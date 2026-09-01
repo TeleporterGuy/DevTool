@@ -4,7 +4,7 @@ A desktop application for managing development workspaces. Organize projects, ta
 
 Built with Electron, React, and TypeScript.
 
-**This repository** is a fork of [join3r/claude-project](https://github.com/join3r/claude-project). The intended direction is a Windows orchestrator for the Pi agent (Git Bash, portable Node, LiteLLM, then conda / Jupyter / a thin LSP). How to progress is in [ROADMAP.md](./ROADMAP.md). Upstream README below is unchanged except this note; the Features list still describes upstream (OpenCode in that list is stale — the code has Pi).
+**This repository** is a fork of [join3r/claude-project](https://github.com/join3r/claude-project). join3r has said it may be forked and modified freely. All work stays on **this** repo ([TeleporterGuy/DevTool](https://github.com/TeleporterGuy/DevTool)); do not open PRs against upstream. Direction: Pi as the primary agent, primarily on Windows (Git Bash, portable Node, conda, Jupyter, Python and Markdown language servers). How to progress is in [ROADMAP.md](./ROADMAP.md). Upstream README below is unchanged except this note; the Features list still describes upstream (OpenCode in that list is stale — the code has Pi).
 
 ## Features
 

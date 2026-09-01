@@ -1,8 +1,8 @@
 # Fork roadmap: Windows orchestrator for Pi
 
-This repository is a fork of [join3r/claude-project](https://github.com/join3r/claude-project) (DevTool). Upstream is a macOS/Linux **task multiplexer** for CLI coding agents (Claude Code, Codex, Pi), with SSH, git worktrees, and an inbox. It is not an IDE and not an agent runtime.
+This repository is a fork of [join3r/claude-project](https://github.com/join3r/claude-project) (DevTool). join3r has said this fork may be modified freely. Upstream is a macOS/Linux **task multiplexer** for CLI coding agents (Claude Code, Codex, Pi), with SSH, git worktrees, and an inbox. It is not an IDE and not an agent runtime.
 
-This fork’s goal is to keep that orchestrator model and make it a daily driver on **Windows at work**: Git Bash terminals, a portable Node zip, Pi talking to a local **LiteLLM** server, conda environments, then file-explorer polish, Jupyter, and later a thin language-server layer. Linting and similar agent tools stay in **Pi extensions**.
+This fork keeps that orchestrator model, with **Pi** as the primary agent and Pi’s own settings preserved and first-class in the app. The aim is to make it **primarily for Windows**: Git Bash, a portable Node zip, conda environments, Jupyter, and a small set of language servers (Python and Markdown). Linting and similar agent tools stay in **Pi extensions**.
 
 Do not try to become VS Code or Cursor. If a feature belongs in Pi, put it in Pi.
 
@@ -14,7 +14,7 @@ Do not try to become VS Code or Cursor. If a feature belongs in Pi, put it in Pi
 - **No VMs.** Local disk + existing SSH to Linux boxes is enough.
 - **Git Bash** is the only first-class Windows shell. No PowerShell. `cmd.exe` is a last-resort fallback, not a product surface.
 - **Environments are spawn-time PATH/env**, not a conda GUI and not a Node version manager UI.
-- **LSP is optional sugar** (hover, go-to, complete) for one language at a time. Diagnostics can stay in Pi.
+- **LSP is optional sugar** (hover, go-to, complete) for a small set: Python and Markdown. Diagnostics can stay in Pi.
 - **Jupyter starts as a browser tab** against a local JupyterLab. Native `.ipynb` is a later phase, not a gate.
 
 ---
@@ -70,7 +70,7 @@ Work items:
 
 **Verify:** `npm run dev` on Windows → Git Bash tab → `node -v` from the zip → `pi` TUI draws and talks to LiteLLM → inbox status on `agent_start` / `agent_end`.
 
-**Effort:** about 2–4 focused weeks. Do not start Phase 2+ until this is true on the work PC, not only on a home machine.
+**Effort:** about 2–4 focused weeks. Do not start Phase 2+ until this is true on Windows, not only on macOS/Linux.
 
 ---
 
@@ -124,9 +124,9 @@ Do **not** build a native notebook editor here.
 
 ---
 
-## Phase 4 — One language server (Python first)
+## Phase 4 — Language servers (Python and Markdown)
 
-**Outcome:** Monaco talks to `pylsp` or `pyright` started inside the **same conda env** as the terminals. Hover, go-to-definition, completion. Windows paths must round-trip.
+**Outcome:** Monaco talks to a small set of servers — Python (`pylsp` or `pyright` in the **same conda env** as the terminals) and Markdown. Hover, go-to-definition, completion. Windows paths must round-trip.
 
 Out of scope: every language, debugger, refactor-rename-across-repo, Pi-quality diagnostics duplication.
 
@@ -160,7 +160,7 @@ Keep upstream `master` as a remote (`upstream`) and rebase or merge periodically
 5. File explorer CRUD.
 6. Conda env picker on spawn.
 7. JupyterLab browser-tab launcher.
-8. Python LSP spike, then harden.
+8. Python and Markdown LSP spike, then harden.
 
 Skip a step only if the previous phase already includes it by accident (e.g. PATH work that makes conda trivial).
 
@@ -168,10 +168,14 @@ Skip a step only if the previous phase already includes it by accident (e.g. PAT
 
 ## How to work on this fork
 
+Work happens **only** on this repository: [TeleporterGuy/DevTool](https://github.com/TeleporterGuy/DevTool). Do not open pull requests against [join3r/claude-project](https://github.com/join3r/claude-project). If a PR is created (local, GitHub, Cursor cloud, or any other agent), its base must be **this fork** (`origin`, usually `master` or a branch on TeleporterGuy/DevTool).
+
+Fetching upstream is for optionally merging their changes in, not for contributing back.
+
 ```text
-GitHub:  https://github.com/TeleporterGuy/DevTool
-Local:   clone of that repo (this tree)
-Upstream: https://github.com/join3r/claude-project
+GitHub (origin):  https://github.com/TeleporterGuy/DevTool
+Local:            this tree
+Upstream (read):  https://github.com/join3r/claude-project
 ```
 
 ```bash
@@ -189,12 +193,12 @@ Work machine constraints to re-test every phase: Git Bash, portable Node zip, Pi
 
 | Phase | What “done” means | Rough time |
 | --- | --- | --- |
-| 0 | Git Bash + Pi + LiteLLM in DevTool on the work PC | 1–2 months calendar / 2–4 weeks focused |
+| 0 | Git Bash + Pi in DevTool on Windows | 1–2 months calendar / 2–4 weeks focused |
 | 0.5 | Saved Pi/LiteLLM settings | days |
 | 1 | File tree CRUD | 1–2 weeks |
 | 2 | Conda picker on spawn | 1–2 weeks |
 | 3 | JupyterLab in a browser tab | days |
-| 4 | Usable Python LSP | 1–2 months |
+| 4 | Usable Python and Markdown LSPs | 1–2 months |
 | 5 | Native notebooks / extra LSPs | open-ended |
 
 A year of evenings can yield a personal orchestrator. It will not become Cursor. That is success.
