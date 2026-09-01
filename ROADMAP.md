@@ -1,0 +1,200 @@
+# Fork roadmap: Windows orchestrator for Pi
+
+This repository is a fork of [join3r/claude-project](https://github.com/join3r/claude-project) (DevTool). Upstream is a macOS/Linux **task multiplexer** for CLI coding agents (Claude Code, Codex, Pi), with SSH, git worktrees, and an inbox. It is not an IDE and not an agent runtime.
+
+This fork’s goal is to keep that orchestrator model and make it a daily driver on **Windows at work**: Git Bash terminals, a portable Node zip, Pi talking to a local **LiteLLM** server, conda environments, then file-explorer polish, Jupyter, and later a thin language-server layer. Linting and similar agent tools stay in **Pi extensions**.
+
+Do not try to become VS Code or Cursor. If a feature belongs in Pi, put it in Pi.
+
+---
+
+## Product bet (do not revisit every phase)
+
+- **Host**, do not replace, the agent. Pi remains a CLI TUI in a tab.
+- **No VMs.** Local disk + existing SSH to Linux boxes is enough.
+- **Git Bash** is the only first-class Windows shell. No PowerShell. `cmd.exe` is a last-resort fallback, not a product surface.
+- **Environments are spawn-time PATH/env**, not a conda GUI and not a Node version manager UI.
+- **LSP is optional sugar** (hover, go-to, complete) for one language at a time. Diagnostics can stay in Pi.
+- **Jupyter starts as a browser tab** against a local JupyterLab. Native `.ipynb` is a later phase, not a gate.
+
+---
+
+## Current upstream (what you inherit)
+
+Already useful, keep it:
+
+- Projects, tasks, two-pane tabs, command palette, inbox (`working` / `needs you` / settled / snooze).
+- Pi tab type: `pi` command, `--session-id`, bundled status extension (`-e`), hook server.
+- Claude/Codex tabs (keep working; not the focus of this fork).
+- File tree → Monaco editor (syntax + save, no LSP).
+- Git status/diff/commit, worktrees, SSH remotes, embedded browser.
+
+Known gaps this fork must treat as work, not surprises:
+
+- No Windows packaging or `build:win`. `electron-winstaller` is unapproved on purpose upstream.
+- Default PTY shell is `/bin/sh`; login-shell PATH capture **returns immediately on `win32`**.
+- POSIX assumptions: worktree paths, hook inject (`curl` + `python3`), remote Pi extension under `/tmp/...`.
+- README still mentions OpenCode; code has Pi, not OpenCode.
+
+**Go/no-go:** if Git Bash + ConPTY + Pi TUI is unusable after Phase 0, stop. Nothing else in this plan can paper over a broken terminal.
+
+---
+
+## Phase 0 — Windows + Git Bash + PATH (make-or-break)
+
+**Outcome:** unzip-or-dev-run on Windows, open a task, get a Git Bash tab, run `pi` against LiteLLM, status dot still works.
+
+Work items:
+
+1. **Default shell on Windows**  
+   Resolve `Git\bin\bash.exe` (Program Files, user install, `PATH`). Spawn with `--login -i`. Persist override in Settings (`defaultShell`).
+
+2. **Spawn environment**  
+   Replace the “skip win32” shell-env path. Build env explicitly:
+   - prepend portable Node directory
+   - prepend selected conda env (`Scripts` / `Library/bin` as needed)
+   - pass through LiteLLM / API base URL vars
+   Apply the same env to terminal tabs **and** Pi/Claude/Codex tabs.
+
+3. **node-pty**  
+   Confirm `@electron/rebuild` for Windows ConPTY. Document VS Build Tools if rebuild fails. Do not chase `chrome-sandbox` setuid (Linux-only issue).
+
+4. **Path and quoting**  
+   Audit cwd, worktrees, file-browser reads, git IPC for `\` vs `/`. Git Bash wants Unix-style paths for `cwd` where possible (`/c/Users/...`).
+
+5. **Hooks on Windows**  
+   Claude inject uses `curl`. Git Bash usually has it; fail clearly if not. Pi extension is local `-e` (no `/tmp` required for local). SSH remotes can wait until Phase 0.5.
+
+6. **Packaging**  
+   `electron-builder --win dir` (portable folder). Approve `electron-winstaller` only if an installer is required. Prefer “folder next to a Node zip” for locked-down PCs.
+
+**Verify:** `npm run dev` on Windows → Git Bash tab → `node -v` from the zip → `pi` TUI draws and talks to LiteLLM → inbox status on `agent_start` / `agent_end`.
+
+**Effort:** about 2–4 focused weeks. Do not start Phase 2+ until this is true on the work PC, not only on a home machine.
+
+---
+
+## Phase 0.5 — Pi + LiteLLM as a first-class project setting
+
+**Outcome:** a project (or global config) stores Pi extra args and inference env without editing the shell profile every time.
+
+Work items:
+
+- Settings / per-project fields: LiteLLM base URL, API key if needed (store like other local config, not in git), extra `pi` args.
+- Document the expected Pi CLI flags for this LiteLLM setup (mirror whatever already works in Git Bash).
+- Keep using the existing Pi status extension; only thicken it if permission prompts are invisible in the inbox.
+
+**Effort:** days, once Phase 0 spawn env exists.
+
+---
+
+## Phase 1 — File explorer that can manage a tree
+
+Upstream tree can list and open files. Extend it; do not replace it.
+
+**Outcome:** create / rename / delete files and folders, sensible ignore, quick filter. Optional: reveal in Git Bash.
+
+Stay out of: full project search, git graph, VS Code-style explorer features.
+
+**Effort:** 1–2 weeks.
+
+---
+
+## Phase 2 — Conda as a spawn picker
+
+**Outcome:** pick an env per project (or task). Every PTY and later LSP/Jupyter child inherits it. No env-create/delete UI.
+
+Work items:
+
+- Detect `conda` (Anaconda / Miniconda / micromamba if easy).
+- List envs, persist name on the project.
+- Activate the Git Bash way: `eval "$(conda shell.bash hook)"` + `conda activate <name>`, or prepend env paths. Prefer one method and test with `which python` / `python -c "import sys; print(sys.prefix)"`.
+
+**Effort:** 1–2 weeks. Windows + Git Bash activation is the only tricky part.
+
+---
+
+## Phase 3 — Jupyter via the browser tab
+
+**Outcome:** command “Open JupyterLab for this project” starts (or reuses) a server in the conda env and opens an existing **browser tab**. SOCKS/SSH later if needed.
+
+Do **not** build a native notebook editor here.
+
+**Effort:** days to a week if conda spawn works.
+
+---
+
+## Phase 4 — One language server (Python first)
+
+**Outcome:** Monaco talks to `pylsp` or `pyright` started inside the **same conda env** as the terminals. Hover, go-to-definition, completion. Windows paths must round-trip.
+
+Out of scope: every language, debugger, refactor-rename-across-repo, Pi-quality diagnostics duplication.
+
+Stack hint: `monaco-languageclient` + JSON-RPC stdio. Kill the server when the project/env changes.
+
+**Effort:** 1–3 months for “actually usable,” not “hello world.” Only start after Phases 0–2 are daily-driver quality.
+
+---
+
+## Phase 5 — Later, maybe
+
+Only after the above is boring and stable:
+
+- Native `.ipynb` cells in a tab (kernel via `jupyter_client` in the conda env).
+- TypeScript/JavaScript LSP if the Node zip is the runtime.
+- Windows OpenSSH for the existing remote-project flow (separate from Git Bash local).
+- Search-in-files, extra pane layouts.
+
+Explicit non-goals unless the product bet changes: cloud VMs, embedding Pi’s UI, replacing Pi extensions with Electron linters, PowerShell, full Windows “IDE.”
+
+---
+
+## Suggested order of PRs / commits on this fork
+
+Keep upstream `master` as a remote (`upstream`) and rebase or merge periodically. Land work in this order so each PR is demoable:
+
+1. Windows shell resolution + Git Bash PTY + documented rebuild.
+2. Configurable spawn PATH (portable Node) + env passthrough.
+3. Win dir packaging notes / script.
+4. Per-project Pi / LiteLLM settings.
+5. File explorer CRUD.
+6. Conda env picker on spawn.
+7. JupyterLab browser-tab launcher.
+8. Python LSP spike, then harden.
+
+Skip a step only if the previous phase already includes it by accident (e.g. PATH work that makes conda trivial).
+
+---
+
+## How to work on this fork
+
+```text
+GitHub:  https://github.com/TeleporterGuy/DevTool
+Local:   clone of that repo (this tree)
+Upstream: https://github.com/join3r/claude-project
+```
+
+```bash
+git remote add upstream https://github.com/join3r/claude-project.git
+git fetch upstream
+```
+
+Upstream will keep moving on macOS/Linux agent-host features. Prefer merging `upstream/master` after Phase 0 so Windows fixes do not bit-rot. If a merge fights POSIX-only code, isolate Windows behind `process.platform === 'win32'` rather than forking every file.
+
+Work machine constraints to re-test every phase: Git Bash, portable Node zip, Pi, LiteLLM on localhost, conda. Do not declare a phase done from macOS alone.
+
+---
+
+## Effort snapshot (solo, evenings, one Windows box)
+
+| Phase | What “done” means | Rough time |
+| --- | --- | --- |
+| 0 | Git Bash + Pi + LiteLLM in DevTool on the work PC | 1–2 months calendar / 2–4 weeks focused |
+| 0.5 | Saved Pi/LiteLLM settings | days |
+| 1 | File tree CRUD | 1–2 weeks |
+| 2 | Conda picker on spawn | 1–2 weeks |
+| 3 | JupyterLab in a browser tab | days |
+| 4 | Usable Python LSP | 1–2 months |
+| 5 | Native notebooks / extra LSPs | open-ended |
+
+A year of evenings can yield a personal orchestrator. It will not become Cursor. That is success.
