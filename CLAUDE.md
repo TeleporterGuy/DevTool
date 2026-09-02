@@ -1,5 +1,9 @@
 This is DevTool, an Electron desktop app for managing development workspaces with projects, tasks, and tabs.
 
+This tree is the **TeleporterGuy/DevTool** fork. Do not open PRs against join3r/claude-project. Pull requests (including cloud-agent PRs) must target this repository.
+
+Direction and phases: [ROADMAP.md](./ROADMAP.md).
+
 ## Config dir
 
 Persistent state lives in a config dir resolved in `src/main/config-dir.ts`: `~/.devtool` for packaged builds, `~/.devtool-dev` for dev runs (`npm run dev*`), overridable via `DEVTOOL_CONFIG_DIR`. Dev and production are isolated on purpose — saves write full snapshots of `projects.json` (last writer wins), so two instances sharing a dir silently lose each other's changes. Never point a dev instance at `~/.devtool` while the production app is running. On startup each instance also snapshots `projects.json` into `<config dir>/backups/` (last 10 kept).
