@@ -31,7 +31,7 @@ Already useful, keep it:
 
 Known gaps this fork must treat as work, not surprises:
 
-- No Windows packaging or `build:win`. `electron-winstaller` is unapproved on purpose upstream.
+- Windows packaging is a portable folder (`npm run build:win` → `dist/win-unpacked`), not a Setup.exe. `electron-winstaller` stays unapproved until an installer is required. From-source `npm install` on Windows still needs admin + VS Build Tools + Spectre libs (see README).
 - Default PTY shell is `/bin/sh`; login-shell PATH capture **returns immediately on `win32`**.
 - POSIX assumptions: worktree paths, hook inject (`curl` + `python3`), remote Pi extension under `/tmp/...`.
 - README still mentions OpenCode; code has Pi, not OpenCode.
@@ -57,7 +57,7 @@ Work items:
    Apply the same env to terminal tabs **and** Pi/Claude/Codex tabs.
 
 3. **node-pty**  
-   Confirm `@electron/rebuild` for Windows ConPTY. Document VS Build Tools if rebuild fails. Do not chase `chrome-sandbox` setuid (Linux-only issue).
+   `@electron/rebuild` compiles ConPTY from source. That needs admin + VS 2022 Build Tools + **Spectre-mitigated libs** (`MSB8040` otherwise). Documented in README. Do not disable Spectre. Do not chase `chrome-sandbox` setuid (Linux-only). Locked-down PCs skip compile: consume `npm run build:win` output.
 
 4. **Path and quoting**  
    Audit cwd, worktrees, file-browser reads, git IPC for `\` vs `/`. Git Bash wants Unix-style paths for `cwd` where possible (`/c/Users/...`).
@@ -66,7 +66,7 @@ Work items:
    Claude inject uses `curl`. Git Bash usually has it; fail clearly if not. Pi extension is local `-e` (no `/tmp` required for local). SSH remotes can wait until Phase 0.5.
 
 6. **Packaging**  
-   `electron-builder --win dir` (portable folder). Approve `electron-winstaller` only if an installer is required. Prefer “folder next to a Node zip” for locked-down PCs.
+   `npm run build:win` runs `electron-builder --win --dir` (portable folder). Approve `electron-winstaller` only if an installer is required. Prefer “folder next to a Node zip” for locked-down PCs. This is **run-only**; git checkout + `npm run dev` still needs the VS machine.
 
 **Verify:** `npm run dev` on Windows → Git Bash tab → `node -v` from the zip → `pi` TUI draws and talks to LiteLLM → inbox status on `agent_start` / `agent_end`.
 

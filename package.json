@@ -10,6 +10,7 @@
     "build": "electron-vite build",
     "build:mac": "electron-vite build && electron-builder --mac --dir",
     "build:linux": "electron-vite build && electron-builder --linux --dir",
+    "build:win": "electron-vite build && electron-builder --win --dir",
     "typecheck": "tsc --noEmit -p tsconfig.typecheck.json",
     "test": "vitest run",
     "test:watch": "vitest",
@@ -27,7 +28,8 @@
       "!node_modules/.cache"
     ],
     "asarUnpack": [
-      "out/main/pi-status-extension.mjs"
+      "out/main/pi-status-extension.mjs",
+      "node_modules/node-pty/**"
     ],
     "mac": {
       "target": "dir",
@@ -43,6 +45,9 @@
     "linux": {
       "target": "dir",
       "category": "Development"
+    },
+    "win": {
+      "target": "dir"
     },
     "electronDist": "node_modules/electron/dist"
   },

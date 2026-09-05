@@ -14,7 +14,13 @@ Persistent state lives in a config dir resolved in `src/main/config-dir.ts`: `~/
 
 Don't `chmod +s` `dist/chrome-sandbox` to chase sandbox errors — a setuid binary not owned by root makes Chromium reject it outright rather than fall back to the user-namespace sandbox.
 
-npm >=11.17 blocks dependency install scripts until they're approved, which would otherwise stop Electron from downloading at all. The `allowScripts` field in `package.json` covers `electron`, `esbuild` and `node-pty`; entries are pinned to exact versions, so bumping any of those needs a fresh `npm approve-scripts <pkg>`. `electron-winstaller` is deliberately left unapproved — it only matters for Windows packaging, which this project doesn't do, so `npm install` warns about it harmlessly.
+npm >=11.17 blocks dependency install scripts until they're approved, which would otherwise stop Electron from downloading at all. The `allowScripts` field in `package.json` covers `electron`, `esbuild` and `node-pty`; entries are pinned to exact versions, so bumping any of those needs a fresh `npm approve-scripts <pkg>`. `electron-winstaller` is deliberately left unapproved — portable Windows output is `npm run build:win` (`--win --dir`), not an installer, so `npm install` may warn about it harmlessly.
+
+## Windows native rebuild (`node-pty`)
+
+`postinstall` runs `@electron/rebuild` so `node-pty` matches Electron, not the host Node. On Windows that compile needs **admin rights** to install or modify Visual Studio 2022 Build Tools, plus the **MSVC v143 Spectre-mitigated libs** component (`MSB8040` if it is missing). Do not strip `SpectreMitigation` from `binding.gyp`. Git Bash/MinGW is not a substitute. Details: [README.md](./README.md) (Install → Windows).
+
+Machines without admin do not `npm install` from git. Produce a portable folder on a VS machine with `npm run build:win` and copy `dist/win-unpacked`. That path is run-only (`DevTool.exe`); it does not unlock `npm run dev`.
 
 ## UI smoke testing with agent-browser
 
