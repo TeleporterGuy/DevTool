@@ -82,6 +82,8 @@ npx @electron/rebuild -m .
 
 **MSB8040** (“Spectre-mitigated libraries are required”) means that component is still missing. Do not disable Spectre in `node-pty`’s `binding.gyp`.
 
+Opening a Pi (or Claude/Codex) tab can fail with **Cannot create process, error code: 2** if Windows cannot find the CLI, or **error code: 193** if DevTool tries to CreateProcess a `.cmd` shim directly. Electron does not see Git Bash’s PATH, and npm’s `pi` is usually `pi.cmd`. Set **Settings → AI Tools → Command path** after enabling the tool, or put npm’s global bin on PATH (`%AppData%\npm`). DevTool wraps `.cmd` through `cmd.exe`.
+
 Without admin, without the Visual Studio Installer, or without those Spectre libs, **from-source `npm install` cannot succeed** on Windows. Use a pre-built folder instead.
 
 #### Windows without admin (pre-built portable folder)

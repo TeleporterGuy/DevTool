@@ -359,6 +359,10 @@ export interface AppConfig {
   enableClaude: boolean
   enableCodex: boolean
   enablePi: boolean
+  /** Absolute path or command name. Empty uses the default (`claude` / `codex` / `pi`). */
+  claudeCommand: string
+  codexCommand: string
+  piCommand: string
   lazyLoadClaude: boolean
   lastProjectId: string | null
   lastTaskId: string | null
@@ -546,6 +550,9 @@ export const DEFAULT_CONFIG: AppConfig = {
   enableClaude: false,
   enableCodex: false,
   enablePi: false,
+  claudeCommand: '',
+  codexCommand: '',
+  piCommand: '',
   lazyLoadClaude: true,
   lastProjectId: null,
   lastTaskId: null,

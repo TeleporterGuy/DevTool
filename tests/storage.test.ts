@@ -36,6 +36,9 @@ describe('Storage', () => {
     expect(config.diffRenderSideBySide).toBe(true)
     expect(config.defaultSidebarTab).toBe('inbox')
     expect(config.newTaskAutoOpen).toBe('none')
+    expect(config.piCommand).toBe('')
+    expect(config.claudeCommand).toBe('')
+    expect(config.codexCommand).toBe('')
   })
 
   it('fills in new config defaults for configs written before the key existed', () => {
@@ -45,11 +48,14 @@ describe('Storage', () => {
     expect(config.defaultSidebarTab).toBe('inbox')
     // Pre-existing configs must keep opening nothing until the user opts in.
     expect(config.newTaskAutoOpen).toBe('none')
+    expect(config.piCommand).toBe('')
   })
 
   it('round-trips the new-task auto-open choice', () => {
-    storage.saveConfig({ ...DEFAULT_CONFIG, newTaskAutoOpen: 'claude' })
-    expect(storage.loadConfig().newTaskAutoOpen).toBe('claude')
+    storage.saveConfig({ ...DEFAULT_CONFIG, newTaskAutoOpen: 'claude', piCommand: 'C:\\npm\\pi.cmd' })
+    const loaded = storage.loadConfig()
+    expect(loaded.newTaskAutoOpen).toBe('claude')
+    expect(loaded.piCommand).toBe('C:\\npm\\pi.cmd')
   })
 
   it('saves and loads config', () => {

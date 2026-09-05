@@ -11,7 +11,7 @@ import {
   EDITOR_TAB_SIZE_MAX,
   EDITOR_TAB_SIZE_MIN
 } from './monacoOptions'
-import { GrpHead, FormGroup, SetBlock, Group, GroupRow, SegCtl, Switch, Field, Select, HelperText, Disclosure } from './ui'
+import { GrpHead, FormGroup, SetBlock, Group, GroupRow, SegCtl, Switch, Field, Select, HelperText, Disclosure, LinkBtn } from './ui'
 
 interface Props {
   onClose: () => void
@@ -365,6 +365,32 @@ export default function Settings({ onClose }: Props): React.ReactElement {
             </Group>
 
             <GrpHead>Claude Code</GrpHead>
+            {config.enableClaude && (
+              <FormGroup>
+                <SetBlock label="Command path">
+                  <div className="flex items-center gap-2.5">
+                    <Field
+                      className="flex-1"
+                      value={config.claudeCommand}
+                      onChange={(e) => updateConfig({ claudeCommand: e.target.value })}
+                      placeholder="claude"
+                    />
+                    <LinkBtn
+                      onClick={() => {
+                        void window.api.pickFile('Select Claude Code executable').then((picked) => {
+                          if (picked) updateConfig({ claudeCommand: picked })
+                        })
+                      }}
+                    >
+                      Browse
+                    </LinkBtn>
+                  </div>
+                  <HelperText>
+                    Leave empty to use `claude` on PATH. On Windows this is often %AppData%\npm\claude.cmd.
+                  </HelperText>
+                </SetBlock>
+              </FormGroup>
+            )}
             <Group>
               <GroupRow
                 label="Lazy-load Claude tabs"
@@ -377,6 +403,66 @@ export default function Settings({ onClose }: Props): React.ReactElement {
                 }
               />
             </Group>
+
+            {config.enableCodex && (
+              <>
+                <GrpHead>Codex</GrpHead>
+                <FormGroup>
+                  <SetBlock label="Command path">
+                    <div className="flex items-center gap-2.5">
+                      <Field
+                        className="flex-1"
+                        value={config.codexCommand}
+                        onChange={(e) => updateConfig({ codexCommand: e.target.value })}
+                        placeholder="codex"
+                      />
+                      <LinkBtn
+                        onClick={() => {
+                          void window.api.pickFile('Select Codex executable').then((picked) => {
+                            if (picked) updateConfig({ codexCommand: picked })
+                          })
+                        }}
+                      >
+                        Browse
+                      </LinkBtn>
+                    </div>
+                    <HelperText>
+                      Leave empty to use `codex` on PATH. On Windows this is often %AppData%\npm\codex.cmd.
+                    </HelperText>
+                  </SetBlock>
+                </FormGroup>
+              </>
+            )}
+
+            {config.enablePi && (
+              <>
+                <GrpHead>Pi</GrpHead>
+                <FormGroup>
+                  <SetBlock label="Command path">
+                    <div className="flex items-center gap-2.5">
+                      <Field
+                        className="flex-1"
+                        value={config.piCommand}
+                        onChange={(e) => updateConfig({ piCommand: e.target.value })}
+                        placeholder="pi"
+                      />
+                      <LinkBtn
+                        onClick={() => {
+                          void window.api.pickFile('Select Pi executable').then((picked) => {
+                            if (picked) updateConfig({ piCommand: picked })
+                          })
+                        }}
+                      >
+                        Browse
+                      </LinkBtn>
+                    </div>
+                    <HelperText>
+                      Leave empty to use `pi` on PATH. On Windows this is often %AppData%\npm\pi.cmd.
+                    </HelperText>
+                  </SetBlock>
+                </FormGroup>
+              </>
+            )}
           </>
         )
 

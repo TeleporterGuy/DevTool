@@ -21,6 +21,7 @@ import { PaletteFrecencyStorage, type FrecencyFile } from './palette-frecency-st
 import { parseNumstat } from './git-diff-summary'
 import { GIT_STATUS_ARGS, parseGitStatusZ } from './git-status-parse'
 import { AI_TAB_META } from '../shared/types'
+import { agentCommandOverride, conptySpawnArgv, isAiAgentCommand, resolveAgentCommand } from './resolve-agent-command'
 import {
   piExtensionLocalPath,
   piExtensionRemotePath,
@@ -1323,7 +1324,19 @@ export class AppRuntime {
         localArgs = [...(args ?? []), '-e', piExtensionLocalPath()]
         localEnv = { ...extraEnv, DEVTOOL_HOOK_PORT: String(this.hookServer.getPort()) }
       }
-      this.ptyManager.spawn(id, shell, cwd, cols, rows, localArgs, localEnv, callbacks)
+      // Keep `shell` as `pi`/`claude`/`codex` for hook detection above. Resolve the
+      // actual file CreateProcess can open (Windows needs pi.cmd, not a bare `pi`).
+      let spawnFile = shell
+      let spawnArgs = localArgs ?? []
+      if (isAiAgentCommand(shell)) {
+        const override = agentCommandOverride(shell, this.config).trim()
+        spawnFile = resolveAgentCommand(override || shell)
+        const wrapped = conptySpawnArgv(spawnFile, spawnArgs)
+        spawnFile = wrapped.file
+        spawnArgs = wrapped.args
+        this.logDebug(`ptySpawn resolve id=${id} shell=${shell} file=${spawnFile} args=${spawnArgs.length}`)
+      }
+      this.ptyManager.spawn(id, spawnFile, cwd, cols, rows, spawnArgs, localEnv, callbacks)
     }
   }
 
