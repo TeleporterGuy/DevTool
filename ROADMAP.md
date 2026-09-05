@@ -42,7 +42,7 @@ Known gaps this fork must treat as work, not surprises:
 
 ## Phase 0 — Windows + Git Bash + PATH (make-or-break)
 
-**Outcome:** unzip-or-dev-run on Windows, open a task, get a Git Bash tab, run `pi` against LiteLLM, status dot still works.
+**Outcome:** unzip-or-dev-run on Windows, open a task, get a Git Bash tab, run `pi` with the user’s existing Pi config, status dot still works.
 
 Work items:
 
@@ -53,8 +53,7 @@ Work items:
    Replace the “skip win32” shell-env path. Build env explicitly:
    - prepend portable Node directory
    - prepend selected conda env (`Scripts` / `Library/bin` as needed)
-   - pass through LiteLLM / API base URL vars
-   Apply the same env to terminal tabs **and** Pi/Claude/Codex tabs.
+   Apply the same env to terminal tabs **and** Pi/Claude/Codex tabs. Do not add inference URL/key vars here — Pi already has its own settings.
 
 3. **node-pty**  
    `@electron/rebuild` compiles ConPTY from source. That needs admin + VS 2022 Build Tools + **Spectre-mitigated libs** (`MSB8040` otherwise). Documented in README. Do not disable Spectre. Do not chase `chrome-sandbox` setuid (Linux-only). Locked-down PCs skip compile: consume `npm run build:win` output.
@@ -63,28 +62,28 @@ Work items:
    Audit cwd, worktrees, file-browser reads, git IPC for `\` vs `/`. Git Bash wants Unix-style paths for `cwd` where possible (`/c/Users/...`).
 
 5. **Hooks on Windows**  
-   Claude inject uses `curl`. Git Bash usually has it; fail clearly if not. Pi extension is local `-e` (no `/tmp` required for local). SSH remotes can wait until Phase 0.5.
+   Claude inject uses `curl`. Git Bash usually has it; fail clearly if not. Pi extension is local `-e` (no `/tmp` required for local). SSH remotes can wait until after Phase 0.
 
 6. **Packaging**  
    `npm run build:win` runs `electron-builder --win --dir` (portable folder). Approve `electron-winstaller` only if an installer is required. Prefer “folder next to a Node zip” for locked-down PCs. This is **run-only**; git checkout + `npm run dev` still needs the VS machine.
 
-**Verify:** `npm run dev` on Windows → Git Bash tab → `node -v` from the zip → `pi` TUI draws and talks to LiteLLM → inbox status on `agent_start` / `agent_end`.
+**Verify:** `npm run dev` on Windows → Git Bash tab → `node -v` from the zip → `pi` TUI draws and uses the same models/setup as a normal Git Bash `pi` → inbox status on `agent_start` / `agent_end`.
 
 **Effort:** about 2–4 focused weeks. Do not start Phase 2+ until this is true on Windows, not only on macOS/Linux.
 
 ---
 
-## Phase 0.5 — Pi + LiteLLM as a first-class project setting
+## Phase 0.5 — Do not duplicate Pi’s settings in DevTool
 
-**Outcome:** a project (or global config) stores Pi extra args and inference env without editing the shell profile every time.
+**Outcome:** DevTool hosts Pi; inference (models, API, base URL) stays in Pi’s own config. A Pi tab should behave like `pi` already does in Git Bash.
 
 Work items:
 
-- Settings / per-project fields: LiteLLM base URL, API key if needed (store like other local config, not in git), extra `pi` args.
-- Document the expected Pi CLI flags for this LiteLLM setup (mirror whatever already works in Git Bash).
+- Do **not** add inference URL/key fields to DevTool.
+- Per-project extra `pi` args already exist (`aiToolArgs`); keep that for CLI flags, not for wiring a proxy.
 - Keep using the existing Pi status extension; only thicken it if permission prompts are invisible in the inbox.
 
-**Effort:** days, once Phase 0 spawn env exists.
+**Effort:** none as a feature. This phase is a guardrail so later work does not grow a second settings UI.
 
 ---
 
@@ -156,11 +155,10 @@ Keep upstream `master` as a remote (`upstream`) and rebase or merge periodically
 1. Windows shell resolution + Git Bash PTY + documented rebuild.
 2. Configurable spawn PATH (portable Node) + env passthrough.
 3. Win dir packaging notes / script.
-4. Per-project Pi / LiteLLM settings.
-5. File explorer CRUD.
-6. Conda env picker on spawn.
-7. JupyterLab browser-tab launcher.
-8. Python and Markdown LSP spike, then harden.
+4. File explorer CRUD.
+5. Conda env picker on spawn.
+6. JupyterLab browser-tab launcher.
+7. Python and Markdown LSP spike, then harden.
 
 Skip a step only if the previous phase already includes it by accident (e.g. PATH work that makes conda trivial).
 
@@ -185,7 +183,7 @@ git fetch upstream
 
 Upstream will keep moving on macOS/Linux agent-host features. Prefer merging `upstream/master` after Phase 0 so Windows fixes do not bit-rot. If a merge fights POSIX-only code, isolate Windows behind `process.platform === 'win32'` rather than forking every file.
 
-Work machine constraints to re-test every phase: Git Bash, portable Node zip, Pi, LiteLLM on localhost, conda. Do not declare a phase done from macOS alone.
+Work machine constraints to re-test every phase: Git Bash, portable Node zip, Pi (whatever setup already works in a Git Bash terminal), conda. Do not declare a phase done from macOS alone.
 
 ---
 
@@ -194,7 +192,7 @@ Work machine constraints to re-test every phase: Git Bash, portable Node zip, Pi
 | Phase | What “done” means | Rough time |
 | --- | --- | --- |
 | 0 | Git Bash + Pi in DevTool on Windows | 1–2 months calendar / 2–4 weeks focused |
-| 0.5 | Saved Pi/LiteLLM settings | days |
+| 0.5 | No DevTool inference UI (Pi keeps its settings) | n/a |
 | 1 | File tree CRUD | 1–2 weeks |
 | 2 | Conda picker on spawn | 1–2 weeks |
 | 3 | JupyterLab in a browser tab | days |

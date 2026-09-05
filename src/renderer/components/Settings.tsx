@@ -218,6 +218,29 @@ export default function Settings({ onClose }: Props): React.ReactElement {
                 />
                 <HelperText>Leave empty to use your login shell.</HelperText>
               </SetBlock>
+              <SetBlock label="Node directory" divider>
+                <div className="flex items-center gap-2.5">
+                  <Field
+                    className="flex-1"
+                    value={config.portableNodeDir}
+                    onChange={(e) => updateConfig({ portableNodeDir: e.target.value })}
+                    placeholder="Folder that contains node.exe"
+                  />
+                  <LinkBtn
+                    onClick={() => {
+                      void window.api.pickDirectory().then((picked) => {
+                        if (picked) updateConfig({ portableNodeDir: picked })
+                      })
+                    }}
+                  >
+                    Browse
+                  </LinkBtn>
+                </div>
+                <HelperText>
+                  Unzipped Node zip. The folder must contain node.exe. It is prepended to PATH
+                  for new terminal and Pi tabs (already-open tabs keep their original PATH).
+                </HelperText>
+              </SetBlock>
             </FormGroup>
           </>
         )

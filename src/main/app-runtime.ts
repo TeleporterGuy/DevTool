@@ -22,6 +22,7 @@ import { parseNumstat } from './git-diff-summary'
 import { GIT_STATUS_ARGS, parseGitStatusZ } from './git-status-parse'
 import { AI_TAB_META } from '../shared/types'
 import { agentCommandOverride, conptySpawnArgv, isAiAgentCommand, resolveAgentCommand } from './resolve-agent-command'
+import { setPortableNodeDir } from './shell-env'
 import {
   piExtensionLocalPath,
   piExtensionRemotePath,
@@ -200,6 +201,7 @@ export class AppRuntime {
       broadcast: (envelope) => this.broadcastToAllWindows('notes-updated', envelope)
     })
     this.config = this.storage.loadConfig()
+    setPortableNodeDir(this.config.portableNodeDir)
     this.startupWindowStates = this.storage.loadWindowSession(
       this.projectsStore.peek(),
       this.config.defaultSidebarTab
@@ -587,6 +589,7 @@ export class AppRuntime {
     ipcMain.handle('save-config', (_event, config: AppConfig) => {
       this.config = { ...this.config, ...config }
       this.storage.saveConfig(this.config)
+      setPortableNodeDir(this.config.portableNodeDir)
       this.broadcastToAllWindows('config-updated', clone(this.config))
       return undefined
     })

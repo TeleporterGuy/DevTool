@@ -346,6 +346,11 @@ export interface AppConfig {
   terminalTheme: 'system' | 'dark' | 'light'
   terminalColorScheme: TerminalColorScheme
   defaultShell: string
+  /**
+   * Folder of a portable Node zip (contains `node.exe` / `node`).
+   * Prepended to PATH for new local terminal and Pi tabs. Empty means do not prepend.
+   */
+  portableNodeDir: string
   copyOnSelect: boolean
   editorFontFamily: string
   editorFontSize: number
@@ -537,6 +542,7 @@ export const DEFAULT_CONFIG: AppConfig = {
   terminalTheme: 'system',
   terminalColorScheme: 'auto',
   defaultShell: '',
+  portableNodeDir: '',
   copyOnSelect: false,
   editorFontFamily: 'monospace',
   editorFontSize: 14,

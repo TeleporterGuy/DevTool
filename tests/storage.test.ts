@@ -39,6 +39,7 @@ describe('Storage', () => {
     expect(config.piCommand).toBe('')
     expect(config.claudeCommand).toBe('')
     expect(config.codexCommand).toBe('')
+    expect(config.portableNodeDir).toBe('')
   })
 
   it('fills in new config defaults for configs written before the key existed', () => {
@@ -49,13 +50,13 @@ describe('Storage', () => {
     // Pre-existing configs must keep opening nothing until the user opts in.
     expect(config.newTaskAutoOpen).toBe('none')
     expect(config.piCommand).toBe('')
+    expect(config.portableNodeDir).toBe('')
   })
 
-  it('round-trips the new-task auto-open choice', () => {
-    storage.saveConfig({ ...DEFAULT_CONFIG, newTaskAutoOpen: 'claude', piCommand: 'C:\\npm\\pi.cmd' })
+  it('round-trips the portable Node directory', () => {
+    storage.saveConfig({ ...DEFAULT_CONFIG, portableNodeDir: 'C:\\Tools\\node-v22' })
     const loaded = storage.loadConfig()
-    expect(loaded.newTaskAutoOpen).toBe('claude')
-    expect(loaded.piCommand).toBe('C:\\npm\\pi.cmd')
+    expect(loaded.portableNodeDir).toBe('C:\\Tools\\node-v22')
   })
 
   it('saves and loads config', () => {
