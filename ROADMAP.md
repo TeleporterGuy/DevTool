@@ -13,7 +13,8 @@ Do not try to become VS Code or Cursor. If a feature belongs in Pi, put it in Pi
 - **Host**, do not replace, the agent. Pi remains a CLI TUI in a tab.
 - **No VMs.** Local disk + existing SSH to Linux boxes is enough.
 - **Git Bash** is the only first-class Windows shell. No PowerShell. `cmd.exe` is a last-resort fallback, not a product surface.
-- **Environments are spawn-time PATH/env**, not a conda GUI and not a Node version manager UI.
+- **Environments are spawn-time PATH/env**, not a conda GUI and not a Node version manager UI. Settings **Node directory** is a folder prepend, not a requirement for `DevTool.exe` to launch.
+- **Pi owns inference.** Models, API, and base URL stay in Pi’s config. Do not add those fields to DevTool.
 - **LSP is optional sugar** (hover, go-to, complete) for a small set: Python and Markdown. Diagnostics can stay in Pi.
 - **Jupyter starts as a browser tab** against a local JupyterLab. Native `.ipynb` is a later phase, not a gate.
 
@@ -32,7 +33,7 @@ Already useful, keep it:
 Known gaps this fork must treat as work, not surprises:
 
 - Windows packaging is a portable folder (`npm run build:win` → `dist/win-unpacked`), not a Setup.exe. `electron-winstaller` stays unapproved until an installer is required. From-source `npm install` on Windows still needs admin + VS Build Tools + Spectre libs (see README).
-- Default PTY shell is `/bin/sh`; login-shell PATH capture **returns immediately on `win32`**.
+- Default PTY shell is still `$SHELL` / `/bin/sh` when Settings **Default shell** is empty (Git Bash auto-detect is not done). Login-shell env **is** captured on Windows in `shell-env.ts`; do not copy that Unix PATH onto `process.env.PATH` (ConPTY `cmd.exe` lookup breaks — see AGENTS.md).
 - POSIX assumptions: worktree paths, hook inject (`curl` + `python3`), remote Pi extension under `/tmp/...`.
 - README still mentions OpenCode; code has Pi, not OpenCode.
 

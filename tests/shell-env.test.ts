@@ -3,6 +3,8 @@ import { afterEach, describe, expect, it } from 'vitest'
 import {
   findGitBashExe,
   getShellEnv,
+  gitInstallRoot,
+  msysPathListToWindows,
   normalizePortableNodeDir,
   parseNullDelimitedEnv,
   prependDirToPath,
@@ -111,6 +113,30 @@ describe('findGitBashExe', () => {
   })
 })
 
+describe('msysPathListToWindows', () => {
+  const gitRoot = 'C:\\Program Files\\Git'
+
+  it('maps /c/... entries and Git /usr/bin', () => {
+    const converted = msysPathListToWindows(
+      '/c/Program Files/Git/usr/bin:/usr/bin:/c/Windows/System32',
+      gitRoot,
+      win
+    )
+    expect(converted).toBe(
+      'C:\\Program Files\\Git\\usr\\bin;C:\\Program Files\\Git\\usr\\bin;C:\\Windows\\System32'
+    )
+  })
+
+  it('treats Git\\usr\\bin\\bash.exe as inside the Git root', () => {
+    expect(gitInstallRoot('C:\\Program Files\\Git\\usr\\bin\\bash.exe', win)).toBe(
+      'C:\\Program Files\\Git'
+    )
+    expect(gitInstallRoot('C:\\Program Files\\Git\\bin\\bash.exe', win)).toBe(
+      'C:\\Program Files\\Git'
+    )
+  })
+})
+
 describe('getShellEnv', () => {
   it('prepends the live Node dir onto captured-or-process env', () => {
     setPortableNodeDir('C:\\Tools\\node-v22')
@@ -123,7 +149,7 @@ describe('getShellEnv', () => {
 })
 
 describe('resolveShellEnv', () => {
-  it('captures Git Bash login PATH on Windows', async () => {
+  it('does not put a Unix PATH onto process.env; PTY env uses converted Windows PATH', async () => {
     const env: NodeJS.ProcessEnv = { PATH: 'C:\\Windows\\System32', LOCALAPPDATA: 'C:\\Users\\me\\AppData\\Local' }
     await resolveShellEnv({
       ...win,
@@ -134,10 +160,12 @@ describe('resolveShellEnv', () => {
         cb(null, 'PATH=/c/Program Files/Git/usr/bin:/c/Windows\0HOME=/c/Users/me\0', '')
       }
     })
-    expect(env.PATH).toBe('/c/Program Files/Git/usr/bin:/c/Windows')
+    expect(env.PATH).toBe('C:\\Windows\\System32')
     const merged = getShellEnv({ ...win, env })
     expect(merged.HOME).toBe('/c/Users/me')
-    expect(merged.PATH).toBe('/c/Program Files/Git/usr/bin:/c/Windows')
+    expect(merged.PATH).toBe(
+      'C:\\Program Files\\Git\\usr\\bin;C:\\Windows'
+    )
   })
 
   it('leaves process env alone when the dump fails', async () => {

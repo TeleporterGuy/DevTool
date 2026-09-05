@@ -22,6 +22,14 @@ npm >=11.17 blocks dependency install scripts until they're approved, which woul
 
 Machines without admin do not `npm install` from git. Produce a portable folder on a VS machine with `npm run build:win` and copy `dist/win-unpacked`. That path is run-only (`DevTool.exe`); it does not unlock `npm run dev`.
 
+## Windows spawn PATH
+
+Pi and terminals inherit env from [`src/main/shell-env.ts`](src/main/shell-env.ts). Settings **Node directory** (`portableNodeDir`) is the unzipped Node zip folder; it is prepended on **new** tabs only. `DevTool.exe` already embeds Node — a portable zip is not required for the app to start, and Node does not need to be on the machine-wide Windows PATH.
+
+Do **not** assign Git Bash’s Unix PATH (`/c/Users/...:/usr/bin:...`) to `process.env.PATH`. node-pty ConPTY resolves relative `cmd.exe` against that process PATH; a Unix value yields `Error: File not found:` with an empty path and a blank Pi tab. Convert MSYS PATH to `C:\...;...` for the **child** env only.
+
+Inference (models, API, base URL) stays in **Pi’s own config**. Do not add those fields to DevTool. Extra `pi` CLI flags already live on the project as `aiToolArgs`.
+
 ## UI smoke testing with agent-browser
 
 DevTool exposes a Chrome DevTools Protocol port when launched with the `DEVTOOL_CDP_PORT` env var (wired in `src/main/index.ts`). Use this to drive the live UI from an AI session via `agent-browser`.

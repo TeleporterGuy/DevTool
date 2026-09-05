@@ -21,7 +21,27 @@ export interface ShellEnvDeps {
 }
 
 let resolvedEnv: Record<string, string> | null = null
+/** Git Bash PATH converted to Windows `C:\...;...` form. Never written to process.env.PATH. */
+let windowsLoginPath: string | null = null
 let portableNodeDir = ''
+
+/** Keys CreateProcess / ConPTY need in Windows form. Do not copy MSYS versions over them. */
+const WINDOWS_PROCESS_KEYS = new Set([
+  'PATH',
+  'Path',
+  'PATHEXT',
+  'COMSPEC',
+  'ComSpec',
+  'SYSTEMROOT',
+  'SystemRoot',
+  'WINDIR',
+  'windir',
+  'SYSTEMDRIVE',
+  'SystemDrive',
+  'TEMP',
+  'TMP',
+  'TMPDIR'
+])
 
 const execFile: ExecFileFn = execFileCb as ExecFileFn
 
@@ -82,6 +102,52 @@ export function parseNullDelimitedEnv(dump: string): Record<string, string> {
   return parsed
 }
 
+/** `Git\\bin\\bash.exe` → Git root; `Git\\usr\\bin\\bash.exe` → Git root. */
+export function gitInstallRoot(bashExe: string, deps: ShellEnvDeps = {}): string {
+  const pathMod = pathOf(deps)
+  const binDir = pathMod.dirname(bashExe)
+  const binName = pathMod.basename(binDir)
+  if (binName.toLowerCase() === 'bin') {
+    const parent = pathMod.dirname(binDir)
+    if (pathMod.basename(parent).toLowerCase() === 'usr') return pathMod.dirname(parent)
+    return parent
+  }
+  return binDir
+}
+
+/**
+ * One Git Bash PATH entry → a Windows directory.
+ * `/c/Users/me` → `C:\Users\me`. `/usr/bin` → `<Git>\usr\bin`.
+ */
+export function msysPathEntryToWindows(entry: string, gitRoot: string, deps: ShellEnvDeps = {}): string {
+  const pathMod = pathOf(deps)
+  const trimmed = entry.trim()
+  if (!trimmed) return ''
+  if (/^[a-zA-Z]:[\\/]/.test(trimmed) || trimmed.startsWith('\\\\')) {
+    return trimmed.replace(/\//g, '\\')
+  }
+  const drive = trimmed.match(/^\/([a-zA-Z])(\/.*)?$/)
+  if (drive) {
+    const rest = (drive[2] || '').replace(/\//g, '\\')
+    return `${drive[1].toUpperCase()}:${rest || '\\'}`
+  }
+  const relative = trimmed.match(/^\/(usr|bin|mingw64|mingw32)(\/.*)?$/)
+  if (relative) {
+    const rest = trimmed.replace(/^\//, '').replace(/\//g, '\\')
+    return pathMod.join(gitRoot, rest)
+  }
+  return ''
+}
+
+/** Colon-separated MSYS PATH → semicolon-separated Windows PATH. */
+export function msysPathListToWindows(pathList: string, gitRoot: string, deps: ShellEnvDeps = {}): string {
+  return pathList
+    .split(':')
+    .map((part) => msysPathEntryToWindows(part, gitRoot, deps))
+    .filter(Boolean)
+    .join(';')
+}
+
 /** Locate Git Bash so we can dump a login PATH on Windows. */
 export function findGitBashExe(deps: ShellEnvDeps = {}): string | null {
   const pathMod = pathOf(deps)
@@ -114,6 +180,10 @@ function dumpLoginEnv(file: string, deps: ShellEnvDeps = {}): Promise<string> {
  * Resolve the user's shell environment by spawning a login shell.
  * On macOS, GUI apps launched from Finder get a minimal PATH.
  * On Windows, Electron is the same: capture Git Bash login env instead of skipping.
+ *
+ * Do not copy Git Bash's Unix PATH onto process.env.PATH. node-pty ConPTY
+ * resolves relative files like `cmd.exe` with that PATH; a `/c/...:/usr/bin`
+ * value makes the lookup return empty ("File not found: ").
  */
 export async function resolveShellEnv(deps: ShellEnvDeps = {}): Promise<void> {
   const platform = platformOf(deps)
@@ -127,9 +197,12 @@ export async function resolveShellEnv(deps: ShellEnvDeps = {}): Promise<void> {
     const pathValue = parsed.PATH || parsed.Path
     if (pathValue) {
       resolvedEnv = parsed
-      // Child_process and later prepends read process.env.PATH too.
-      if (deps.env) deps.env.PATH = pathValue
-      else process.env.PATH = pathValue
+      if (platform === 'win32') {
+        windowsLoginPath = msysPathListToWindows(pathValue, gitInstallRoot(shell, deps), deps)
+      } else {
+        if (deps.env) deps.env.PATH = pathValue
+        else process.env.PATH = pathValue
+      }
     }
   } catch {
     // Fall back to process.env if shell resolution fails
@@ -142,12 +215,31 @@ export function setPortableNodeDir(dir: string): void {
 }
 
 export function getShellEnv(deps: ShellEnvDeps = {}): Record<string, string> {
-  const base = resolvedEnv ?? (envOf(deps) as Record<string, string>)
+  const platform = platformOf(deps)
+  const live = envOf(deps) as Record<string, string>
+
+  if (platform === 'win32') {
+    const base: Record<string, string> = { ...live }
+    if (resolvedEnv) {
+      for (const [key, value] of Object.entries(resolvedEnv)) {
+        if (WINDOWS_PROCESS_KEYS.has(key)) continue
+        base[key] = value
+      }
+    }
+    if (windowsLoginPath) {
+      base.PATH = windowsLoginPath
+      if ('Path' in base) base.Path = windowsLoginPath
+    }
+    return prependDirToPath(base, portableNodeDir, deps)
+  }
+
+  const base = resolvedEnv ?? live
   return prependDirToPath(base, portableNodeDir, deps)
 }
 
 /** Test helper: clear cached login env and the Node-dir override. */
 export function resetShellEnvForTests(): void {
   resolvedEnv = null
+  windowsLoginPath = null
   portableNodeDir = ''
 }
