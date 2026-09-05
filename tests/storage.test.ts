@@ -40,6 +40,7 @@ describe('Storage', () => {
     expect(config.claudeCommand).toBe('')
     expect(config.codexCommand).toBe('')
     expect(config.portableNodeDir).toBe('')
+    expect(config.windowsTerminal).toBe('git-bash')
   })
 
   it('fills in new config defaults for configs written before the key existed', () => {
@@ -51,6 +52,7 @@ describe('Storage', () => {
     expect(config.newTaskAutoOpen).toBe('none')
     expect(config.piCommand).toBe('')
     expect(config.portableNodeDir).toBe('')
+    expect(config.windowsTerminal).toBe('git-bash')
   })
 
   it('round-trips the portable Node directory', () => {
@@ -67,6 +69,7 @@ describe('Storage', () => {
       theme: 'dark',
       terminalTheme: 'dark',
       defaultShell: '/bin/bash',
+      windowsTerminal: 'powershell',
       editorFontFamily: 'JetBrains Mono',
       editorWordWrap: 'bounded',
       diffRenderSideBySide: false
@@ -77,6 +80,7 @@ describe('Storage', () => {
     expect(config.editorFontFamily).toBe('JetBrains Mono')
     expect(config.editorWordWrap).toBe('bounded')
     expect(config.diffRenderSideBySide).toBe(false)
+    expect(config.windowsTerminal).toBe('powershell')
   })
 
   it('returns empty projects when no projects file exists', () => {

@@ -102,6 +102,21 @@ describe('findGitBashExe', () => {
     expect(found?.toLowerCase()).toBe('c:\\users\\me\\appdata\\local\\programs\\git\\bin\\bash.exe')
   })
 
+  it('prefers Git\\bin over Git\\usr\\bin when both exist', () => {
+    const found = findGitBashExe({
+      ...win,
+      env: { PATH: 'C:\\Program Files\\Git\\usr\\bin;C:\\Windows\\System32' },
+      existsSync: (candidate) => {
+        const n = candidate.toLowerCase()
+        return (
+          n === 'c:\\program files\\git\\usr\\bin\\bash.exe' ||
+          n === 'c:\\program files\\git\\bin\\bash.exe'
+        )
+      }
+    })
+    expect(found?.toLowerCase()).toBe('c:\\program files\\git\\bin\\bash.exe')
+  })
+
   it('returns null when bash.exe is missing', () => {
     expect(
       findGitBashExe({

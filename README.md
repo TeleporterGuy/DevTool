@@ -14,7 +14,7 @@ Built with Electron, React, and TypeScript.
 
 **Split-Pane Layout** -- Horizontal split view with independent left and right panes. Drag tabs between panes.
 
-**Terminal Tabs** -- Full terminal emulation via xterm.js and node-pty. WebGL-accelerated rendering, scrollback preservation, search, clipboard integration, and copy-on-select.
+**Terminal Tabs** -- Full terminal emulation via xterm.js and node-pty. On Windows, new tabs default to Git Bash (auto-detected); Settings can switch to PowerShell or Command Prompt. WebGL-accelerated rendering, scrollback preservation, search, clipboard integration, and copy-on-select.
 
 **Browser Tabs** -- Embedded Chromium browser with URL bar, navigation, and DevTools. SOCKS proxy support for remote project access.
 
@@ -83,6 +83,8 @@ npx @electron/rebuild -m .
 **MSB8040** (“Spectre-mitigated libraries are required”) means that component is still missing. Do not disable Spectre in `node-pty`’s `binding.gyp`.
 
 Opening a Pi (or Claude/Codex) tab can fail with **Cannot create process, error code: 2** if Windows cannot find the CLI, or **error code: 193** if DevTool tries to CreateProcess a `.cmd` shim directly. Electron does not see Git Bash’s PATH, and npm’s `pi` is usually `pi.cmd`. Set **Settings → AI Tools → Command path** after enabling the tool, or put npm’s global bin on PATH (`%AppData%\npm`). DevTool wraps `.cmd` through `cmd.exe`.
+
+New **Terminal** tabs on Windows use **Git Bash** by default (`Git\bin\bash.exe --login -i`), including when you start `DevTool.exe` or `npm run dev` from Explorer or cmd — the app does not rely on an inherited `SHELL`. **Settings → Terminal → Default shell** can switch to PowerShell or Command Prompt (new tabs only). Leave the Git Bash path empty to auto-detect, or Browse to a `bash.exe`. SSH tabs still use the remote `$SHELL`.
 
 Without admin, without the Visual Studio Installer, or without those Spectre libs, **from-source `npm install` cannot succeed** on Windows. Use a pre-built folder instead.
 

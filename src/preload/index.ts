@@ -88,6 +88,9 @@ const api = {
   pickFile: (title?: string): Promise<string | null> =>
     ipcRenderer.invoke('pick-file', title),
 
+  /** Main-process platform. Renderer uses this for Windows-only Settings. */
+  platform: process.platform,
+
   // SSH
   sshConnect: (projectId: string, sshConfig: SshConfig): Promise<void> =>
     ipcRenderer.invoke('ssh-connect', projectId, sshConfig),

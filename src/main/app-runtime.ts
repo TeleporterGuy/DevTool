@@ -22,6 +22,7 @@ import { parseNumstat } from './git-diff-summary'
 import { GIT_STATUS_ARGS, parseGitStatusZ } from './git-status-parse'
 import { AI_TAB_META } from '../shared/types'
 import { agentCommandOverride, conptySpawnArgv, isAiAgentCommand, resolveAgentCommand } from './resolve-agent-command'
+import { isLocalInteractiveTerminal, resolveLocalTerminalSpawn } from './resolve-local-terminal'
 import { setPortableNodeDir } from './shell-env'
 import {
   piExtensionLocalPath,
@@ -874,7 +875,7 @@ export class AppRuntime {
         if (!window) {
           throw new Error('Unable to resolve window for PTY attach')
         }
-        const resolvedShell = shell || process.env.SHELL || '/bin/sh'
+        const resolvedShell = shell || '(local default)'
         this.logDebug(`ptySpawnRequest windowId=${window.id} id=${id} shell=${resolvedShell} cwd=${cwd} cols=${cols} rows=${rows}`)
         return this.attachOrCreatePty(window.id, id, resolvedShell, cwd, cols, rows, args, extraEnv, projectId, sshConfig)
       }
@@ -1338,6 +1339,12 @@ export class AppRuntime {
         spawnFile = wrapped.file
         spawnArgs = wrapped.args
         this.logDebug(`ptySpawn resolve id=${id} shell=${shell} file=${spawnFile} args=${spawnArgs.length}`)
+      } else if (isLocalInteractiveTerminal(shell, spawnArgs)) {
+        // Git Bash / $SHELL from Settings — do not inherit process.env.SHELL on Windows.
+        const resolved = resolveLocalTerminalSpawn(this.config)
+        spawnFile = resolved.file
+        spawnArgs = resolved.args
+        this.logDebug(`ptySpawn resolve id=${id} shell=${shell} file=${spawnFile} args=${spawnArgs.join(' ')}`)
       }
       this.ptyManager.spawn(id, spawnFile, cwd, cols, rows, spawnArgs, localEnv, callbacks)
     }

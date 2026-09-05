@@ -148,7 +148,12 @@ export function msysPathListToWindows(pathList: string, gitRoot: string, deps: S
     .join(';')
 }
 
-/** Locate Git Bash so we can dump a login PATH on Windows. */
+/** True for `...\Git\bin\bash.exe`, false for `...\Git\usr\bin\bash.exe`. */
+export function isGitBinBashExe(file: string): boolean {
+  return file.replace(/\//g, '\\').toLowerCase().endsWith('\\git\\bin\\bash.exe')
+}
+
+/** Locate Git Bash so we can dump a login PATH and spawn a PTY on Windows. */
 export function findGitBashExe(deps: ShellEnvDeps = {}): string | null {
   const pathMod = pathOf(deps)
   const env = envOf(deps)
@@ -156,14 +161,16 @@ export function findGitBashExe(deps: ShellEnvDeps = {}): string | null {
   const pathDirs = (env.PATH || env.Path || '').split(pathMod.delimiter)
   const dirs = [...pathDirs, ...extraWindowsSearchDirs(env, pathMod as typeof path.win32)].filter(Boolean)
   const seen = new Set<string>()
+  const found: string[] = []
   for (const dir of dirs) {
     const candidate = pathMod.join(dir, 'bash.exe')
     const key = candidate.toLowerCase()
     if (seen.has(key)) continue
     seen.add(key)
-    if (existsSync(candidate)) return candidate
+    if (existsSync(candidate)) found.push(candidate)
   }
-  return null
+  // Git\bin\bash.exe is the Git Bash launcher; usr\bin is MSYS bash on PATH.
+  return found.find(isGitBinBashExe) ?? found[0] ?? null
 }
 
 function dumpLoginEnv(file: string, deps: ShellEnvDeps = {}): Promise<string> {

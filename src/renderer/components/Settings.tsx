@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react'
-import type { CleanupActivity, EditorLineNumbers, EditorRenderWhitespace, EditorWordWrap, IdleTaskCleanupConfig, NewTaskAutoOpen, TabStatusValue, TerminalColorScheme } from '../../shared/types'
+import type { CleanupActivity, EditorLineNumbers, EditorRenderWhitespace, EditorWordWrap, IdleTaskCleanupConfig, NewTaskAutoOpen, TabStatusValue, TerminalColorScheme, WindowsTerminal } from '../../shared/types'
 import { useApp } from '../context/AppContext'
 import { useAllTabStatuses } from '../context/TabStatusContext'
 import { findIdleCleanupCandidates } from '../../shared/idle-cleanup'
@@ -68,6 +68,12 @@ const newTaskAutoOpenOptions: Array<{ value: NewTaskAutoOpen; label: string }> =
   { value: 'terminal', label: 'Terminal' },
   { value: 'browser', label: 'Browser' }
 ]
+
+const windowsTerminalOptions = [
+  { value: 'git-bash', label: 'Git Bash' },
+  { value: 'powershell', label: 'PowerShell' },
+  { value: 'cmd', label: 'Command Prompt' }
+] as const
 
 const themeOptions = [
   { value: 'system', label: 'System' },
@@ -211,12 +217,48 @@ export default function Settings({ onClose }: Props): React.ReactElement {
             </Group>
             <FormGroup>
               <SetBlock label="Default shell">
-                <Field
-                  value={config.defaultShell}
-                  onChange={(e) => updateConfig({ defaultShell: e.target.value })}
-                  placeholder="$SHELL (system default)"
-                />
-                <HelperText>Leave empty to use your login shell.</HelperText>
+                {window.api.platform === 'win32' ? (
+                  <>
+                    <SegCtl
+                      options={windowsTerminalOptions}
+                      value={config.windowsTerminal}
+                      onChange={(windowsTerminal: WindowsTerminal) => updateConfig({ windowsTerminal })}
+                    />
+                    {config.windowsTerminal === 'git-bash' && (
+                      <div className="mt-2.5 flex items-center gap-2.5">
+                        <Field
+                          className="flex-1"
+                          value={config.defaultShell}
+                          onChange={(e) => updateConfig({ defaultShell: e.target.value })}
+                          placeholder="Auto-detect"
+                        />
+                        <LinkBtn
+                          onClick={() => {
+                            void window.api.pickFile('Select Git Bash (bash.exe)').then((picked) => {
+                              if (picked) updateConfig({ defaultShell: picked })
+                            })
+                          }}
+                        >
+                          Browse
+                        </LinkBtn>
+                      </div>
+                    )}
+                    <HelperText>
+                      {config.windowsTerminal === 'git-bash'
+                        ? 'Empty path finds Git\\bin\\bash.exe. New tabs only.'
+                        : 'PowerShell and Command Prompt apply to new tabs only.'}
+                    </HelperText>
+                  </>
+                ) : (
+                  <>
+                    <Field
+                      value={config.defaultShell}
+                      onChange={(e) => updateConfig({ defaultShell: e.target.value })}
+                      placeholder="$SHELL (system default)"
+                    />
+                    <HelperText>Leave empty to use your login shell.</HelperText>
+                  </>
+                )}
               </SetBlock>
               <SetBlock label="Node directory" divider>
                 <div className="flex items-center gap-2.5">

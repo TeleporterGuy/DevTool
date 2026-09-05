@@ -33,7 +33,7 @@ Already useful, keep it:
 Known gaps this fork must treat as work, not surprises:
 
 - Windows packaging is a portable folder (`npm run build:win` → `dist/win-unpacked`), not a Setup.exe. `electron-winstaller` stays unapproved until an installer is required. From-source `npm install` on Windows still needs admin + VS Build Tools + Spectre libs (see README).
-- Default PTY shell is still `$SHELL` / `/bin/sh` when Settings **Default shell** is empty (Git Bash auto-detect is not done). Login-shell env **is** captured on Windows in `shell-env.ts`; do not copy that Unix PATH onto `process.env.PATH` (ConPTY `cmd.exe` lookup breaks — see AGENTS.md).
+- Local Windows terminals default to Git Bash (`Git\bin\bash.exe --login -i`, auto-detect; Settings can pick PowerShell/cmd or a `bash.exe` path). Login-shell env **is** captured in `shell-env.ts`; do not copy that Unix PATH onto `process.env.PATH` (ConPTY `cmd.exe` lookup breaks — see AGENTS.md).
 - POSIX assumptions: worktree paths, hook inject (`curl` + `python3`), remote Pi extension under `/tmp/...`.
 - README still mentions OpenCode; code has Pi, not OpenCode.
 
@@ -47,8 +47,8 @@ Known gaps this fork must treat as work, not surprises:
 
 Work items:
 
-1. **Default shell on Windows**  
-   Resolve `Git\bin\bash.exe` (Program Files, user install, `PATH`). Spawn with `--login -i`. Persist override in Settings (`defaultShell`).
+1. **Default shell on Windows** — done.  
+   Resolve `Git\bin\bash.exe` (Program Files, user install, `PATH`; prefer `Git\bin` over `usr\bin`). Spawn with `--login -i`. Do not use inherited `SHELL`. Settings: Git Bash / PowerShell / Command Prompt; empty `defaultShell` auto-detects Git Bash. Override path is optional. New tabs only.
 
 2. **Spawn environment**  
    Replace the “skip win32” shell-env path. Build env explicitly:
@@ -153,7 +153,7 @@ Explicit non-goals unless the product bet changes: cloud VMs, embedding Pi’s U
 
 Keep upstream `master` as a remote (`upstream`) and rebase or merge periodically. Land work in this order so each PR is demoable:
 
-1. Windows shell resolution + Git Bash PTY + documented rebuild.
+1. Windows shell resolution + Git Bash PTY + documented rebuild. **Done** (Git Bash default + Settings presets; portable Node PATH and rebuild docs landed earlier).
 2. Configurable spawn PATH (portable Node) + env passthrough.
 3. Win dir packaging notes / script.
 4. File explorer CRUD.

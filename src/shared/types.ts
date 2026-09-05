@@ -345,7 +345,16 @@ export interface AppConfig {
   theme: 'system' | 'dark' | 'light'
   terminalTheme: 'system' | 'dark' | 'light'
   terminalColorScheme: TerminalColorScheme
+  /**
+   * Unix: login-shell path. Empty uses `$SHELL`.
+   * Windows + Git Bash: optional `bash.exe` path. Empty auto-detects Git for Windows.
+   */
   defaultShell: string
+  /**
+   * Windows local terminal preset. Ignored on macOS/Linux.
+   * Git Bash is the product default; PowerShell and cmd are extras.
+   */
+  windowsTerminal: WindowsTerminal
   /**
    * Folder of a portable Node zip (contains `node.exe` / `node`).
    * Prepended to PATH for new local terminal and Pi tabs. Empty means do not prepend.
@@ -422,6 +431,8 @@ export interface IdleTaskCleanupConfig {
   /** Also delete workspace tasks whose worktree is clean and branch already merged. */
   includeCleanWorkspaces: boolean
 }
+
+export type WindowsTerminal = 'git-bash' | 'powershell' | 'cmd'
 
 export type TerminalColorScheme =
   | 'auto'
@@ -542,6 +553,7 @@ export const DEFAULT_CONFIG: AppConfig = {
   terminalTheme: 'system',
   terminalColorScheme: 'auto',
   defaultShell: '',
+  windowsTerminal: 'git-bash',
   portableNodeDir: '',
   copyOnSelect: false,
   editorFontFamily: 'monospace',
