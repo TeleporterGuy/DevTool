@@ -23,7 +23,9 @@ import { GIT_STATUS_ARGS, parseGitStatusZ } from './git-status-parse'
 import { AI_TAB_META } from '../shared/types'
 import { agentCommandOverride, conptySpawnArgv, isAiAgentCommand, resolveAgentCommand } from './resolve-agent-command'
 import { isLocalInteractiveTerminal, resolveLocalTerminalSpawn } from './resolve-local-terminal'
-import { setPortableNodeDir } from './shell-env'
+import { findGitBashExe, setPortableNodeDir } from './shell-env'
+import { resolveSafeProjectPath } from './project-fs-path'
+import { posixRelativeJoin } from '../shared/workspace-path'
 import {
   piExtensionLocalPath,
   piExtensionRemotePath,
@@ -113,11 +115,12 @@ async function readUntrackedSummary(resolvedCwd: string): Promise<GitDiffSummary
     // Count lines via a shell pipeline instead of reading every untracked file
     // into Node.js — projects with hundreds of untracked files (e.g. vendored
     // dependencies) would otherwise cause 100% CPU on the 2-second poll.
-    const { stdout } = await execFileAsync(
-      '/bin/sh',
-      ['-c', 'git ls-files --others --exclude-standard -z | xargs -0 wc -l 2>/dev/null | tail -1'],
-      { cwd: resolvedCwd, timeout: 5000 }
-    )
+    const script =
+      'git ls-files --others --exclude-standard -z | xargs -0 wc -l 2>/dev/null | tail -1'
+    const file = process.platform === 'win32' ? findGitBashExe() : '/bin/sh'
+    if (!file) return { added: 0, deleted: 0 }
+    const args = process.platform === 'win32' ? ['-lc', script] : ['-c', script]
+    const { stdout } = await execFileAsync(file, args, { cwd: resolvedCwd, timeout: 5000 })
     const added = parseInt(stdout.trim(), 10) || 0
     return { added, deleted: 0 }
   } catch {
@@ -941,11 +944,7 @@ export class AppRuntime {
 
     // File browser
     const validatePath = (projectCwd: string, relativePath: string): string => {
-      const resolved = path.resolve(projectCwd, relativePath)
-      if (!resolved.startsWith(path.resolve(projectCwd) + path.sep) && resolved !== path.resolve(projectCwd)) {
-        throw new Error('Path traversal not allowed')
-      }
-      return resolved
+      return resolveSafeProjectPath(projectCwd, relativePath)
     }
 
     ipcMain.handle('fb-read-directory', async (_event, projectCwd: string, relativeDirPath: string): Promise<DirectoryEntry[]> => {
@@ -956,7 +955,7 @@ export class AppRuntime {
         .map(entry => ({
           name: entry.name,
           type: entry.isDirectory() ? 'directory' as const : 'file' as const,
-          relativePath: path.join(relativeDirPath, entry.name)
+          relativePath: posixRelativeJoin(relativeDirPath, entry.name)
         }))
         .sort((a, b) => {
           if (a.type !== b.type) return a.type === 'directory' ? -1 : 1

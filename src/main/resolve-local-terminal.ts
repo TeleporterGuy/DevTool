@@ -1,6 +1,5 @@
 import fs from 'fs'
-import path from 'path'
-import type { AppConfig, WindowsTerminal } from '../shared/types'
+import type { AppConfig } from '../shared/types'
 import { findGitBashExe, type ShellEnvDeps } from './shell-env'
 
 export interface LocalTerminalSpawn {
@@ -19,27 +18,6 @@ function platformOf(deps: ShellEnvDeps = {}): NodeJS.Platform {
   return deps.platform ?? process.platform
 }
 
-function windowsPreset(value: WindowsTerminal | undefined): WindowsTerminal {
-  if (value === 'powershell' || value === 'cmd') return value
-  return 'git-bash'
-}
-
-function windowsPowerShellExe(deps: ShellEnvDeps = {}): string {
-  const env = envOf(deps)
-  const pathMod = deps.path ?? path.win32
-  const root = env.SystemRoot || env.SYSTEMROOT || 'C:\\Windows'
-  return pathMod.join(root, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe')
-}
-
-function windowsCmdExe(deps: ShellEnvDeps = {}): string {
-  const env = envOf(deps)
-  const fromEnv = env.ComSpec || env.COMSPEC
-  if (fromEnv?.trim()) return fromEnv.trim()
-  const pathMod = deps.path ?? path.win32
-  const root = env.SystemRoot || env.SYSTEMROOT || 'C:\\Windows'
-  return pathMod.join(root, 'System32', 'cmd.exe')
-}
-
 function requireExistingFile(file: string, deps: ShellEnvDeps, missing: string): string {
   const existsSync = deps.existsSync ?? fs.existsSync
   if (existsSync(file)) return file
@@ -48,7 +26,7 @@ function requireExistingFile(file: string, deps: ShellEnvDeps, missing: string):
 
 /**
  * File + args for a local interactive terminal tab.
- * On Windows this ignores inherited SHELL so Explorer / cmd launches match Git-Bash-started `npm run dev`.
+ * On Windows this is always Git Bash — inherited SHELL and PowerShell/cmd are ignored.
  */
 export function resolveLocalTerminalSpawn(
   config: Pick<AppConfig, 'defaultShell' | 'windowsTerminal'>,
@@ -61,17 +39,6 @@ export function resolveLocalTerminalSpawn(
   if (platform !== 'win32') {
     const file = override || env.SHELL || '/bin/sh'
     return { file, args: ['-l'] }
-  }
-
-  const preset = windowsPreset(config.windowsTerminal)
-
-  if (preset === 'powershell') {
-    const file = windowsPowerShellExe(deps)
-    return { file, args: ['-NoLogo'] }
-  }
-
-  if (preset === 'cmd') {
-    return { file: windowsCmdExe(deps), args: [] }
   }
 
   if (override) {
@@ -88,7 +55,7 @@ export function resolveLocalTerminalSpawn(
   return { file: found, args: ['--login', '-i'] }
 }
 
-/** Local Git Bash / PowerShell / cmd — not SSH, not Pi/Claude/Codex, not `sh -c`. */
+/** Local Git Bash (Windows) or login shell (Unix) — not SSH, not Pi/Claude/Codex, not `sh -c`. */
 export function isLocalInteractiveTerminal(shell: string, args?: string[]): boolean {
   if ((args ?? []).includes('-c')) return false
   if (shell === '$SHELL') return false

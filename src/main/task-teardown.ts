@@ -1,4 +1,5 @@
 import type { Project, Task } from '../shared/types'
+import { joinWorkspaceDir } from '../shared/workspace-path'
 
 /** The per-tab teardown a window would normally do, as main has to do it. */
 export interface TaskTeardownTargets {
@@ -14,7 +15,7 @@ export interface TaskTeardownTargets {
 export function taskDir(project: Project, task: Task): string {
   const base = project.ssh ? project.ssh.remoteDir : project.directory
   if (!task.workspace) return base
-  return [task.workspace.worktreePath, task.workspace.relativeProjectPath].filter(Boolean).join('/')
+  return joinWorkspaceDir(task.workspace.worktreePath, task.workspace.relativeProjectPath)
 }
 
 /**

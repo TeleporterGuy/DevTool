@@ -351,8 +351,8 @@ export interface AppConfig {
    */
   defaultShell: string
   /**
-   * Windows local terminal preset. Ignored on macOS/Linux.
-   * Git Bash is the product default; PowerShell and cmd are extras.
+   * Kept so old config.json still loads. Always coerced to Git Bash.
+   * PowerShell and Command Prompt are not product surfaces on this fork.
    */
   windowsTerminal: WindowsTerminal
   /**
@@ -432,7 +432,12 @@ export interface IdleTaskCleanupConfig {
   includeCleanWorkspaces: boolean
 }
 
-export type WindowsTerminal = 'git-bash' | 'powershell' | 'cmd'
+/** Interactive Windows tabs are Git Bash only. Legacy `powershell` / `cmd` values coerce here. */
+export type WindowsTerminal = 'git-bash'
+
+export function coerceWindowsTerminal(_value: unknown): WindowsTerminal {
+  return 'git-bash'
+}
 
 export type TerminalColorScheme =
   | 'auto'

@@ -172,12 +172,14 @@ describe('resolveShellEnv', () => {
       existsSync: (candidate) =>
         candidate.toLowerCase() === 'c:\\users\\me\\appdata\\local\\programs\\git\\bin\\bash.exe',
       execFile: (_file, _args, _opts, cb) => {
-        cb(null, 'PATH=/c/Program Files/Git/usr/bin:/c/Windows\0HOME=/c/Users/me\0', '')
+        cb(null, 'PATH=/c/Program Files/Git/usr/bin:/c/Windows\0HOME=/c/Users/me\0PWD=/c/Users/me\0', '')
       }
     })
     expect(env.PATH).toBe('C:\\Windows\\System32')
     const merged = getShellEnv({ ...win, env })
     expect(merged.HOME).toBe('/c/Users/me')
+    expect(merged.PWD).toBeUndefined()
+    expect(merged.CHERE_INVOKING).toBe('1')
     expect(merged.PATH).toBe(
       'C:\\Program Files\\Git\\usr\\bin;C:\\Windows'
     )

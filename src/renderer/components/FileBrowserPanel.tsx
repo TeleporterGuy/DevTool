@@ -2,6 +2,7 @@ import React, { useCallback, useRef } from 'react'
 import { useApp } from '../context/AppContext'
 import { useGitStatus } from '../hooks/useGitStatus'
 import { isRemoteProject, isShellCommandProject } from '../../shared/types'
+import { joinWorkspaceDir } from '../../shared/workspace-path'
 import FileTree from './FileTree'
 import GitStatus from './GitStatus'
 import NotesList from './NotesList'
@@ -23,7 +24,7 @@ export default function FileBrowserPanel(): React.ReactElement | null {
   const panelRef = useRef<HTMLDivElement | null>(null)
 
   const effectiveDir = selectedTask?.workspace
-    ? [selectedTask.workspace.worktreePath, selectedTask.workspace.relativeProjectPath].filter(Boolean).join('/')
+    ? joinWorkspaceDir(selectedTask.workspace.worktreePath, selectedTask.workspace.relativeProjectPath)
     : selectedProject?.directory ?? ''
 
   const isLocalProject = !!selectedProject

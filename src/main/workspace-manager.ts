@@ -58,7 +58,7 @@ export class WorkspaceManager {
     // Compute relative project path
     const rel = path.relative(repoRoot, fs.realpathSync(projectDir))
 
-    return { worktreePath, branchName: name, relativeProjectPath: rel }
+    return { worktreePath, branchName: name, relativeProjectPath: rel.split(path.sep).join('/') }
   }
 
   /** Absolute paths of every worktree git currently has registered for this repo. */

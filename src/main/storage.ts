@@ -2,6 +2,7 @@ import fs from 'fs'
 import path from 'path'
 import {
   AppConfig,
+  coerceWindowsTerminal,
   DEFAULT_CONFIG,
   ProjectsData,
   createDefaultWindowSessionState,
@@ -80,7 +81,9 @@ export class Storage {
       const raw = fs.readFileSync(this.configPath, 'utf-8')
       const parsed = JSON.parse(raw) as Record<string, unknown>
       const { collapsedFolderIds: _legacy, ...rest } = parsed
-      return { ...DEFAULT_CONFIG, ...rest } as AppConfig
+      const config = { ...DEFAULT_CONFIG, ...rest } as AppConfig
+      config.windowsTerminal = coerceWindowsTerminal(config.windowsTerminal)
+      return config
     } catch {
       return { ...DEFAULT_CONFIG }
     }

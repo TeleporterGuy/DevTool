@@ -4,7 +4,9 @@ import {
   agentCommandOverride,
   conptySpawnArgv,
   extraWindowsSearchDirs,
+  findCurlExe,
   isAiAgentCommand,
+  quotePosixHookBin,
   resolveAgentCommand
 } from '../src/main/resolve-agent-command'
 import { DEFAULT_CONFIG } from '../src/shared/types'
@@ -144,5 +146,41 @@ describe('extraWindowsSearchDirs', () => {
     )
     expect(dirs).toContain('C:\\Users\\me\\AppData\\Roaming\\npm')
     expect(dirs).toContain('C:\\Program Files\\Git\\usr\\bin')
+  })
+})
+
+describe('findCurlExe', () => {
+  const win = { platform: 'win32' as const, path: path.win32 }
+
+  it('finds curl.exe in Git usr\\bin when PATH is thin', () => {
+    const found = findCurlExe({
+      ...win,
+      env: { PATH: 'C:\\Windows\\System32' },
+      existsSync: (candidate) =>
+        candidate.toLowerCase() === 'c:\\program files\\git\\usr\\bin\\curl.exe'
+    })
+    expect(found?.toLowerCase()).toBe('c:\\program files\\git\\usr\\bin\\curl.exe')
+  })
+
+  it('returns null when curl is missing', () => {
+    expect(
+      findCurlExe({
+        ...win,
+        env: { PATH: 'C:\\Windows\\System32' },
+        existsSync: () => false
+      })
+    ).toBeNull()
+  })
+})
+
+describe('quotePosixHookBin', () => {
+  it('leaves a simple curl name unquoted', () => {
+    expect(quotePosixHookBin('curl')).toBe('curl')
+  })
+
+  it('quotes a Windows path with spaces using forward slashes', () => {
+    expect(quotePosixHookBin('C:\\Program Files\\Git\\usr\\bin\\curl.exe')).toBe(
+      "'C:/Program Files/Git/usr/bin/curl.exe'"
+    )
   })
 })

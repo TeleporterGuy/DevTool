@@ -20,13 +20,13 @@ describe('HookInjector', () => {
   })
 
   it('creates .claude directory and settings.local.json if they do not exist', () => {
-    const injector = new HookInjector(3456)
+    const injector = new HookInjector(3456, () => 'curl')
     injector.inject(testDir, 'tab-1')
     expect(fs.existsSync(settingsPath)).toBe(true)
   })
 
   it('injects all four hook types', () => {
-    const injector = new HookInjector(3456)
+    const injector = new HookInjector(3456, () => 'curl')
     injector.inject(testDir, 'tab-1')
     const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf-8'))
     expect(settings.hooks.SessionStart).toBeDefined()
@@ -36,7 +36,7 @@ describe('HookInjector', () => {
   })
 
   it('includes correct port in hook commands', () => {
-    const injector = new HookInjector(9876)
+    const injector = new HookInjector(9876, () => 'curl')
     injector.inject(testDir, 'tab-1')
     const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf-8'))
     const cmd = settings.hooks.Notification[0].hooks[0].command
@@ -44,7 +44,7 @@ describe('HookInjector', () => {
   })
 
   it('includes $DEVTOOL_TAB_ID in hook commands', () => {
-    const injector = new HookInjector(3456)
+    const injector = new HookInjector(3456, () => 'curl')
     injector.inject(testDir, 'tab-1')
     const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf-8'))
     const cmd = settings.hooks.SessionStart[0].hooks[0].command
@@ -54,7 +54,7 @@ describe('HookInjector', () => {
   it('preserves existing non-hook settings', () => {
     fs.mkdirSync(claudeDir, { recursive: true })
     fs.writeFileSync(settingsPath, JSON.stringify({ permissions: { allow: ['Read'] } }))
-    const injector = new HookInjector(3456)
+    const injector = new HookInjector(3456, () => 'curl')
     injector.inject(testDir, 'tab-1')
     const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf-8'))
     expect(settings.permissions.allow).toEqual(['Read'])
@@ -68,7 +68,7 @@ describe('HookInjector', () => {
         PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', command: 'echo hi' }] }]
       }
     }))
-    const injector = new HookInjector(3456)
+    const injector = new HookInjector(3456, () => 'curl')
     injector.inject(testDir, 'tab-1')
     const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf-8'))
     expect(settings.hooks.PreToolUse).toHaveLength(1)
@@ -76,7 +76,7 @@ describe('HookInjector', () => {
   })
 
   it('removes injected hooks on cleanup', () => {
-    const injector = new HookInjector(3456)
+    const injector = new HookInjector(3456, () => 'curl')
     injector.inject(testDir, 'tab-1')
     injector.cleanup(testDir, 'tab-1')
     const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf-8'))
@@ -94,7 +94,7 @@ describe('HookInjector', () => {
         PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', command: 'echo hi' }] }]
       }
     }))
-    const injector = new HookInjector(3456)
+    const injector = new HookInjector(3456, () => 'curl')
     injector.inject(testDir, 'tab-1')
     injector.cleanup(testDir, 'tab-1')
     const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf-8'))
@@ -103,14 +103,14 @@ describe('HookInjector', () => {
   })
 
   it('tracks injected project directories', () => {
-    const injector = new HookInjector(3456)
+    const injector = new HookInjector(3456, () => 'curl')
     injector.inject(testDir, 'tab-1')
     expect(injector.getInjectedDirs()).toContain(testDir)
   })
 
   it('cleanupAll removes hooks from all injected directories', () => {
     const dir2 = fs.mkdtempSync(path.join(os.tmpdir(), 'devtool-hook-test2-'))
-    const injector = new HookInjector(3456)
+    const injector = new HookInjector(3456, () => 'curl')
     injector.inject(testDir, 'tab-1')
     injector.inject(dir2, 'tab-2')
     injector.cleanupAll()
@@ -133,7 +133,7 @@ describe('HookInjector', () => {
         PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', command: 'echo user-hook' }] }]
       }
     }))
-    const injector = new HookInjector(3456)
+    const injector = new HookInjector(3456, () => 'curl')
     injector.inject(testDir, 'tab-1')
     const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf-8'))
     // Old stale hook (port 9999) should be replaced, not duplicated
@@ -146,7 +146,7 @@ describe('HookInjector', () => {
   // --- Remote hook injection tests ---
 
   it('builds remote inject script that merges hooks into existing settings', () => {
-    const injector = new HookInjector(3456)
+    const injector = new HookInjector(3456, () => 'curl')
     const script = injector.buildRemoteInjectScript('/home/deploy/app', 45678)
     // Should create .claude dir
     expect(script).toContain('mkdir -p')
@@ -163,7 +163,7 @@ describe('HookInjector', () => {
   })
 
   it('builds remote cleanup script that removes only devtool hooks', () => {
-    const injector = new HookInjector(3456)
+    const injector = new HookInjector(3456, () => 'curl')
     const script = injector.buildRemoteCleanupScript('/home/deploy/app')
     expect(script).toContain('settings.local.json')
     // Should NOT delete the whole file — should filter out devtool hooks only
@@ -171,7 +171,7 @@ describe('HookInjector', () => {
   })
 
   it('tracks remote owners per projectId and remoteDir', () => {
-    const injector = new HookInjector(3456)
+    const injector = new HookInjector(3456, () => 'curl')
     // First owner installs the hooks
     expect(injector.remoteInject('proj-1', '/home/deploy/app', 'tab-1')).toBe(true)
     // Second owner shares them
@@ -183,7 +183,7 @@ describe('HookInjector', () => {
   })
 
   it('does not collide owners across different projects with same remoteDir', () => {
-    const injector = new HookInjector(3456)
+    const injector = new HookInjector(3456, () => 'curl')
     injector.remoteInject('proj-1', '/home/deploy/app', 'tab-1')
     injector.remoteInject('proj-2', '/home/deploy/app', 'tab-2')
     // Cleaning up proj-1 should not affect proj-2
@@ -192,7 +192,7 @@ describe('HookInjector', () => {
   })
 
   it('does not collide owners across different directories in the same project', () => {
-    const injector = new HookInjector(3456)
+    const injector = new HookInjector(3456, () => 'curl')
     injector.remoteInject('proj-1', '/home/deploy/app/.worktrees/ws-a', 'tab-1')
     injector.remoteInject('proj-1', '/home/deploy/app/.worktrees/ws-b', 'tab-2')
     expect(injector.remoteCleanup('proj-1', '/home/deploy/app/.worktrees/ws-a', 'tab-1')).toBe(true)
@@ -200,7 +200,7 @@ describe('HookInjector', () => {
   })
 
   it('shares one reference between two injected tabs in the same directory', () => {
-    const injector = new HookInjector(3456)
+    const injector = new HookInjector(3456, () => 'curl')
     injector.inject(testDir, 'tab-1')
     injector.inject(testDir, 'tab-2')
     // Removing the first tab leaves the second tab's hooks in place
@@ -216,7 +216,7 @@ describe('HookInjector', () => {
   // --- Ownership accounting (regression: refcounts decremented by tabs that never injected) ---
 
   it('cleanup for a never-spawned sibling tab does not remove an injected tab\'s hooks', () => {
-    const injector = new HookInjector(3456)
+    const injector = new HookInjector(3456, () => 'curl')
     injector.inject(testDir, 'tab-injected')
 
     // A hidden lazy tab in the same directory never spawned, so it never injected —
@@ -233,7 +233,7 @@ describe('HookInjector', () => {
   })
 
   it('a respawned tab still holds exactly one reference', () => {
-    const injector = new HookInjector(3456)
+    const injector = new HookInjector(3456, () => 'curl')
     // PTY created, exits, created again — inject runs once per spawn
     injector.inject(testDir, 'tab-1')
     injector.inject(testDir, 'tab-1')
@@ -247,7 +247,7 @@ describe('HookInjector', () => {
   })
 
   it('a second cleanup for an already-removed tab is a no-op', () => {
-    const injector = new HookInjector(3456)
+    const injector = new HookInjector(3456, () => 'curl')
     injector.inject(testDir, 'tab-1')
     injector.cleanup(testDir, 'tab-1')
     // Tab removed while its PTY was still alive: the PTY's later exit must not
@@ -264,7 +264,7 @@ describe('HookInjector', () => {
     const dir2 = fs.mkdtempSync(path.join(os.tmpdir(), 'devtool-hook-test2-'))
     const settings2Path = path.join(dir2, '.claude', 'settings.local.json')
     try {
-      const injector = new HookInjector(3456)
+      const injector = new HookInjector(3456, () => 'curl')
       injector.inject(testDir, 'tab-1')
       injector.inject(dir2, 'tab-2')
 
@@ -281,7 +281,7 @@ describe('HookInjector', () => {
   })
 
   it('remote cleanup for a never-spawned sibling tab does not release the injected tab', () => {
-    const injector = new HookInjector(3456)
+    const injector = new HookInjector(3456, () => 'curl')
     expect(injector.remoteInject('proj-1', '/home/deploy/app', 'tab-injected')).toBe(true)
 
     // Never-spawned sibling in the same remote dir — nothing to release
@@ -291,7 +291,7 @@ describe('HookInjector', () => {
   })
 
   it('a respawned remote tab still holds exactly one reference', () => {
-    const injector = new HookInjector(3456)
+    const injector = new HookInjector(3456, () => 'curl')
     expect(injector.remoteInject('proj-1', '/home/deploy/app', 'tab-1')).toBe(true)
     // Respawn after the PTY exited — same owner, not a second reference
     expect(injector.remoteInject('proj-1', '/home/deploy/app', 'tab-1')).toBe(false)
@@ -299,5 +299,21 @@ describe('HookInjector', () => {
     expect(injector.remoteCleanup('proj-1', '/home/deploy/app', 'tab-1')).toBe(true)
     // Nothing left to release
     expect(injector.remoteCleanup('proj-1', '/home/deploy/app', 'tab-1')).toBe(false)
+  })
+
+  it('throws a clear error when curl is missing', () => {
+    const injector = new HookInjector(3456, () => null)
+    expect(() => injector.inject(testDir, 'tab-1')).toThrow(/Cannot find curl/)
+    expect(fs.existsSync(settingsPath)).toBe(false)
+  })
+
+  it('uses an absolute curl path in injected commands', () => {
+    const curl = 'C:\\Program Files\\Git\\usr\\bin\\curl.exe'
+    const injector = new HookInjector(3456, () => curl)
+    injector.inject(testDir, 'tab-1')
+    const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf-8'))
+    const cmd = settings.hooks.Notification[0].hooks[0].command
+    expect(cmd).toContain("'C:/Program Files/Git/usr/bin/curl.exe'")
+    expect(cmd).toContain('localhost:3456')
   })
 })

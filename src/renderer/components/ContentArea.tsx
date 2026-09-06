@@ -13,9 +13,7 @@ import { getPaneFromValue, resolvePaneForMenuAction, type PaneSide } from './pan
 import type { TabDragState, TabDropTarget } from './tabDrag'
 import type { TunnelConfig, TunnelState } from '../../shared/types'
 
-function joinPath(...parts: string[]): string {
-  return parts.filter(Boolean).join('/')
-}
+import { joinWorkspaceDir } from '../../shared/workspace-path'
 
 function FileBrowserTabButton({
   icon,
@@ -348,7 +346,7 @@ export default function ContentArea(): React.ReactElement {
     selectedTask?.system === 'home'
   )
   const selectedProjectDir = selectedTask?.workspace
-    ? joinPath(selectedTask.workspace.worktreePath, selectedTask.workspace.relativeProjectPath)
+    ? joinWorkspaceDir(selectedTask.workspace.worktreePath, selectedTask.workspace.relativeProjectPath)
     : selectedProject?.directory ?? ''
   const canShowLocalTabs = !!selectedProject
     && !isRemoteProject(selectedProject)
@@ -477,7 +475,7 @@ export default function ContentArea(): React.ReactElement {
           const isSplitOpen = taskView.splitOpen
           const ratio = dragRatio ?? taskView.splitRatio ?? 0.5
           const effectiveDir = task.workspace
-            ? joinPath(task.workspace.worktreePath, task.workspace.relativeProjectPath)
+            ? joinWorkspaceDir(task.workspace.worktreePath, task.workspace.relativeProjectPath)
             : getProjectDir(project)
           return (
             <div

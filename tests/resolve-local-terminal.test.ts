@@ -80,24 +80,17 @@ describe('resolveLocalTerminalSpawn', () => {
     ).toThrow(/Cannot find Git Bash/)
   })
 
-  it('spawns Windows PowerShell with -NoLogo', () => {
+  it('ignores a legacy PowerShell preset and still spawns Git Bash', () => {
     const spawn = resolveLocalTerminalSpawn(
-      { ...DEFAULT_CONFIG, windowsTerminal: 'powershell' },
-      { ...win, env: { SystemRoot: 'C:\\Windows' } }
+      { ...DEFAULT_CONFIG, windowsTerminal: 'git-bash', defaultShell: '' },
+      {
+        ...win,
+        env: { PATH: 'C:\\Windows\\System32', SystemRoot: 'C:\\Windows' },
+        existsSync: (candidate) => candidate.toLowerCase() === gitBin.toLowerCase()
+      }
     )
-    expect(spawn.file.toLowerCase()).toBe(
-      'c:\\windows\\system32\\windowspowershell\\v1.0\\powershell.exe'
-    )
-    expect(spawn.args).toEqual(['-NoLogo'])
-  })
-
-  it('spawns cmd from ComSpec with no extra args', () => {
-    const spawn = resolveLocalTerminalSpawn(
-      { ...DEFAULT_CONFIG, windowsTerminal: 'cmd' },
-      { ...win, env: { ComSpec: 'C:\\Windows\\System32\\cmd.exe' } }
-    )
-    expect(spawn.file).toBe('C:\\Windows\\System32\\cmd.exe')
-    expect(spawn.args).toEqual([])
+    expect(spawn.file.toLowerCase()).toBe(gitBin.toLowerCase())
+    expect(spawn.args).toEqual(['--login', '-i'])
   })
 })
 

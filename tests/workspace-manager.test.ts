@@ -74,7 +74,7 @@ describe('WorkspaceManager', () => {
       const subDir = path.join(repoDir, 'apps', 'web')
       fs.mkdirSync(subDir, { recursive: true })
       const result = await manager.create(subDir, 'sub-ws', 'master')
-      expect(result.relativeProjectPath).toBe(path.join('apps', 'web'))
+      expect(result.relativeProjectPath).toBe('apps/web')
       expect(result.worktreePath).toBe(path.join(repoDir, '.worktrees', 'sub-ws'))
     })
 

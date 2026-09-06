@@ -230,9 +230,14 @@ export function getShellEnv(deps: ShellEnvDeps = {}): Record<string, string> {
     if (resolvedEnv) {
       for (const [key, value] of Object.entries(resolvedEnv)) {
         if (WINDOWS_PROCESS_KEYS.has(key)) continue
+        if (key === 'PWD' || key === 'pwd') continue
         base[key] = value
       }
     }
+    // Login bash otherwise cds to $HOME. Do not keep dumped PWD (Electron's cwd).
+    delete base.PWD
+    delete base.pwd
+    base.CHERE_INVOKING = '1'
     if (windowsLoginPath) {
       base.PATH = windowsLoginPath
       if ('Path' in base) base.Path = windowsLoginPath

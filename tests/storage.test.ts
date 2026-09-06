@@ -69,7 +69,6 @@ describe('Storage', () => {
       theme: 'dark',
       terminalTheme: 'dark',
       defaultShell: '/bin/bash',
-      windowsTerminal: 'powershell',
       editorFontFamily: 'JetBrains Mono',
       editorWordWrap: 'bounded',
       diffRenderSideBySide: false
@@ -80,7 +79,20 @@ describe('Storage', () => {
     expect(config.editorFontFamily).toBe('JetBrains Mono')
     expect(config.editorWordWrap).toBe('bounded')
     expect(config.diffRenderSideBySide).toBe(false)
-    expect(config.windowsTerminal).toBe('powershell')
+    expect(config.windowsTerminal).toBe('git-bash')
+  })
+
+  it('coerces legacy PowerShell and cmd terminal presets to Git Bash', () => {
+    fs.writeFileSync(
+      path.join(testDir, 'config.json'),
+      JSON.stringify({ fontSize: 16, windowsTerminal: 'powershell' })
+    )
+    expect(storage.loadConfig().windowsTerminal).toBe('git-bash')
+    fs.writeFileSync(
+      path.join(testDir, 'config.json'),
+      JSON.stringify({ fontSize: 16, windowsTerminal: 'cmd' })
+    )
+    expect(storage.loadConfig().windowsTerminal).toBe('git-bash')
   })
 
   it('returns empty projects when no projects file exists', () => {

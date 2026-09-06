@@ -29,6 +29,43 @@ export function extraWindowsSearchDirs(env: NodeJS.ProcessEnv, pathMod: PathApi 
   return dirs
 }
 
+export function missingCurlError(): Error {
+  return new Error(
+    'Cannot find curl. Install Git for Windows (curl.exe lives in Git\\usr\\bin), then open the Claude tab again.'
+  )
+}
+
+/** Locate `curl` / `curl.exe` for Claude hooks. Git usr\\bin is searched on Windows. */
+export function findCurlExe(deps: ResolveCommandDeps = {}): string | null {
+  const platform = deps.platform ?? process.platform
+  const env = deps.env ?? process.env
+  const existsSync = deps.existsSync ?? fs.existsSync
+  const pathMod = deps.path ?? (platform === 'win32' ? path.win32 : path.posix)
+  const delim = pathMod.delimiter
+  const pathDirs = (env.PATH || env.Path || '').split(delim)
+  const extra = platform === 'win32' ? extraWindowsSearchDirs(env, pathMod as PathApi) : []
+  const names = platform === 'win32' ? ['curl.exe', 'curl'] : ['curl']
+  const seen = new Set<string>()
+  for (const dir of [...pathDirs, ...extra]) {
+    if (!dir) continue
+    for (const name of names) {
+      const candidate = pathMod.join(dir, name)
+      const key = platform === 'win32' ? candidate.toLowerCase() : candidate
+      if (seen.has(key)) continue
+      seen.add(key)
+      if (existsSync(candidate)) return candidate
+    }
+  }
+  return null
+}
+
+/** Quote a file path for a POSIX hook snippet (Claude's hook runner). */
+export function quotePosixHookBin(file: string): string {
+  if (/^[\w./+-]+$/.test(file)) return file
+  const unixish = file.replace(/\\/g, '/')
+  return "'" + unixish.replace(/'/g, `'\\''`) + "'"
+}
+
 export function missingCommandError(command: string): Error {
   return new Error(
     `Cannot find "${command}". Set a command path in Settings → AI Tools, ` +

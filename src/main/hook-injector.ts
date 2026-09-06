@@ -1,5 +1,6 @@
 import fs from 'fs'
 import path from 'path'
+import { findCurlExe, missingCurlError, quotePosixHookBin } from './resolve-agent-command'
 
 const DEVTOOL_HOOK_MARKER = '__devtool_injected'
 
@@ -11,6 +12,7 @@ interface HookEntry {
 
 export class HookInjector {
   private port: number
+  private resolveCurl: () => string | null
   /**
    * Tab ids that currently hold an injection, keyed by project dir.
    *
@@ -23,8 +25,9 @@ export class HookInjector {
    */
   private localOwners = new Map<string, Set<string>>()
 
-  constructor(port: number) {
+  constructor(port: number, resolveCurl: () => string | null = findCurlExe) {
     this.port = port
+    this.resolveCurl = resolveCurl
   }
 
   /** Identify devtool hooks by marker OR by URL pattern (marker may be stripped by Claude) */
@@ -33,13 +36,20 @@ export class HookInjector {
     return h.hooks.some((hook) => /localhost:\d+\/hook\//.test(hook.command))
   }
 
+  private curlBin(): string {
+    const found = this.resolveCurl()
+    if (!found) throw missingCurlError()
+    return quotePosixHookBin(found)
+  }
+
   private buildHooks(): Record<string, HookEntry[]> {
+    const curl = this.curlBin()
     const base = `http://localhost:${this.port}`
     const mkHook = (endpoint: string): HookEntry => ({
       matcher: '*',
       hooks: [{
         type: 'command',
-        command: `curl -s --max-time 5 -X POST ${base}/hook/${endpoint} -H "X-Tab-Id: $DEVTOOL_TAB_ID" -d @- 2>/dev/null; printf Success`
+        command: `${curl} -s --max-time 5 -X POST ${base}/hook/${endpoint} -H "X-Tab-Id: $DEVTOOL_TAB_ID" -d @- 2>/dev/null; printf Success`
       }],
       [DEVTOOL_HOOK_MARKER]: true
     })
@@ -60,6 +70,8 @@ export class HookInjector {
       owners.add(tabId)
       return
     }
+
+    const devtoolHooks = this.buildHooks()
     this.localOwners.set(projectDir, new Set([tabId]))
 
     const claudeDir = path.join(projectDir, '.claude')
@@ -77,7 +89,6 @@ export class HookInjector {
     }
 
     const existingHooks = (settings.hooks ?? {}) as Record<string, HookEntry[]>
-    const devtoolHooks = this.buildHooks()
 
     // Merge: add our hooks, preserve user hooks on other events
     const mergedHooks: Record<string, HookEntry[]> = { ...existingHooks }

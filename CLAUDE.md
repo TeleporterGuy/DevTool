@@ -24,7 +24,7 @@ Machines without admin do not `npm install` from git. Produce a portable folder 
 
 ## Windows spawn PATH
 
-Pi and terminals inherit env from [`src/main/shell-env.ts`](src/main/shell-env.ts). Settings **Node directory** (`portableNodeDir`) is the unzipped Node zip folder; it is prepended on **new** tabs only. `DevTool.exe` already embeds Node — a portable zip is not required for the app to start, and Node does not need to be on the machine-wide Windows PATH.
+Pi and terminals inherit env from [`src/main/shell-env.ts`](src/main/shell-env.ts). Settings **Node directory** (`portableNodeDir`) is the unzipped Node zip folder; it is prepended on **new** tabs only. `DevTool.exe` already embeds Node — a portable zip is not required for the app to start, and Node does not need to be on the machine-wide Windows PATH. Interactive Windows tabs are Git Bash only (no PowerShell / Command Prompt picker). `cmd.exe` remains only as the ConPTY wrapper for `.cmd` agent shims.
 
 Do **not** assign Git Bash’s Unix PATH (`/c/Users/...:/usr/bin:...`) to `process.env.PATH`. node-pty ConPTY resolves relative `cmd.exe` against that process PATH; a Unix value yields `Error: File not found:` with an empty path and a blank Pi tab. Convert MSYS PATH to `C:\...;...` for the **child** env only.
 

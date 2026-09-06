@@ -12,7 +12,7 @@ Do not try to become VS Code or Cursor. If a feature belongs in Pi, put it in Pi
 
 - **Host**, do not replace, the agent. Pi remains a CLI TUI in a tab.
 - **No VMs.** Local disk + existing SSH to Linux boxes is enough.
-- **Git Bash** is the only first-class Windows shell. No PowerShell. `cmd.exe` is a last-resort fallback, not a product surface.
+- **Git Bash** is the only Windows shell for interactive tabs. No PowerShell. No Command Prompt. (`cmd.exe` may still wrap `pi.cmd` for ConPTY; that is not a product terminal.)
 - **Environments are spawn-time PATH/env**, not a conda GUI and not a Node version manager UI. Settings **Node directory** is a folder prepend, not a requirement for `DevTool.exe` to launch.
 - **Pi owns inference.** Models, API, and base URL stay in Pi’s config. Do not add those fields to DevTool.
 - **LSP is optional sugar** (hover, go-to, complete) for a small set: Python and Markdown. Diagnostics can stay in Pi.
@@ -33,7 +33,7 @@ Already useful, keep it:
 Known gaps this fork must treat as work, not surprises:
 
 - Windows packaging is a portable folder (`npm run build:win` → `dist/win-unpacked`), not a Setup.exe. `electron-winstaller` stays unapproved until an installer is required. From-source `npm install` on Windows still needs admin + VS Build Tools + Spectre libs (see README).
-- Local Windows terminals default to Git Bash (`Git\bin\bash.exe --login -i`, auto-detect; Settings can pick PowerShell/cmd or a `bash.exe` path). Login-shell env **is** captured in `shell-env.ts`; do not copy that Unix PATH onto `process.env.PATH` (ConPTY `cmd.exe` lookup breaks — see AGENTS.md).
+- Local Windows terminals are Git Bash (`Git\bin\bash.exe --login -i`, auto-detect; Settings can set a `bash.exe` path). PowerShell and Command Prompt are not product surfaces. Login-shell env **is** captured in `shell-env.ts`; do not copy that Unix PATH onto `process.env.PATH` (ConPTY `cmd.exe` lookup breaks — see AGENTS.md).
 - POSIX assumptions: worktree paths, hook inject (`curl` + `python3`), remote Pi extension under `/tmp/...`.
 - README still mentions OpenCode; code has Pi, not OpenCode.
 
@@ -48,7 +48,7 @@ Known gaps this fork must treat as work, not surprises:
 Work items:
 
 1. **Default shell on Windows** — done.  
-   Resolve `Git\bin\bash.exe` (Program Files, user install, `PATH`; prefer `Git\bin` over `usr\bin`). Spawn with `--login -i`. Do not use inherited `SHELL`. Settings: Git Bash / PowerShell / Command Prompt; empty `defaultShell` auto-detects Git Bash. Override path is optional. New tabs only.
+   Resolve `Git\bin\bash.exe` (Program Files, user install, `PATH`; prefer `Git\bin` over `usr\bin`). Spawn with `--login -i`. Do not use inherited `SHELL`. Empty `defaultShell` auto-detects Git Bash. Override path is optional. New tabs only. PowerShell / Command Prompt are not Settings options.
 
 2. **Spawn environment**  
    Replace the “skip win32” shell-env path. Build env explicitly:
@@ -60,7 +60,7 @@ Work items:
    `@electron/rebuild` compiles ConPTY from source. That needs admin + VS 2022 Build Tools + **Spectre-mitigated libs** (`MSB8040` otherwise). Documented in README. Do not disable Spectre. Do not chase `chrome-sandbox` setuid (Linux-only). Locked-down PCs skip compile: consume `npm run build:win` output.
 
 4. **Path and quoting**  
-   Audit cwd, worktrees, file-browser reads, git IPC for `\` vs `/`. Git Bash wants Unix-style paths for `cwd` where possible (`/c/Users/...`).
+   File-tree relatives and git porcelain use `/`. Worktree + nested project joins use win32 locally. `node-pty` `cwd` stays a Windows absolute path (ConPTY); Git Bash shows `/f/...` itself. Do not feed `/c/Users/...` to CreateProcess.
 
 5. **Hooks on Windows**  
    Claude inject uses `curl`. Git Bash usually has it; fail clearly if not. Pi extension is local `-e` (no `/tmp` required for local). SSH remotes can wait until after Phase 0.
