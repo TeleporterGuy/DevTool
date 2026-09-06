@@ -20,6 +20,36 @@ Do not try to become VS Code or Cursor. If a feature belongs in Pi, put it in Pi
 
 ---
 
+## Versioning (`0.x.y`)
+
+Stay on **0.x** until the app is something you would tell a friend to unzip. **1.0.0** is that call, not “Phase 5 finished.”
+
+`package.json` is **0.1.0** today (Phase 0 in progress). Shape:
+
+| Part | Meaning |
+| --- | --- |
+| `0` | Pre-1.0. Breaking changes are allowed. |
+| `x` (minor) | Bump when a **numbered phase is done**. |
+| `y` (patch) | Bump for a **mid-phase build** you would actually copy (`dist/win-unpacked`, a git tag). Not every PR. |
+
+So: finish Phase 0 → **0.2.0** (plus LICENSE). Work inside a phase is `0.x.y`; shipping the phase is the next `0.(x+1).0`.
+
+| State | Version |
+| --- | --- |
+| Now / Phase 0 in progress | `0.1.y` |
+| Phase 0 done | `0.2.0` |
+| Phase 1 in progress / done | `0.2.y` → `0.3.0` |
+| Phase 2 done | `0.4.0` |
+| Phase 3 done | `0.5.0` |
+| Phase 4 done | `0.6.0` |
+| Phase 5 slices | keep bumping `0.6.y` / `0.7.0` as you tag them |
+
+Phase 0.5 does not get a version. Ideas in the parking lot do not get a version until they are pulled into a phase.
+
+Do not bump `package.json` in this file’s closeout list until the phase is actually verified on Windows.
+
+---
+
 ## Current upstream (what you inherit)
 
 Already useful, keep it:
@@ -70,6 +100,11 @@ Work items:
 
 **Verify:** `npm run dev` on Windows → Git Bash tab → `node -v` from the zip → `pi` TUI draws and uses the same models/setup as a normal Git Bash `pi` → inbox status on `agent_start` / `agent_end`.
 
+**Closeout (when Phase 0 is actually done):**
+
+- Bump `package.json` version from `0.1.0` to **`0.2.0`**.
+- Add a `LICENSE` file and set `package.json` `license` to match. Recommendation: **MIT**. Upstream never shipped a license file; join3r said this fork may be modified freely. MIT is the usual match for that intent (permissive, GitHub/npm-friendly, same family as most Electron deps). `package.json` currently says `ISC` only because that is npm’s default — do not leave it as a silent mismatch. Name both join3r (original) and this fork’s copyright in the MIT header. Skip GPL (would fight the stack) and Apache-2.0 unless you later want an explicit patent grant.
+
 **Effort:** about 2–4 focused weeks. Do not start Phase 2+ until this is true on Windows, not only on macOS/Linux.
 
 ---
@@ -94,7 +129,7 @@ Upstream tree can list and open files. Extend it; do not replace it.
 
 **Outcome:** create / rename / delete files and folders, sensible ignore, quick filter. Optional: reveal in Git Bash.
 
-Stay out of: full project search, git graph, VS Code-style explorer features.
+Stay out of: full project search, git graph (see Ideas), VS Code-style explorer features.
 
 **Effort:** 1–2 weeks.
 
@@ -149,6 +184,23 @@ Explicit non-goals unless the product bet changes: cloud VMs, embedding Pi’s U
 
 ---
 
+## Ideas (not sequenced)
+
+Parking lot. Do not start these instead of the numbered phases. Several items already have a home:
+
+| Idea | Where it lives |
+| --- | --- |
+| Conda env on spawn | Phase 2 |
+| JupyterLab in a browser tab | Phase 3 |
+| Language servers (Python, Markdown) | Phase 4 |
+| Native notebook cells + kernel | Phase 5 |
+
+**Git tree.** A branch/commit graph in the UI (log, parents, maybe checkout). Useful for “where am I” without leaving DevTool. Phase 1 explicitly stays out of a git graph so the file explorer does not grow into an IDE. If it happens, it is Phase 5-or-later: read-only first, no rebase UI.
+
+**Generate commit message with a specified agent.** Pre-fill the existing git commit box from Pi (or Claude/Codex) given the staged diff. Low confidence this needs a DevTool feature: you can already ask Pi in a tab to write the message and paste it. Only worth it if the commit UI is used a lot and the round-trip is annoying. Prefer “use the project’s default agent” over a per-commit picker.
+
+---
+
 ## Suggested order of PRs / commits on this fork
 
 Keep upstream `master` as a remote (`upstream`) and rebase or merge periodically. Land work in this order so each PR is demoable:
@@ -190,14 +242,14 @@ Work machine constraints to re-test every phase: Git Bash, portable Node zip, Pi
 
 ## Effort snapshot (solo, evenings, one Windows box)
 
-| Phase | What “done” means | Rough time |
-| --- | --- | --- |
-| 0 | Git Bash + Pi in DevTool on Windows | 1–2 months calendar / 2–4 weeks focused |
-| 0.5 | No DevTool inference UI (Pi keeps its settings) | n/a |
-| 1 | File tree CRUD | 1–2 weeks |
-| 2 | Conda picker on spawn | 1–2 weeks |
-| 3 | JupyterLab in a browser tab | days |
-| 4 | Usable Python and Markdown LSPs | 1–2 months |
-| 5 | Native notebooks / extra LSPs | open-ended |
+| Phase | Ships as | What “done” means | Rough time |
+| --- | --- | --- | --- |
+| 0 | `0.2.0` | Git Bash + Pi in DevTool on Windows | 1–2 months calendar / 2–4 weeks focused |
+| 0.5 | (no bump) | No DevTool inference UI (Pi keeps its settings) | n/a |
+| 1 | `0.3.0` | File tree CRUD | 1–2 weeks |
+| 2 | `0.4.0` | Conda picker on spawn | 1–2 weeks |
+| 3 | `0.5.0` | JupyterLab in a browser tab | days |
+| 4 | `0.6.0` | Usable Python and Markdown LSPs | 1–2 months |
+| 5 | `0.7.0`+ | Native notebooks / extra LSPs | open-ended |
 
 A year of evenings can yield a personal orchestrator. It will not become Cursor. That is success.
