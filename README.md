@@ -4,7 +4,7 @@ A desktop application for managing development workspaces. Organize projects, ta
 
 Built with Electron, React, and TypeScript.
 
-**This repository** is a fork of [join3r/claude-project](https://github.com/join3r/claude-project). join3r has said it may be forked and modified freely. All work stays on **this** repo ([TeleporterGuy/DevTool](https://github.com/TeleporterGuy/DevTool)); do not open PRs against upstream. Direction: Pi as the primary agent, primarily on Windows (Git Bash, portable Node, conda, Jupyter, Python and Markdown language servers). How to progress is in [ROADMAP.md](./ROADMAP.md). Upstream README below is unchanged except this note; the Features list still describes upstream (OpenCode in that list is stale — the code has Pi).
+**This repository** is a fork of [join3r/claude-project](https://github.com/join3r/claude-project). join3r has said it may be forked and modified freely. All work stays on **this** repo ([TeleporterGuy/DevTool](https://github.com/TeleporterGuy/DevTool)); do not open PRs against upstream. Direction: Pi as the primary agent, primarily on Windows (Git Bash, portable Node, conda, Jupyter, Python and Markdown language servers). How to progress is in [ROADMAP.md](./ROADMAP.md).
 
 ## Features
 
@@ -22,7 +22,7 @@ Built with Electron, React, and TypeScript.
 
 **Diff Viewer** -- Git diff visualization with side-by-side rendering and whitespace options.
 
-**AI Tool Integration** -- Dedicated tabs for Claude Code, Codex, and OpenCode. Hook server enables bidirectional communication with AI tools running in terminals.
+**AI Tool Integration** -- Dedicated tabs for Pi (primary), Claude Code, and Codex. Hook server enables bidirectional communication with AI tools running in terminals.
 
 **Remote SSH Projects** -- Connect to remote machines via SSH with port forwarding, SOCKS proxy tunneling, key authentication, health checks, and auto-reconnection.
 
@@ -98,13 +98,13 @@ On the build machine (Windows x64, after a successful `npm install` as above):
 npm run build:win
 ```
 
-That writes a portable directory (typically `dist/win-unpacked`). Zip that folder and give it to the locked-down PC. Run `DevTool.exe` from inside it. Keep a portable Node zip next to it if you want `node` on PATH for terminals later (see [ROADMAP.md](./ROADMAP.md) Phase 0).
+That writes a portable directory (typically `dist/win-unpacked`). Zip that folder and give it to the locked-down PC. Run `DevTool.exe` from inside it. Keep a portable Node zip next to it if you want `node` on PATH for terminals later (Settings → Node directory).
 
 Limits of this path:
 
 - It is **run-only**. You cannot `npm run dev` or change the Electron native addon without a VS build machine.
 - Architecture must match (x64 build for x64 Windows).
-- This is a folder, not a Setup.exe. `electron-winstaller` stays unapproved until an installer is actually required.
+- This is a folder, not a Setup.exe. `electron-winstaller` stays unapproved until an installer is actually required. The portable `DevTool.exe` is unsigned (`signAndEditExecutable` is off so the build does not need Windows code-sign tools).
 
 ### Development
 
@@ -137,3 +137,7 @@ Builds and installs the app system-wide. Supports macOS (arm64) and Linux (x86_6
 npm test               # Run tests
 npm run test:watch     # Run tests in watch mode
 ```
+
+## License
+
+[MIT](./LICENSE). Original work by [join3r](https://github.com/join3r); this fork by [TeleporterGuy](https://github.com/TeleporterGuy).

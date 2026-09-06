@@ -24,7 +24,7 @@ Do not try to become VS Code or Cursor. If a feature belongs in Pi, put it in Pi
 
 Stay on **0.x** until the app is something you would tell a friend to unzip. **1.0.0** is that call, not “Phase 5 finished.”
 
-`package.json` is **0.1.0** today (Phase 0 in progress). Shape:
+`package.json` is **0.2.0** (Phase 0 done). Shape:
 
 | Part | Meaning |
 | --- | --- |
@@ -32,11 +32,10 @@ Stay on **0.x** until the app is something you would tell a friend to unzip. **1
 | `x` (minor) | Bump when a **numbered phase is done**. |
 | `y` (patch) | Bump for a **mid-phase build** you would actually copy (`dist/win-unpacked`, a git tag). Not every PR. |
 
-So: finish Phase 0 → **0.2.0** (plus LICENSE). Work inside a phase is `0.x.y`; shipping the phase is the next `0.(x+1).0`.
+Work inside a phase is `0.x.y`; shipping the phase is the next `0.(x+1).0`.
 
 | State | Version |
 | --- | --- |
-| Now / Phase 0 in progress | `0.1.y` |
 | Phase 0 done | `0.2.0` |
 | Phase 1 in progress / done | `0.2.y` → `0.3.0` |
 | Phase 2 done | `0.4.0` |
@@ -45,8 +44,6 @@ So: finish Phase 0 → **0.2.0** (plus LICENSE). Work inside a phase is `0.x.y`;
 | Phase 5 slices | keep bumping `0.6.y` / `0.7.0` as you tag them |
 
 Phase 0.5 does not get a version. Ideas in the parking lot do not get a version until they are pulled into a phase.
-
-Do not bump `package.json` in this file’s closeout list until the phase is actually verified on Windows.
 
 ---
 
@@ -65,13 +62,12 @@ Known gaps this fork must treat as work, not surprises:
 - Windows packaging is a portable folder (`npm run build:win` → `dist/win-unpacked`), not a Setup.exe. `electron-winstaller` stays unapproved until an installer is required. From-source `npm install` on Windows still needs admin + VS Build Tools + Spectre libs (see README).
 - Local Windows terminals are Git Bash (`Git\bin\bash.exe --login -i`, auto-detect; Settings can set a `bash.exe` path). PowerShell and Command Prompt are not product surfaces. Login-shell env **is** captured in `shell-env.ts`; do not copy that Unix PATH onto `process.env.PATH` (ConPTY `cmd.exe` lookup breaks — see AGENTS.md).
 - POSIX assumptions: worktree paths, hook inject (`curl` + `python3`), remote Pi extension under `/tmp/...`.
-- README still mentions OpenCode; code has Pi, not OpenCode.
 
 **Go/no-go:** if Git Bash + ConPTY + Pi TUI is unusable after Phase 0, stop. Nothing else in this plan can paper over a broken terminal.
 
 ---
 
-## Phase 0 — Windows + Git Bash + PATH (make-or-break)
+## Phase 0 — Windows + Git Bash + PATH (make-or-break) — done (`0.2.0`)
 
 **Outcome:** unzip-or-dev-run on Windows, open a task, get a Git Bash tab, run `pi` with the user’s existing Pi config, status dot still works.
 
@@ -80,32 +76,29 @@ Work items:
 1. **Default shell on Windows** — done.  
    Resolve `Git\bin\bash.exe` (Program Files, user install, `PATH`; prefer `Git\bin` over `usr\bin`). Spawn with `--login -i`. Do not use inherited `SHELL`. Empty `defaultShell` auto-detects Git Bash. Override path is optional. New tabs only. PowerShell / Command Prompt are not Settings options.
 
-2. **Spawn environment**  
+2. **Spawn environment** — done for Phase 0.  
    Replace the “skip win32” shell-env path. Build env explicitly:
    - prepend portable Node directory
-   - prepend selected conda env (`Scripts` / `Library/bin` as needed)
+   - conda env prepend is **Phase 2**, not required for 0.2.0
    Apply the same env to terminal tabs **and** Pi/Claude/Codex tabs. Do not add inference URL/key vars here — Pi already has its own settings.
 
-3. **node-pty**  
+3. **node-pty** — done.  
    `@electron/rebuild` compiles ConPTY from source. That needs admin + VS 2022 Build Tools + **Spectre-mitigated libs** (`MSB8040` otherwise). Documented in README. Do not disable Spectre. Do not chase `chrome-sandbox` setuid (Linux-only). Locked-down PCs skip compile: consume `npm run build:win` output.
 
-4. **Path and quoting**  
+4. **Path and quoting** — done.  
    File-tree relatives and git porcelain use `/`. Worktree + nested project joins use win32 locally. `node-pty` `cwd` stays a Windows absolute path (ConPTY); Git Bash shows `/f/...` itself. Do not feed `/c/Users/...` to CreateProcess.
 
-5. **Hooks on Windows**  
+5. **Hooks on Windows** — done for local.  
    Claude inject uses `curl`. Git Bash usually has it; fail clearly if not. Pi extension is local `-e` (no `/tmp` required for local). SSH remotes can wait until after Phase 0.
 
-6. **Packaging**  
-   `npm run build:win` runs `electron-builder --win --dir` (portable folder). Approve `electron-winstaller` only if an installer is required. Prefer “folder next to a Node zip” for locked-down PCs. This is **run-only**; git checkout + `npm run dev` still needs the VS machine.
+6. **Packaging** — done.  
+   `npm run build:win` runs `electron-builder --win --dir` (portable folder). The exe is left unsigned so the build does not need winCodeSign / symlink privileges. Approve `electron-winstaller` only if an installer is required. Prefer “folder next to a Node zip” for locked-down PCs. This is **run-only**; git checkout + `npm run dev` still needs the VS machine.
 
-**Verify:** `npm run dev` on Windows → Git Bash tab → `node -v` from the zip → `pi` TUI draws and uses the same models/setup as a normal Git Bash `pi` → inbox status on `agent_start` / `agent_end`.
+**Verify:** done on Windows (`npm run dev` → Git Bash tab → portable Node → Pi TUI + inbox status).
 
-**Closeout (when Phase 0 is actually done):**
+**Closeout:** done. `package.json` is **0.2.0**. License is **MIT** (`LICENSE`; copyright join3r and TeleporterGuy).
 
-- Bump `package.json` version from `0.1.0` to **`0.2.0`**.
-- Add a `LICENSE` file and set `package.json` `license` to match. Recommendation: **MIT**. Upstream never shipped a license file; join3r said this fork may be modified freely. MIT is the usual match for that intent (permissive, GitHub/npm-friendly, same family as most Electron deps). `package.json` currently says `ISC` only because that is npm’s default — do not leave it as a silent mismatch. Name both join3r (original) and this fork’s copyright in the MIT header. Skip GPL (would fight the stack) and Apache-2.0 unless you later want an explicit patent grant.
-
-**Effort:** about 2–4 focused weeks. Do not start Phase 2+ until this is true on Windows, not only on macOS/Linux.
+**Effort:** about 2–4 focused weeks. Next is Phase 1 (file explorer). Conda is Phase 2.
 
 ---
 
@@ -206,8 +199,8 @@ Parking lot. Do not start these instead of the numbered phases. Several items al
 Keep upstream `master` as a remote (`upstream`) and rebase or merge periodically. Land work in this order so each PR is demoable:
 
 1. Windows shell resolution + Git Bash PTY + documented rebuild. **Done** (Git Bash default + Settings presets; portable Node PATH and rebuild docs landed earlier).
-2. Configurable spawn PATH (portable Node) + env passthrough.
-3. Win dir packaging notes / script.
+2. Configurable spawn PATH (portable Node) + env passthrough. **Done.**
+3. Win dir packaging notes / script. **Done.** (`npm run build:win` → `dist/win-unpacked`.)
 4. File explorer CRUD.
 5. Conda env picker on spawn.
 6. JupyterLab browser-tab launcher.
@@ -244,7 +237,7 @@ Work machine constraints to re-test every phase: Git Bash, portable Node zip, Pi
 
 | Phase | Ships as | What “done” means | Rough time |
 | --- | --- | --- | --- |
-| 0 | `0.2.0` | Git Bash + Pi in DevTool on Windows | 1–2 months calendar / 2–4 weeks focused |
+| 0 | `0.2.0` (shipped) | Git Bash + Pi in DevTool on Windows | 1–2 months calendar / 2–4 weeks focused |
 | 0.5 | (no bump) | No DevTool inference UI (Pi keeps its settings) | n/a |
 | 1 | `0.3.0` | File tree CRUD | 1–2 weeks |
 | 2 | `0.4.0` | Conda picker on spawn | 1–2 weeks |

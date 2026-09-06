@@ -1,6 +1,6 @@
 {
   "name": "devtool",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Development workspace manager",
   "main": "out/main/index.js",
   "private": true,
@@ -47,13 +47,14 @@
       "category": "Development"
     },
     "win": {
-      "target": "dir"
+      "target": "dir",
+      "signAndEditExecutable": false
     },
     "electronDist": "node_modules/electron/dist"
   },
   "keywords": [],
   "author": "",
-  "license": "ISC",
+  "license": "MIT",
   "type": "commonjs",
   "devDependencies": {
     "@tailwindcss/vite": "^4.2.4",
