@@ -35,6 +35,7 @@ interface Props {
   projectDir: string
   sshConfig?: SshConfig
   shellCommand?: ShellCommandConfig
+  cwd?: string
 }
 
 interface TerminalEntry {
@@ -133,7 +134,7 @@ function attachWebgl(tabId: string, term: Terminal): WebglAddon | null {
   }
 }
 
-export default function TerminalTab({ tabId, visible, projectId, taskId, pane, projectDir, sshConfig, shellCommand }: Props): React.ReactElement {
+export default function TerminalTab({ tabId, visible, projectId, taskId, pane, projectDir, sshConfig, shellCommand, cwd }: Props): React.ReactElement {
   const containerRef = useRef<HTMLDivElement>(null)
   const hostRef = useRef<HTMLDivElement>(null)
   const { addTab, config, effectiveTerminalTheme, terminalZoomDelta, markTaskInteracted, markTaskEvent } = useApp()
@@ -141,7 +142,7 @@ export default function TerminalTab({ tabId, visible, projectId, taskId, pane, p
   const spawnedRef = useRef(false)
   const focusClaimRef = useRef(false)
   const projectDirRef = useRef(projectDir)
-  projectDirRef.current = projectDir
+  projectDirRef.current = cwd || projectDir
   const [sshReady, setSshReady] = useState(!sshConfig)
   const prevSshReadyRef = useRef(sshReady)
   const [searchOpen, setSearchOpen] = useState(false)

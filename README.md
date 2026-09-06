@@ -28,7 +28,7 @@ Built with Electron, React, and TypeScript.
 
 **Git Worktree Management** -- Create and delete isolated git worktrees for branch work directly from the UI.
 
-**File Browser** -- Integrated file tree panel for browsing and opening files.
+**File Browser** -- Integrated file tree: open, create, rename, and delete files and folders. The Files tab has New file / New folder buttons, a quick filter, and per-project ignore patterns.
 
 **Git Status** -- Display current branch, changed files, and diffs.
 

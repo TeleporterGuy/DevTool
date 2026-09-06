@@ -102,15 +102,17 @@ Work items:
 
 ---
 
-## Phase 0.5 — Do not duplicate Pi’s settings in DevTool
+## Phase 0.5 — Do not duplicate Pi’s settings in DevTool — done (no version bump)
 
 **Outcome:** DevTool hosts Pi; inference (models, API, base URL) stays in Pi’s own config. A Pi tab should behave like `pi` already does in Git Bash.
 
 Work items:
 
-- Do **not** add inference URL/key fields to DevTool.
-- Per-project extra `pi` args already exist (`aiToolArgs`); keep that for CLI flags, not for wiring a proxy.
-- Keep using the existing Pi status extension; only thicken it if permission prompts are invisible in the inbox.
+- Do **not** add inference URL/key fields to DevTool. — done. Project settings only keep extra CLI flags (`aiToolArgs`).
+- Per-project extra `pi` args already exist (`aiToolArgs`); keep that for CLI flags, not for wiring a proxy. — done.
+- Keep using the existing Pi status extension; only thicken it if permission prompts are invisible in the inbox. — done (unchanged).
+
+**Closeout:** done. Guardrail held; nothing to ship. `package.json` stays **0.2.0**. Next is Phase 1 (file explorer).
 
 **Effort:** none as a feature. This phase is a guardrail so later work does not grow a second settings UI.
 
@@ -120,11 +122,30 @@ Work items:
 
 Upstream tree can list and open files. Extend it; do not replace it.
 
-**Outcome:** create / rename / delete files and folders, sensible ignore, quick filter. Optional: reveal in Git Bash.
+**Outcome:** create / rename / delete files and folders, per-project ignore + quick filter in the Files panel. Optional: reveal in Git Bash.
 
 Stay out of: full project search, git graph (see Ideas), VS Code-style explorer features.
 
-**Effort:** 1–2 weeks.
+Work items:
+
+1. **CRUD** — create, rename, and delete files and folders from the Files tree (local projects only). **Landed.**
+2. **Filter + ignore** — session filter box; ignore patterns edited in the Files panel and stored on the project (`fileTreeIgnore`). Not a `.gitignore` parser. **Landed.**
+3. **Reveal in Git Bash** — open a terminal tab whose cwd is that folder. **Landed.**
+
+**Effort:** 1–2 weeks. Mid-phase **0.2.1** is Phase 1.1. Ships as **0.3.0** when verified on Windows.
+
+---
+
+## Phase 1.1 — Files panel polish (mid-phase)
+
+Not a new numbered phase. Same explorer; small UX follow-ups before `0.3.0`.
+
+Work items:
+
+1. **New file / New folder toolbar** — icon buttons above the filter (VS Code-like; room to add more later). **Landed.**
+2. **Reconsider the ignore list** — keep the current per-project ignore UI for now. Decide later whether to drop it, keep defaults-only, or keep the editor. Sleep on it.
+
+`package.json` is **0.2.1** after this slice. **0.3.0** still waits on Windows verify of the full Phase 1 explorer.
 
 ---
 
@@ -201,7 +222,7 @@ Keep upstream `master` as a remote (`upstream`) and rebase or merge periodically
 1. Windows shell resolution + Git Bash PTY + documented rebuild. **Done** (Git Bash default + Settings presets; portable Node PATH and rebuild docs landed earlier).
 2. Configurable spawn PATH (portable Node) + env passthrough. **Done.**
 3. Win dir packaging notes / script. **Done.** (`npm run build:win` → `dist/win-unpacked`.)
-4. File explorer CRUD.
+4. File explorer CRUD. **Landed** (filter + per-project ignore in the Files panel; Reveal in Git Bash; 1.1 toolbar). Verify on Windows before bumping to `0.3.0`.
 5. Conda env picker on spawn.
 6. JupyterLab browser-tab launcher.
 7. Python and Markdown LSP spike, then harden.
@@ -238,8 +259,8 @@ Work machine constraints to re-test every phase: Git Bash, portable Node zip, Pi
 | Phase | Ships as | What “done” means | Rough time |
 | --- | --- | --- | --- |
 | 0 | `0.2.0` (shipped) | Git Bash + Pi in DevTool on Windows | 1–2 months calendar / 2–4 weeks focused |
-| 0.5 | (no bump) | No DevTool inference UI (Pi keeps its settings) | n/a |
-| 1 | `0.3.0` | File tree CRUD | 1–2 weeks |
+| 0.5 | (no bump, done) | No DevTool inference UI (Pi keeps its settings) | n/a |
+| 1 | `0.2.1` → `0.3.0` | File tree CRUD (`0.2.1` = 1.1 polish) | 1–2 weeks |
 | 2 | `0.4.0` | Conda picker on spawn | 1–2 weeks |
 | 3 | `0.5.0` | JupyterLab in a browser tab | days |
 | 4 | `0.6.0` | Usable Python and Markdown LSPs | 1–2 months |

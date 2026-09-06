@@ -94,6 +94,7 @@ export default function Pane({
                 projectDir={projectDir}
                 sshConfig={sshConfig}
                 shellCommand={shellCommand}
+                cwd={tab.cwd}
               />
             )
           }

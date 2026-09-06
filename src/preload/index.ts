@@ -255,12 +255,24 @@ const api = {
   },
 
   // File browser
-  fbReadDirectory: (projectCwd: string, relativeDirPath: string): Promise<DirectoryEntry[]> =>
-    ipcRenderer.invoke('fb-read-directory', projectCwd, relativeDirPath),
+  fbReadDirectory: (
+    projectCwd: string,
+    relativeDirPath: string,
+    options?: { ignore?: readonly string[]; includeIgnored?: boolean }
+  ): Promise<DirectoryEntry[]> =>
+    ipcRenderer.invoke('fb-read-directory', projectCwd, relativeDirPath, options),
   fbReadFile: (projectCwd: string, relativeFilePath: string): Promise<string> =>
     ipcRenderer.invoke('fb-read-file', projectCwd, relativeFilePath),
   fbWriteFile: (projectCwd: string, relativeFilePath: string, content: string): Promise<void> =>
     ipcRenderer.invoke('fb-write-file', projectCwd, relativeFilePath, content),
+  fbCreateFile: (projectCwd: string, parentRelativePath: string, name: string): Promise<DirectoryEntry> =>
+    ipcRenderer.invoke('fb-create-file', projectCwd, parentRelativePath, name),
+  fbCreateDirectory: (projectCwd: string, parentRelativePath: string, name: string): Promise<DirectoryEntry> =>
+    ipcRenderer.invoke('fb-create-directory', projectCwd, parentRelativePath, name),
+  fbRename: (projectCwd: string, fromRelativePath: string, newName: string): Promise<DirectoryEntry> =>
+    ipcRenderer.invoke('fb-rename', projectCwd, fromRelativePath, newName),
+  fbDelete: (projectCwd: string, relativePath: string): Promise<void> =>
+    ipcRenderer.invoke('fb-delete', projectCwd, relativePath),
   fbGitStatus: (projectCwd: string): Promise<GitStatusResult> =>
     ipcRenderer.invoke('fb-git-status', projectCwd),
   gitProjectPosture: (projectCwd: string): Promise<GitPostureResult> =>

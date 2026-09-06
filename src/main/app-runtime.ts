@@ -25,7 +25,13 @@ import { agentCommandOverride, conptySpawnArgv, isAiAgentCommand, resolveAgentCo
 import { isLocalInteractiveTerminal, resolveLocalTerminalSpawn } from './resolve-local-terminal'
 import { findGitBashExe, setPortableNodeDir } from './shell-env'
 import { resolveSafeProjectPath } from './project-fs-path'
-import { posixRelativeJoin } from '../shared/workspace-path'
+import {
+  createProjectDirectory,
+  createProjectFile,
+  deleteProjectEntry,
+  listProjectDirectory,
+  renameProjectEntry
+} from './file-browser-fs'
 import {
   piExtensionLocalPath,
   piExtensionRemotePath,
@@ -947,21 +953,17 @@ export class AppRuntime {
       return resolveSafeProjectPath(projectCwd, relativePath)
     }
 
-    ipcMain.handle('fb-read-directory', async (_event, projectCwd: string, relativeDirPath: string): Promise<DirectoryEntry[]> => {
-      const fullPath = validatePath(projectCwd, relativeDirPath)
-      const entries = await fsPromises.readdir(fullPath, { withFileTypes: true })
-      return entries
-        .filter(entry => !entry.name.startsWith('.'))
-        .map(entry => ({
-          name: entry.name,
-          type: entry.isDirectory() ? 'directory' as const : 'file' as const,
-          relativePath: posixRelativeJoin(relativeDirPath, entry.name)
-        }))
-        .sort((a, b) => {
-          if (a.type !== b.type) return a.type === 'directory' ? -1 : 1
-          return a.name.localeCompare(b.name)
-        })
-    })
+    ipcMain.handle(
+      'fb-read-directory',
+      async (
+        _event,
+        projectCwd: string,
+        relativeDirPath: string,
+    options?: { ignore?: readonly string[]; includeIgnored?: boolean }
+      ): Promise<DirectoryEntry[]> => {
+        return listProjectDirectory(projectCwd, relativeDirPath, options)
+      }
+    )
 
     ipcMain.handle('fb-read-file', async (_event, projectCwd: string, relativeFilePath: string): Promise<string> => {
       const fullPath = validatePath(projectCwd, relativeFilePath)
@@ -972,6 +974,27 @@ export class AppRuntime {
       const fullPath = validatePath(projectCwd, relativeFilePath)
       await fsPromises.writeFile(fullPath, content, 'utf-8')
     })
+
+    ipcMain.handle(
+      'fb-create-file',
+      (_event, projectCwd: string, parentRelativePath: string, name: string): Promise<DirectoryEntry> =>
+        createProjectFile(projectCwd, parentRelativePath, name)
+    )
+    ipcMain.handle(
+      'fb-create-directory',
+      (_event, projectCwd: string, parentRelativePath: string, name: string): Promise<DirectoryEntry> =>
+        createProjectDirectory(projectCwd, parentRelativePath, name)
+    )
+    ipcMain.handle(
+      'fb-rename',
+      (_event, projectCwd: string, fromRelativePath: string, newName: string): Promise<DirectoryEntry> =>
+        renameProjectEntry(projectCwd, fromRelativePath, newName)
+    )
+    ipcMain.handle(
+      'fb-delete',
+      (_event, projectCwd: string, relativePath: string): Promise<void> =>
+        deleteProjectEntry(projectCwd, relativePath)
+    )
 
     ipcMain.handle('git-project-posture', async (_event, projectCwd: string): Promise<GitPostureResult> => {
       const resolvedCwd = path.resolve(projectCwd)

@@ -2,15 +2,21 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import React from 'react'
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
-import FileTree from '../src/renderer/components/FileTree'
+import FileTree, { type FileTreeHandle } from '../src/renderer/components/FileTree'
 import { FILE_BROWSER_REFRESH_MS } from '../src/renderer/hooks/fileBrowserRefresh'
 
 void React
 
 beforeEach(() => {
   ;(window as any).api = {
-    fbReadDirectory: vi.fn()
+    fbReadDirectory: vi.fn(),
+    fbCreateFile: vi.fn(),
+    fbCreateDirectory: vi.fn(),
+    fbRename: vi.fn(),
+    fbDelete: vi.fn()
   }
+  vi.spyOn(window, 'confirm').mockReturnValue(true)
+  vi.spyOn(window, 'alert').mockImplementation(() => {})
 })
 
 afterEach(() => {
@@ -196,5 +202,152 @@ describe('FileTree', () => {
 
     expect(screen.queryByText('Project directory is unavailable')).toBeNull()
     expect(screen.getByText('src')).toBeTruthy()
+  })
+
+  it('filters loaded names without calling search-in-files', async () => {
+    window.api.fbReadDirectory = vi.fn(() =>
+      Promise.resolve([
+        { name: 'hello.py', type: 'file' as const, relativePath: 'hello.py' },
+        { name: 'readme.md', type: 'file' as const, relativePath: 'readme.md' }
+      ])
+    )
+
+    render(
+      <FileTree
+        projectDir="/project"
+        gitStatus={null}
+        onFileClick={vi.fn()}
+        filterQuery="hello"
+      />
+    )
+    expect(await screen.findByText('hello.py')).toBeTruthy()
+    expect(screen.queryByText('readme.md')).toBeNull()
+  })
+
+  it('creates a file from the context menu', async () => {
+    const listing: Record<string, any[]> = { '': [{ name: 'a.ts', type: 'file', relativePath: 'a.ts' }] }
+    window.api.fbReadDirectory = vi.fn((_dir: string, rel: string) =>
+      Promise.resolve(listing[rel] ?? [])
+    )
+    window.api.fbCreateFile = vi.fn(async () => {
+      listing[''] = [
+        { name: 'a.ts', type: 'file', relativePath: 'a.ts' },
+        { name: 'b.ts', type: 'file', relativePath: 'b.ts' }
+      ]
+      return { name: 'b.ts', type: 'file' as const, relativePath: 'b.ts' }
+    })
+
+    render(<FileTree projectDir="/project" gitStatus={null} onFileClick={vi.fn()} />)
+    fireEvent.contextMenu(await screen.findByText('a.ts'))
+    fireEvent.click(screen.getByText('New file'))
+    const input = screen.getByPlaceholderText('file name') as HTMLInputElement
+    fireEvent.change(input, { target: { value: 'b.ts' } })
+    fireEvent.keyDown(input, { key: 'Enter' })
+
+    await waitFor(() => {
+      expect(window.api.fbCreateFile).toHaveBeenCalledWith('/project', '', 'b.ts')
+    })
+  })
+
+  it('renames and deletes with confirm', async () => {
+    let listing = [{ name: 'a.ts', type: 'file' as const, relativePath: 'a.ts' }]
+    window.api.fbReadDirectory = vi.fn(() => Promise.resolve(listing))
+    window.api.fbRename = vi.fn(async () => {
+      listing = [{ name: 'b.ts', type: 'file' as const, relativePath: 'b.ts' }]
+      return { name: 'b.ts', type: 'file' as const, relativePath: 'b.ts' }
+    })
+    window.api.fbDelete = vi.fn(async () => {
+      listing = []
+    })
+
+    render(<FileTree projectDir="/project" gitStatus={null} onFileClick={vi.fn()} />)
+    fireEvent.contextMenu(await screen.findByText('a.ts'))
+    fireEvent.click(screen.getByText('Rename'))
+    const input = screen.getByPlaceholderText('file name') as HTMLInputElement
+    fireEvent.change(input, { target: { value: 'b.ts' } })
+    fireEvent.keyDown(input, { key: 'Enter' })
+    await waitFor(() => {
+      expect(window.api.fbRename).toHaveBeenCalledWith('/project', 'a.ts', 'b.ts')
+    })
+
+    fireEvent.contextMenu(await screen.findByText('b.ts'))
+    fireEvent.click(screen.getByText('Delete'))
+    await waitFor(() => {
+      expect(window.api.fbDelete).toHaveBeenCalledWith('/project', 'b.ts')
+    })
+    expect(window.confirm).toHaveBeenCalled()
+  })
+
+  it('offers Reveal in Git Bash when a handler is provided', async () => {
+    window.api.fbReadDirectory = vi.fn(() =>
+      Promise.resolve([{ name: 'src', type: 'directory' as const, relativePath: 'src' }])
+    )
+    const onReveal = vi.fn()
+    render(
+      <FileTree
+        projectDir="/project"
+        gitStatus={null}
+        onFileClick={vi.fn()}
+        onRevealInTerminal={onReveal}
+      />
+    )
+    fireEvent.contextMenu(await screen.findByText('src'))
+    fireEvent.click(screen.getByText('Reveal in Git Bash'))
+    expect(onReveal).toHaveBeenCalledWith('src')
+  })
+
+  it('creates a file from startCreate on the tree handle (toolbar)', async () => {
+    const listing: Record<string, any[]> = { '': [{ name: 'a.ts', type: 'file', relativePath: 'a.ts' }] }
+    window.api.fbReadDirectory = vi.fn((_dir: string, rel: string) =>
+      Promise.resolve(listing[rel] ?? [])
+    )
+    window.api.fbCreateFile = vi.fn(async () => {
+      listing[''] = [
+        { name: 'a.ts', type: 'file', relativePath: 'a.ts' },
+        { name: 'b.ts', type: 'file', relativePath: 'b.ts' }
+      ]
+      return { name: 'b.ts', type: 'file' as const, relativePath: 'b.ts' }
+    })
+
+    const treeRef = React.createRef<FileTreeHandle>()
+    render(
+      <FileTree
+        ref={treeRef}
+        projectDir="/project"
+        gitStatus={null}
+        onFileClick={vi.fn()}
+      />
+    )
+    expect(await screen.findByText('a.ts')).toBeTruthy()
+    act(() => {
+      treeRef.current?.startCreate('file')
+    })
+    const input = screen.getByPlaceholderText('file name') as HTMLInputElement
+    fireEvent.change(input, { target: { value: 'b.ts' } })
+    fireEvent.keyDown(input, { key: 'Enter' })
+    await waitFor(() => {
+      expect(window.api.fbCreateFile).toHaveBeenCalledWith('/project', '', 'b.ts')
+    })
+  })
+
+  it('passes includeIgnored through to directory reads', async () => {
+    window.api.fbReadDirectory = vi.fn(() =>
+      Promise.resolve([{ name: '__pycache__', type: 'directory' as const, relativePath: '__pycache__' }])
+    )
+    render(
+      <FileTree
+        projectDir="/project"
+        gitStatus={null}
+        onFileClick={vi.fn()}
+        ignorePatterns={['__pycache__']}
+        includeIgnored
+      />
+    )
+    expect(await screen.findByText('__pycache__')).toBeTruthy()
+    expect(window.api.fbReadDirectory).toHaveBeenCalledWith(
+      '/project',
+      '',
+      expect.objectContaining({ ignore: ['__pycache__'], includeIgnored: true })
+    )
   })
 })

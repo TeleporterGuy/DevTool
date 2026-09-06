@@ -1,15 +1,34 @@
-import React, { useState, useEffect, useCallback } from 'react'
+import React, { useState, useEffect, useCallback, useRef } from 'react'
 import type { DirectoryEntry, GitStatusResult, GitFileStatus } from '../../shared/types'
 import { ChevronRight, Folder, FileText } from 'lucide-react'
 import { FILE_BROWSER_REFRESH_MS } from '../hooks/fileBrowserRefresh'
+import { posixRelativeJoin } from '../../shared/workspace-path'
 
 interface Props {
   projectDir: string
   gitStatus: GitStatusResult | null
   onFileClick: (filePath: string) => void
+  ignorePatterns?: readonly string[]
+  includeIgnored?: boolean
+  filterQuery?: string
+  onRevealInTerminal?: (relativeDir: string) => void
 }
 
 type StatusColor = 'var(--color-danger)' | 'var(--color-warn)' | 'var(--color-success)' | undefined
+
+type Draft =
+  | { mode: 'create'; parent: string; kind: 'file' | 'directory' }
+  | { mode: 'rename'; relativePath: string; name: string; kind: 'file' | 'directory' }
+
+type ContextMenuState = {
+  x: number
+  y: number
+  relativePath: string
+  isDirectory: boolean
+}
+
+const menuItemCls = 'block w-full rounded-md px-2.5 py-1 bg-transparent border-0 text-text text-sm text-left cursor-pointer hover:bg-sel'
+const menuCls = 'bg-surface border-[0.5px] border-border rounded-lg p-1 shadow-pop min-w-[160px]'
 
 function statusToColor(status: GitFileStatus): StatusColor {
   switch (status) {
@@ -81,36 +100,64 @@ function sameListing(a: DirectoryEntry[], b: DirectoryEntry[]): boolean {
   return true
 }
 
+function entryIsVisible(
+  entry: DirectoryEntry,
+  filterQuery: string,
+  childrenCache: Record<string, DirectoryEntry[]>
+): boolean {
+  const q = filterQuery.trim().toLowerCase()
+  if (!q) return true
+  if (entry.name.toLowerCase().includes(q)) return true
+  if (entry.type !== 'directory') return false
+  const children = childrenCache[entry.relativePath]
+  if (!children) return false
+  return children.some((child) => entryIsVisible(child, filterQuery, childrenCache))
+}
+
 interface TreeNodeProps {
   entry: DirectoryEntry
   level: number
-  projectDir: string
   expandedDirs: Set<string>
   childrenCache: Record<string, DirectoryEntry[]>
   loadingDirs: Set<string>
   directoryErrors: Record<string, string>
   gitMap: Map<string, GitFileStatus>
+  selectedPath: string | null
+  filterQuery: string
+  draft: Draft | null
   onToggleDir: (relativePath: string) => void
   onFileClick: (filePath: string) => void
+  onSelect: (relativePath: string) => void
+  onContextMenu: (event: React.MouseEvent, relativePath: string, isDirectory: boolean) => void
+  onSubmitDraft: (name: string) => void
+  onCancelDraft: () => void
 }
 
 function TreeNode({
   entry,
   level,
-  projectDir,
   expandedDirs,
   childrenCache,
   loadingDirs,
   directoryErrors,
   gitMap,
+  selectedPath,
+  filterQuery,
+  draft,
   onToggleDir,
   onFileClick,
+  onSelect,
+  onContextMenu,
+  onSubmitDraft,
+  onCancelDraft
 }: TreeNodeProps) {
   const isDirectory = entry.type === 'directory'
   const isExpanded = expandedDirs.has(entry.relativePath)
   const children = childrenCache[entry.relativePath]
   const isLoading = loadingDirs.has(entry.relativePath)
   const loadError = directoryErrors[entry.relativePath]
+  const renaming = draft?.mode === 'rename' && draft.relativePath === entry.relativePath
+  const creatingHere = draft?.mode === 'create' && draft.parent === entry.relativePath && isDirectory && isExpanded
 
   let color: string | undefined
   if (isDirectory) {
@@ -121,19 +168,25 @@ function TreeNode({
   }
 
   const handleClick = useCallback(() => {
+    onSelect(entry.relativePath)
     if (isDirectory) {
       onToggleDir(entry.relativePath)
       return
     }
     onFileClick(entry.relativePath)
-  }, [isDirectory, entry.relativePath, onToggleDir, onFileClick])
+  }, [isDirectory, entry.relativePath, onToggleDir, onFileClick, onSelect])
+
+  const visibleChildren = (children ?? []).filter((child) =>
+    entryIsVisible(child, filterQuery, childrenCache)
+  )
 
   return (
     <>
       <div
-        className="flex items-center px-2 py-0.5 cursor-pointer whitespace-nowrap select-none hover:bg-surface-3 transition-colors duration-(--motion-fast)"
+        className={`flex items-center px-2 py-0.5 cursor-pointer whitespace-nowrap select-none hover:bg-surface-3 transition-colors duration-(--motion-fast) ${selectedPath === entry.relativePath ? 'bg-sel' : ''}`}
         style={{ paddingLeft: 8 + level * 16, color: color || 'var(--color-text)' }}
         onClick={handleClick}
+        onContextMenu={(e) => onContextMenu(e, entry.relativePath, isDirectory)}
       >
         <span className="w-4 flex items-center justify-center shrink-0 text-text-muted">
           {isDirectory ? <ChevronRight size={12} className={`transition-transform duration-(--motion-fast) ${isExpanded ? 'rotate-90' : ''}`} /> : null}
@@ -142,7 +195,16 @@ function TreeNode({
           ? <Folder size={12} className="mr-1.5 text-text-muted shrink-0" />
           : <FileText size={12} className="mr-1.5 text-text-muted shrink-0" />
         }
-        <span className="overflow-hidden text-ellipsis" style={{ color: color }}>{entry.name}</span>
+        {renaming ? (
+          <DraftInput
+            initialValue={entry.name}
+            placeholder={isDirectory ? 'folder name' : 'file name'}
+            onSubmit={onSubmitDraft}
+            onCancel={onCancelDraft}
+          />
+        ) : (
+          <span className="overflow-hidden text-ellipsis" style={{ color: color }}>{entry.name}</span>
+        )}
       </div>
       {isDirectory && isExpanded && (
         <>
@@ -160,38 +222,143 @@ function TreeNode({
               Unable to read folder
             </div>
           )}
-          {children &&
-            children.map((child) => (
-              <TreeNode
-                key={child.relativePath}
-                entry={child}
-                level={level + 1}
-                projectDir={projectDir}
-                expandedDirs={expandedDirs}
-                childrenCache={childrenCache}
-                loadingDirs={loadingDirs}
-                directoryErrors={directoryErrors}
-                gitMap={gitMap}
-                onToggleDir={onToggleDir}
-                onFileClick={onFileClick}
-              />
-            ))}
+          {creatingHere && (
+            <DraftRow
+              level={level + 1}
+              kind={draft.kind}
+              onSubmit={onSubmitDraft}
+              onCancel={onCancelDraft}
+            />
+          )}
+          {visibleChildren.map((child) => (
+            <TreeNode
+              key={child.relativePath}
+              entry={child}
+              level={level + 1}
+              expandedDirs={expandedDirs}
+              childrenCache={childrenCache}
+              loadingDirs={loadingDirs}
+              directoryErrors={directoryErrors}
+              gitMap={gitMap}
+              selectedPath={selectedPath}
+              filterQuery={filterQuery}
+              draft={draft}
+              onToggleDir={onToggleDir}
+              onFileClick={onFileClick}
+              onSelect={onSelect}
+              onContextMenu={onContextMenu}
+              onSubmitDraft={onSubmitDraft}
+              onCancelDraft={onCancelDraft}
+            />
+          ))}
         </>
       )}
     </>
   )
 }
 
-export default function FileTree({ projectDir, gitStatus, onFileClick }: Props) {
+function DraftRow({
+  level,
+  kind,
+  onSubmit,
+  onCancel
+}: {
+  level: number
+  kind: 'file' | 'directory'
+  onSubmit: (name: string) => void
+  onCancel: () => void
+}): React.ReactElement {
+  return (
+    <div
+      className="flex items-center px-2 py-0.5 whitespace-nowrap"
+      style={{ paddingLeft: 8 + level * 16 }}
+    >
+      <span className="w-4 shrink-0" />
+      {kind === 'directory'
+        ? <Folder size={12} className="mr-1.5 text-text-muted shrink-0" />
+        : <FileText size={12} className="mr-1.5 text-text-muted shrink-0" />
+      }
+      <DraftInput
+        initialValue=""
+        placeholder={kind === 'directory' ? 'folder name' : 'file name'}
+        onSubmit={onSubmit}
+        onCancel={onCancel}
+      />
+    </div>
+  )
+}
+
+function DraftInput({
+  initialValue,
+  placeholder,
+  onSubmit,
+  onCancel
+}: {
+  initialValue: string
+  placeholder: string
+  onSubmit: (name: string) => void
+  onCancel: () => void
+}): React.ReactElement {
+  const [value, setValue] = useState(initialValue)
+  const finishedRef = useRef(false)
+
+  const finish = (next: string, cancel: boolean): void => {
+    if (finishedRef.current) return
+    finishedRef.current = true
+    if (cancel || !next.trim()) onCancel()
+    else onSubmit(next)
+  }
+
+  return (
+    <input
+      autoFocus
+      className="min-w-0 flex-1 h-(--ctl-h-sm) px-1 rounded-sm bg-field border border-border-focus text-sm text-text outline-none"
+      value={value}
+      placeholder={placeholder}
+      onChange={(e) => setValue(e.target.value)}
+      onClick={(e) => e.stopPropagation()}
+      onKeyDown={(e) => {
+        e.stopPropagation()
+        if (e.key === 'Enter') {
+          e.preventDefault()
+          finish(value, false)
+        } else if (e.key === 'Escape') {
+          e.preventDefault()
+          finish(value, true)
+        }
+      }}
+      onBlur={() => finish(value, !value.trim())}
+    />
+  )
+}
+
+export type FileTreeHandle = {
+  /** Create in the selected folder, the parent of a selected file, or the project root. */
+  startCreate: (kind: 'file' | 'directory') => void
+}
+
+const FileTree = React.forwardRef<FileTreeHandle, Props>(function FileTree({
+  projectDir,
+  gitStatus,
+  onFileClick,
+  ignorePatterns,
+  includeIgnored = false,
+  filterQuery = '',
+  onRevealInTerminal
+}, ref) {
   const [expandedDirs, setExpandedDirs] = useState<Set<string>>(new Set())
   const [childrenCache, setChildrenCache] = useState<Record<string, DirectoryEntry[]>>({})
   const [loadingDirs, setLoadingDirs] = useState<Set<string>>(new Set())
   const [directoryErrors, setDirectoryErrors] = useState<Record<string, string>>({})
+  const [selectedPath, setSelectedPath] = useState<string | null>(null)
+  const [draft, setDraft] = useState<Draft | null>(null)
+  const [menu, setMenu] = useState<ContextMenuState | null>(null)
   const directoryVersionRef = React.useRef(0)
   const expandedDirsRef = React.useRef(expandedDirs)
   expandedDirsRef.current = expandedDirs
   const childrenCacheRef = React.useRef(childrenCache)
   childrenCacheRef.current = childrenCache
+  const treeRef = useRef<HTMLDivElement>(null)
 
   const gitMap = React.useMemo(() => buildGitMap(gitStatus), [gitStatus])
 
@@ -206,7 +373,10 @@ export default function FileTree({ projectDir, gitStatus, onFileClick }: Props) 
         return next
       })
       try {
-        const entries = await window.api.fbReadDirectory(projectDir, relativePath)
+        const entries = await window.api.fbReadDirectory(projectDir, relativePath, {
+          ignore: ignorePatterns,
+          includeIgnored
+        })
         if (directoryVersion !== directoryVersionRef.current) return
         setChildrenCache((prev) => ({ ...prev, [relativePath]: entries }))
       } catch (error) {
@@ -222,12 +392,11 @@ export default function FileTree({ projectDir, gitStatus, onFileClick }: Props) 
         })
       }
     },
-    [projectDir]
+    [projectDir, ignorePatterns, includeIgnored]
   )
+  const fetchDirectoryRef = React.useRef(fetchDirectory)
+  fetchDirectoryRef.current = fetchDirectory
 
-  // Silent re-read of every directory currently on screen (root + expanded).
-  // Nothing here touches loadingDirs, so a poll never flashes "Loading..." over
-  // a tree the user is looking at.
   const refreshVisibleDirectories = useCallback(async () => {
     if (!projectDir) return
     const directoryVersion = directoryVersionRef.current
@@ -236,7 +405,10 @@ export default function FileTree({ projectDir, gitStatus, onFileClick }: Props) 
     const results = await Promise.all(
       paths.map(async (relativePath) => {
         try {
-          return { relativePath, entries: await window.api.fbReadDirectory(projectDir, relativePath) }
+          return { relativePath, entries: await window.api.fbReadDirectory(projectDir, relativePath, {
+            ignore: ignorePatterns,
+            includeIgnored
+          }) }
         } catch {
           return { relativePath, entries: null }
         }
@@ -249,17 +421,12 @@ export default function FileTree({ projectDir, gitStatus, onFileClick }: Props) 
       if (entries) refreshed.set(relativePath, entries)
     }
 
-    // A directory that vanished from its (successfully re-read) parent is gone.
-    // Its own read failing isn't proof — that could be a transient EACCES.
     const liveDirs = new Set<string>()
     for (const entries of refreshed.values()) {
       for (const entry of entries) {
         if (entry.type === 'directory') liveDirs.add(entry.relativePath)
       }
     }
-    // Stale roots have to be gathered from everything we track, not just from
-    // `refreshed` — a deleted directory's own read fails, so it never lands
-    // there, and its cached descendants would otherwise survive the prune.
     const tracked = new Set<string>([
       ...paths,
       ...expandedDirsRef.current,
@@ -298,7 +465,6 @@ export default function FileTree({ projectDir, gitStatus, onFileClick }: Props) 
       return next
     })
 
-    // A directory that reads cleanly again clears its stale error banner.
     setDirectoryErrors((prev) => {
       const resolved = Object.keys(prev).filter(p => refreshed.has(p))
       if (resolved.length === 0) return prev
@@ -306,24 +472,26 @@ export default function FileTree({ projectDir, gitStatus, onFileClick }: Props) 
       for (const relativePath of resolved) delete next[relativePath]
       return next
     })
-  }, [projectDir])
+  }, [projectDir, ignorePatterns, includeIgnored])
 
-  // Fetch root directory on mount or when projectDir changes
   useEffect(() => {
     directoryVersionRef.current += 1
     setExpandedDirs(new Set())
     setChildrenCache({})
     setLoadingDirs(new Set())
     setDirectoryErrors({})
-    void fetchDirectory('')
+    setSelectedPath(null)
+    setDraft(null)
+    void fetchDirectoryRef.current('')
     return () => {
       directoryVersionRef.current += 1
     }
-  }, [projectDir, fetchDirectory])
+  }, [projectDir])
 
-  // Nothing notifies us when files appear on disk (terminals, AI tools, git
-  // checkouts all write behind our back), so poll on the same cadence as the
-  // git panel.
+  useEffect(() => {
+    void refreshVisibleDirectories()
+  }, [ignorePatterns, includeIgnored, refreshVisibleDirectories])
+
   useEffect(() => {
     if (!projectDir) return
     const run = (): void => { void refreshVisibleDirectories() }
@@ -357,11 +525,142 @@ export default function FileTree({ projectDir, gitStatus, onFileClick }: Props) 
     [childrenCache, fetchDirectory]
   )
 
+  const notifyTreeChanged = useCallback(() => {
+    window.dispatchEvent(new Event('file-saved'))
+    void refreshVisibleDirectories()
+  }, [refreshVisibleDirectories])
+
+  const handleContextMenu = useCallback((event: React.MouseEvent, relativePath: string, isDirectory: boolean) => {
+    event.preventDefault()
+    event.stopPropagation()
+    setSelectedPath(relativePath)
+    setMenu({ x: event.clientX, y: event.clientY, relativePath, isDirectory })
+  }, [])
+
+  const startCreate = useCallback((parent: string, kind: 'file' | 'directory') => {
+    setMenu(null)
+    if (parent) {
+      setExpandedDirs((prev) => {
+        const next = new Set(prev)
+        next.add(parent)
+        return next
+      })
+      if (!childrenCacheRef.current[parent]) void fetchDirectory(parent)
+    }
+    setDraft({ mode: 'create', parent, kind })
+  }, [fetchDirectory])
+
+  React.useImperativeHandle(ref, () => ({
+    startCreate: (kind: 'file' | 'directory') => {
+      const selected = selectedPath
+      let parent = ''
+      if (selected) {
+        const listing = childrenCacheRef.current[parentDirOf(selected)] ?? childrenCacheRef.current[''] ?? []
+        const entry = listing.find((item) => item.relativePath === selected)
+        parent = entry?.type === 'directory' ? selected : parentDirOf(selected)
+      }
+      startCreate(parent, kind)
+    }
+  }), [selectedPath, startCreate])
+
+  const startRename = useCallback((relativePath: string, isDirectory: boolean, name: string) => {
+    setMenu(null)
+    if (!relativePath) return
+    setDraft({ mode: 'rename', relativePath, name, kind: isDirectory ? 'directory' : 'file' })
+  }, [])
+
+  const handleDelete = useCallback(async (relativePath: string, isDirectory: boolean) => {
+    setMenu(null)
+    if (!relativePath) return
+    const name = relativePath.split('/').pop() ?? relativePath
+    const ok = window.confirm(
+      isDirectory
+        ? `Delete folder "${name}" and everything inside it?`
+        : `Delete "${name}"?`
+    )
+    if (!ok) return
+    try {
+      await window.api.fbDelete(projectDir, relativePath)
+      notifyTreeChanged()
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : String(error))
+    }
+  }, [projectDir, notifyTreeChanged])
+
+  const handleSubmitDraft = useCallback(async (name: string) => {
+    const current = draft
+    if (!current) return
+    const trimmed = name.trim()
+    if (!trimmed) {
+      setDraft(null)
+      return
+    }
+    try {
+      if (current.mode === 'create') {
+        if (current.kind === 'directory') {
+          await window.api.fbCreateDirectory(projectDir, current.parent, trimmed)
+        } else {
+          await window.api.fbCreateFile(projectDir, current.parent, trimmed)
+        }
+        const createdPath = posixRelativeJoin(current.parent, trimmed)
+        setSelectedPath(createdPath)
+      } else {
+        await window.api.fbRename(projectDir, current.relativePath, trimmed)
+        const parent = parentDirOf(current.relativePath)
+        setSelectedPath(posixRelativeJoin(parent, trimmed))
+      }
+      setDraft(null)
+      notifyTreeChanged()
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : String(error))
+    }
+  }, [draft, projectDir, notifyTreeChanged])
+
+  const handleKeyDown = useCallback((event: React.KeyboardEvent) => {
+    if (draft) return
+    const path = selectedPath
+    if (path === null) return
+    if (event.key === 'F2') {
+      event.preventDefault()
+      if (!path) return
+      const name = path.split('/').pop() ?? path
+      const listing = childrenCache[parentDirOf(path)] ?? []
+      const entry = listing.find((item) => item.relativePath === path)
+      startRename(path, entry?.type === 'directory', name)
+    } else if (event.key === 'Delete' || event.key === 'Backspace') {
+      if (!path) return
+      event.preventDefault()
+      const listing = childrenCache[parentDirOf(path)] ?? []
+      const entry = listing.find((item) => item.relativePath === path)
+      void handleDelete(path, entry?.type === 'directory')
+    }
+  }, [draft, selectedPath, childrenCache, startRename, handleDelete])
+
   const rootEntries = childrenCache['']
   const rootError = directoryErrors['']
+  const visibleRoot = (rootEntries ?? []).filter((entry) =>
+    entryIsVisible(entry, filterQuery, childrenCache)
+  )
+  const creatingAtRoot = draft?.mode === 'create' && draft.parent === ''
+
+  const menuTargetIsRoot = menu?.relativePath === ''
+  const createParent = menu
+    ? (menu.isDirectory ? menu.relativePath : parentDirOf(menu.relativePath))
+    : ''
+  const revealDir = menu
+    ? (menu.isDirectory ? menu.relativePath : parentDirOf(menu.relativePath))
+    : ''
 
   return (
-    <div className="overflow-y-auto text-base">
+    <div
+      ref={treeRef}
+      className="overflow-y-auto text-base h-full outline-none"
+      tabIndex={0}
+      onKeyDown={handleKeyDown}
+      onContextMenu={(e) => {
+        if (e.target === e.currentTarget) handleContextMenu(e, '', true)
+      }}
+    >
       {!rootEntries && loadingDirs.has('') && (
         <div className="text-text-muted px-2 py-0.5 italic">Loading...</div>
       )}
@@ -381,22 +680,85 @@ export default function FileTree({ projectDir, gitStatus, onFileClick }: Props) 
           </button>
         </div>
       )}
-      {rootEntries &&
-        rootEntries.map((entry) => (
-          <TreeNode
-            key={entry.relativePath}
-            entry={entry}
-            level={0}
-            projectDir={projectDir}
-            expandedDirs={expandedDirs}
-            childrenCache={childrenCache}
-            loadingDirs={loadingDirs}
-            directoryErrors={directoryErrors}
-            gitMap={gitMap}
-            onToggleDir={handleToggleDir}
-            onFileClick={onFileClick}
+      {creatingAtRoot && (
+        <DraftRow
+          level={0}
+          kind={draft.kind}
+          onSubmit={(name) => { void handleSubmitDraft(name) }}
+          onCancel={() => setDraft(null)}
+        />
+      )}
+      {visibleRoot.map((entry) => (
+        <TreeNode
+          key={entry.relativePath}
+          entry={entry}
+          level={0}
+          expandedDirs={expandedDirs}
+          childrenCache={childrenCache}
+          loadingDirs={loadingDirs}
+          directoryErrors={directoryErrors}
+          gitMap={gitMap}
+          selectedPath={selectedPath}
+          filterQuery={filterQuery}
+          draft={draft}
+          onToggleDir={handleToggleDir}
+          onFileClick={onFileClick}
+          onSelect={setSelectedPath}
+          onContextMenu={handleContextMenu}
+          onSubmitDraft={(name) => { void handleSubmitDraft(name) }}
+          onCancelDraft={() => setDraft(null)}
+        />
+      ))}
+      {menu && (
+        <>
+          <div
+            className="fixed inset-0 z-(--z-menu)"
+            onClick={() => setMenu(null)}
+            onContextMenu={(e) => { e.preventDefault(); setMenu(null) }}
           />
-        ))}
+          <div
+            className={`fixed z-(--z-menu) ${menuCls}`}
+            style={{ left: menu.x, top: menu.y }}
+            onMouseDown={(e) => e.stopPropagation()}
+          >
+            <button className={menuItemCls} onClick={() => startCreate(createParent, 'file')}>New file</button>
+            <button className={menuItemCls} onClick={() => startCreate(createParent, 'directory')}>New folder</button>
+            {!menuTargetIsRoot && (
+              <>
+                <button
+                  className={menuItemCls}
+                  onClick={() => startRename(
+                    menu.relativePath,
+                    menu.isDirectory,
+                    menu.relativePath.split('/').pop() ?? menu.relativePath
+                  )}
+                >
+                  Rename
+                </button>
+                <button
+                  className={`${menuItemCls} text-danger`}
+                  onClick={() => { void handleDelete(menu.relativePath, menu.isDirectory) }}
+                >
+                  Delete
+                </button>
+              </>
+            )}
+            {onRevealInTerminal && (
+              <button
+                className={menuItemCls}
+                onClick={() => {
+                  setMenu(null)
+                  onRevealInTerminal(revealDir)
+                }}
+              >
+                Reveal in Git Bash
+              </button>
+            )}
+          </div>
+        </>
+      )}
     </div>
   )
-}
+})
+
+export default FileTree

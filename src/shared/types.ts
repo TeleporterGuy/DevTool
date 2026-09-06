@@ -29,6 +29,8 @@ export interface Tab {
   filePath?: string
   noteId?: string
   system?: 'home'
+  /** Terminal spawn directory; when omitted, the task/project directory is used. */
+  cwd?: string
 }
 
 export interface ProjectNote {
@@ -201,6 +203,8 @@ export interface Project {
   tunnel?: TunnelConfig
   shellCommand?: ShellCommandConfig
   aiToolArgs?: Partial<Record<AiTabType, string>>
+  /** Basename globs hidden in the Files tree. Missing means DEFAULT_FILE_TREE_IGNORE. */
+  fileTreeIgnore?: string[]
   lifetimeStats?: { tasksCreated: number; notesCreated: number }
   tagIds?: string[]
 }

@@ -15,10 +15,11 @@ export type CreateTabOptions = {
   url?: string
   noteId?: string
   noteName?: string
+  cwd?: string
 }
 
 export function createTab(type: TabType, options: CreateTabOptions = {}): Tab {
-  const { filePath, url, noteId, noteName } = options
+  const { filePath, url, noteId, noteName, cwd } = options
   const isAi = (AI_TAB_TYPES as readonly string[]).includes(type)
   let title: string
   if (noteId) {
@@ -26,6 +27,9 @@ export function createTab(type: TabType, options: CreateTabOptions = {}): Tab {
   } else if (filePath) {
     const fileName = filePath.split('/').pop() ?? filePath
     title = type === 'diff' ? `${fileName} (diff)` : fileName
+  } else if (cwd && type === 'terminal') {
+    const folder = cwd.replace(/[\\/]+$/, '').split(/[\\/]/).pop() ?? 'Terminal'
+    title = folder
   } else {
     title = isAi ? AI_TAB_META[type as AiTabType].label : (type === 'terminal' ? 'Terminal' : 'Browser')
   }
@@ -38,7 +42,8 @@ export function createTab(type: TabType, options: CreateTabOptions = {}): Tab {
     ...(type === 'pi' ? { sessionId: uuid() } : {}),
     ...(filePath ? { filePath } : {}),
     ...(url ? { url } : {}),
-    ...(noteId ? { noteId } : {})
+    ...(noteId ? { noteId } : {}),
+    ...(cwd ? { cwd } : {})
   }
 }
 
