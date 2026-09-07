@@ -955,13 +955,8 @@ export class AppRuntime {
 
     ipcMain.handle(
       'fb-read-directory',
-      async (
-        _event,
-        projectCwd: string,
-        relativeDirPath: string,
-    options?: { ignore?: readonly string[]; includeIgnored?: boolean }
-      ): Promise<DirectoryEntry[]> => {
-        return listProjectDirectory(projectCwd, relativeDirPath, options)
+      async (_event, projectCwd: string, relativeDirPath: string): Promise<DirectoryEntry[]> => {
+        return listProjectDirectory(projectCwd, relativeDirPath)
       }
     )
 

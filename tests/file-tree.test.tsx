@@ -330,24 +330,29 @@ describe('FileTree', () => {
     })
   })
 
-  it('passes includeIgnored through to directory reads', async () => {
-    window.api.fbReadDirectory = vi.fn(() =>
-      Promise.resolve([{ name: '__pycache__', type: 'directory' as const, relativePath: '__pycache__' }])
-    )
-    render(
-      <FileTree
-        projectDir="/project"
-        gitStatus={null}
-        onFileClick={vi.fn()}
-        ignorePatterns={['__pycache__']}
-        includeIgnored
-      />
-    )
-    expect(await screen.findByText('__pycache__')).toBeTruthy()
-    expect(window.api.fbReadDirectory).toHaveBeenCalledWith(
-      '/project',
-      '',
-      expect.objectContaining({ ignore: ['__pycache__'], includeIgnored: true })
-    )
+  it('expands nested folders and collapse-all hides them', async () => {
+    window.api.fbReadDirectory = vi.fn((_dir: string, rel: string) => {
+      if (rel === '') return Promise.resolve([{ name: 'src', type: 'directory' as const, relativePath: 'src' }])
+      if (rel === 'src') return Promise.resolve([{ name: 'lib', type: 'directory' as const, relativePath: 'src/lib' }])
+      return Promise.resolve([{ name: 'a.ts', type: 'file' as const, relativePath: 'src/lib/a.ts' }])
+    })
+
+    const treeRef = React.createRef<FileTreeHandle>()
+    render(<FileTree ref={treeRef} projectDir="/project" gitStatus={null} onFileClick={vi.fn()} />)
+    expect(await screen.findByText('src')).toBeTruthy()
+    expect(screen.queryByText('lib')).toBeNull()
+
+    await act(async () => {
+      await treeRef.current?.expandAll()
+    })
+    expect(await screen.findByText('lib')).toBeTruthy()
+    expect(await screen.findByText('a.ts')).toBeTruthy()
+
+    act(() => {
+      treeRef.current?.collapseAll()
+    })
+    expect(screen.queryByText('lib')).toBeNull()
+    expect(screen.queryByText('a.ts')).toBeNull()
+    expect(screen.getByText('src')).toBeTruthy()
   })
 })

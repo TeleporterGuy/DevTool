@@ -39,7 +39,7 @@ describe('file-browser-fs', () => {
     await createProjectDirectory(root, '', 'src')
     await createProjectFile(root, 'src', 'app.py')
 
-    const rootList = await listProjectDirectory(root, '', { ignore: [] })
+    const rootList = await listProjectDirectory(root, '')
     expect(rootList.map((e) => e.name).sort()).toEqual(['hello.py', 'src'])
 
     const renamed = await renameProjectEntry(root, 'hello.py', 'main.py')
@@ -52,17 +52,14 @@ describe('file-browser-fs', () => {
     expect(fs.existsSync(path.join(root, 'main.py'))).toBe(false)
   })
 
-  it('hides ignored basenames when listing', async () => {
+  it('lists every name including dotfiles', async () => {
     const root = makeProject()
     fs.mkdirSync(path.join(root, '__pycache__'))
     fs.writeFileSync(path.join(root, 'hello.py'), '')
     fs.writeFileSync(path.join(root, '.env'), '')
 
-    const hidden = await listProjectDirectory(root, '', { ignore: ['.*', '__pycache__'] })
-    expect(hidden.map((e) => e.name)).toEqual(['hello.py'])
-
-    const shown = await listProjectDirectory(root, '', { ignore: ['.*', '__pycache__'], includeIgnored: true })
-    expect(shown.map((e) => e.name).sort()).toEqual(['.env', '__pycache__', 'hello.py'])
+    const listed = await listProjectDirectory(root, '')
+    expect(listed.map((e) => e.name).sort()).toEqual(['.env', '__pycache__', 'hello.py'])
   })
 
   it('rejects overwrite on create and rename, and path escape', async () => {

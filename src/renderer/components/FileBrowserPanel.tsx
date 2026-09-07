@@ -1,13 +1,8 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { useApp } from '../context/AppContext'
 import { useGitStatus } from '../hooks/useGitStatus'
 import { isRemoteProject, isShellCommandProject } from '../../shared/types'
 import { joinWorkspaceDir } from '../../shared/workspace-path'
-import {
-  DEFAULT_FILE_TREE_IGNORE,
-  formatIgnoreText,
-  parseIgnoreText
-} from '../../shared/file-tree-ignore'
 import FileTree, { type FileTreeHandle } from './FileTree'
 import FilesPanelHeader from './FilesPanelHeader'
 import GitStatus from './GitStatus'
@@ -26,15 +21,11 @@ export default function FileBrowserPanel(): React.ReactElement | null {
     selectedTask,
     openOrFocusDiffTab,
     openOrFocusEditorTab,
-    updateProject,
     addTab
   } = useApp()
   const panelRef = useRef<HTMLDivElement | null>(null)
   const fileTreeRef = useRef<FileTreeHandle>(null)
   const [filterQuery, setFilterQuery] = useState('')
-  const [showIgnored, setShowIgnored] = useState(false)
-  const [ignoreOpen, setIgnoreOpen] = useState(false)
-  const [ignoreDraft, setIgnoreDraft] = useState('')
 
   const effectiveDir = selectedTask?.workspace
     ? joinWorkspaceDir(selectedTask.workspace.worktreePath, selectedTask.workspace.relativeProjectPath)
@@ -46,17 +37,9 @@ export default function FileBrowserPanel(): React.ReactElement | null {
     && !!selectedProject.directory
   const gitStatus = useGitStatus(effectiveDir, fileBrowserOpen && isLocalProject)
 
-  const ignorePatterns = selectedProject?.fileTreeIgnore ?? DEFAULT_FILE_TREE_IGNORE
-
   useEffect(() => {
     setFilterQuery('')
-    setShowIgnored(false)
-    setIgnoreOpen(false)
   }, [selectedProject?.id])
-
-  useEffect(() => {
-    setIgnoreDraft(formatIgnoreText(selectedProject?.fileTreeIgnore ?? DEFAULT_FILE_TREE_IGNORE))
-  }, [selectedProject?.id, selectedProject?.fileTreeIgnore])
 
   const focusedPane = 'left' as const
 
@@ -104,18 +87,11 @@ export default function FileBrowserPanel(): React.ReactElement | null {
     [selectedProjectId, selectedTaskId, openOrFocusDiffTab]
   )
 
-  const saveIgnore = useCallback(() => {
-    if (!selectedProjectId) return
-    updateProject(selectedProjectId, { fileTreeIgnore: parseIgnoreText(ignoreDraft) })
-  }, [ignoreDraft, selectedProjectId, updateProject])
-
   const handleRevealInTerminal = useCallback((relativeDir: string) => {
     if (!selectedProjectId || !selectedTaskId) return
     const cwd = joinWorkspaceDir(effectiveDir, relativeDir || undefined)
     addTab(selectedProjectId, selectedTaskId, focusedPane, 'terminal', { cwd })
   }, [addTab, effectiveDir, selectedProjectId, selectedTaskId])
-
-  const ignoreCount = useMemo(() => parseIgnoreText(ignoreDraft).length, [ignoreDraft])
 
   if (!fileBrowserOpen || !selectedProject) return null
 
@@ -159,16 +135,10 @@ export default function FileBrowserPanel(): React.ReactElement | null {
               <FilesPanelHeader
                 filterQuery={filterQuery}
                 onFilterChange={setFilterQuery}
-                showIgnored={showIgnored}
-                onShowIgnoredChange={setShowIgnored}
-                ignoreOpen={ignoreOpen}
-                onToggleIgnore={() => setIgnoreOpen((open) => !open)}
-                ignoreDraft={ignoreDraft}
-                onIgnoreDraftChange={setIgnoreDraft}
-                ignoreCount={ignoreCount}
-                onSaveIgnore={saveIgnore}
                 onNewFile={() => fileTreeRef.current?.startCreate('file')}
                 onNewFolder={() => fileTreeRef.current?.startCreate('directory')}
+                onExpandAll={() => { void fileTreeRef.current?.expandAll() }}
+                onCollapseAll={() => fileTreeRef.current?.collapseAll()}
               />
               <div className="flex-1 overflow-auto min-h-0">
                 <FileTree
@@ -176,8 +146,6 @@ export default function FileBrowserPanel(): React.ReactElement | null {
                   projectDir={effectiveDir}
                   gitStatus={gitStatus}
                   onFileClick={handleFileClick}
-                  ignorePatterns={ignorePatterns}
-                  includeIgnored={showIgnored}
                   filterQuery={filterQuery}
                   onRevealInTerminal={handleRevealInTerminal}
                 />

@@ -1,16 +1,10 @@
 import fs from 'fs'
 import path from 'path'
 import type { DirectoryEntry } from '../shared/types'
-import { effectiveIgnorePatterns, nameMatchesIgnore } from '../shared/file-tree-ignore'
 import { posixRelativeJoin } from '../shared/workspace-path'
 import { resolveSafeProjectPath } from './project-fs-path'
 
 const fsPromises = fs.promises
-
-export type ListDirectoryOptions = {
-  ignore?: readonly string[]
-  includeIgnored?: boolean
-}
 
 /** A single path segment: no slashes, not `.` / `..`. */
 export function assertFileName(name: string): string {
@@ -21,21 +15,14 @@ export function assertFileName(name: string): string {
   return trimmed
 }
 
-function ignoreCaseForHost(): boolean {
-  return process.platform === 'win32'
-}
-
 export async function listProjectDirectory(
   projectCwd: string,
-  relativeDirPath: string,
-  options: ListDirectoryOptions = {}
+  relativeDirPath: string
 ): Promise<DirectoryEntry[]> {
   const fullPath = resolveSafeProjectPath(projectCwd, relativeDirPath)
   const entries = await fsPromises.readdir(fullPath, { withFileTypes: true })
-  const patterns = effectiveIgnorePatterns(options.ignore, options.includeIgnored === true)
-  const caseInsensitive = ignoreCaseForHost()
   return entries
-    .filter((entry) => !nameMatchesIgnore(entry.name, patterns, caseInsensitive))
+    .filter((entry) => entry.name !== '.' && entry.name !== '..')
     .map((entry) => ({
       name: entry.name,
       type: entry.isDirectory() ? ('directory' as const) : ('file' as const),

@@ -50,7 +50,7 @@ import { createInteractionStampGate } from '../components/taskRecency'
 import { createTab, type CreateTabOptions } from '../components/newTaskTabs'
 import { useDirtyBufferStore, type DirtyBuffer } from '../context/DirtyBufferContext'
 
-export type ProjectUpdate = Partial<Pick<Project, 'directory' | 'aiToolArgs' | 'tunnel' | 'emoji' | 'icon' | 'tagIds' | 'fileTreeIgnore'>>
+export type ProjectUpdate = Partial<Pick<Project, 'directory' | 'aiToolArgs' | 'tunnel' | 'emoji' | 'icon' | 'tagIds'>>
 type AddTabOptions = CreateTabOptions
 
 export function buildWindowTitle(projectName: string | null, taskName: string | null, taskIsHome?: boolean): string {

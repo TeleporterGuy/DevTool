@@ -14,16 +14,10 @@ function renderHeader(overrides: Partial<React.ComponentProps<typeof FilesPanelH
   const props: React.ComponentProps<typeof FilesPanelHeader> = {
     filterQuery: '',
     onFilterChange: vi.fn(),
-    showIgnored: false,
-    onShowIgnoredChange: vi.fn(),
-    ignoreOpen: false,
-    onToggleIgnore: vi.fn(),
-    ignoreDraft: 'node_modules\n__pycache__',
-    onIgnoreDraftChange: vi.fn(),
-    ignoreCount: 2,
-    onSaveIgnore: vi.fn(),
     onNewFile: vi.fn(),
     onNewFolder: vi.fn(),
+    onExpandAll: vi.fn(),
+    onCollapseAll: vi.fn(),
     ...overrides
   }
   render(<FilesPanelHeader {...props} />)
@@ -31,33 +25,30 @@ function renderHeader(overrides: Partial<React.ComponentProps<typeof FilesPanelH
 }
 
 describe('FilesPanelHeader', () => {
-  it('puts New file and New folder above the filter', () => {
+  it('keeps filter and actions on one row', () => {
     renderHeader()
-    const newFile = screen.getByRole('button', { name: 'New file' })
-    const filter = screen.getByLabelText('Filter files')
-    expect(newFile.compareDocumentPosition(filter) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(screen.getByLabelText('Filter files')).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'New file' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'New folder' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Expand all' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Collapse all' })).toBeTruthy()
   })
 
-  it('calls create handlers from the toolbar', () => {
+  it('calls create and expand handlers from the toolbar', () => {
     const props = renderHeader()
     fireEvent.click(screen.getByRole('button', { name: 'New file' }))
     fireEvent.click(screen.getByRole('button', { name: 'New folder' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Expand all' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Collapse all' }))
     expect(props.onNewFile).toHaveBeenCalledTimes(1)
     expect(props.onNewFolder).toHaveBeenCalledTimes(1)
+    expect(props.onExpandAll).toHaveBeenCalledTimes(1)
+    expect(props.onCollapseAll).toHaveBeenCalledTimes(1)
   })
 
-  it('toggles show ignored without changing the ignore draft', () => {
-    const props = renderHeader()
-    fireEvent.click(screen.getByRole('switch'))
-    expect(props.onShowIgnoredChange).toHaveBeenCalledWith(true)
-    expect(props.onIgnoreDraftChange).not.toHaveBeenCalled()
-  })
-
-  it('edits and saves the ignore list', () => {
-    const props = renderHeader({ ignoreOpen: true })
-    fireEvent.change(screen.getByLabelText('Ignore patterns'), { target: { value: 'dist' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Save ignore' }))
-    expect(props.onIgnoreDraftChange).toHaveBeenCalledWith('dist')
-    expect(props.onSaveIgnore).toHaveBeenCalledTimes(1)
+  it('has no ignore UI', () => {
+    renderHeader()
+    expect(screen.queryByText('Show ignored')).toBeNull()
+    expect(screen.queryByText('Ignore')).toBeNull()
   })
 })

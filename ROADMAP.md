@@ -122,17 +122,17 @@ Work items:
 
 Upstream tree can list and open files. Extend it; do not replace it.
 
-**Outcome:** create / rename / delete files and folders, per-project ignore + quick filter in the Files panel. Optional: reveal in Git Bash.
+**Outcome:** create / rename / delete files and folders, plus a quick filter in the Files panel. Optional: reveal in Git Bash.
 
 Stay out of: full project search, git graph (see Ideas), VS Code-style explorer features.
 
 Work items:
 
 1. **CRUD** — create, rename, and delete files and folders from the Files tree (local projects only). **Landed.**
-2. **Filter + ignore** — session filter box; ignore patterns edited in the Files panel and stored on the project (`fileTreeIgnore`). Not a `.gitignore` parser. **Landed.**
+2. **Filter** — session filter box in the Files panel. **Landed.** (A per-project ignore list was added then removed.)
 3. **Reveal in Git Bash** — open a terminal tab whose cwd is that folder. **Landed.**
 
-**Effort:** 1–2 weeks. Mid-phase **0.2.1** is Phase 1.1. Ships as **0.3.0** when verified on Windows.
+**Effort:** 1–2 weeks. Mid-phase **0.2.2** follows 1.1 polish. Ships as **0.3.0** when verified on Windows.
 
 ---
 
@@ -143,9 +143,9 @@ Not a new numbered phase. Same explorer; small UX follow-ups before `0.3.0`.
 Work items:
 
 1. **New file / New folder toolbar** — icon buttons above the filter (VS Code-like; room to add more later). **Landed.**
-2. **Reconsider the ignore list** — keep the current per-project ignore UI for now. Decide later whether to drop it, keep defaults-only, or keep the editor. Sleep on it.
+2. **Reconsider the ignore list** — dropped. The Files tree lists every name, including `.env` / `.git`.
 
-`package.json` is **0.2.1** after this slice. **0.3.0** still waits on Windows verify of the full Phase 1 explorer.
+`package.json` is **0.2.2**. **0.3.0** still waits on Windows verify of the full Phase 1 explorer.
 
 ---
 
@@ -222,7 +222,7 @@ Keep upstream `master` as a remote (`upstream`) and rebase or merge periodically
 1. Windows shell resolution + Git Bash PTY + documented rebuild. **Done** (Git Bash default + Settings presets; portable Node PATH and rebuild docs landed earlier).
 2. Configurable spawn PATH (portable Node) + env passthrough. **Done.**
 3. Win dir packaging notes / script. **Done.** (`npm run build:win` → `dist/win-unpacked`.)
-4. File explorer CRUD. **Landed** (filter + per-project ignore in the Files panel; Reveal in Git Bash; 1.1 toolbar). Verify on Windows before bumping to `0.3.0`.
+4. File explorer CRUD. **Landed** (filter, Reveal in Git Bash, 1.1 toolbar; ignore list removed). Verify on Windows before bumping to `0.3.0`.
 5. Conda env picker on spawn.
 6. JupyterLab browser-tab launcher.
 7. Python and Markdown LSP spike, then harden.
@@ -260,7 +260,7 @@ Work machine constraints to re-test every phase: Git Bash, portable Node zip, Pi
 | --- | --- | --- | --- |
 | 0 | `0.2.0` (shipped) | Git Bash + Pi in DevTool on Windows | 1–2 months calendar / 2–4 weeks focused |
 | 0.5 | (no bump, done) | No DevTool inference UI (Pi keeps its settings) | n/a |
-| 1 | `0.2.1` → `0.3.0` | File tree CRUD (`0.2.1` = 1.1 polish) | 1–2 weeks |
+| 1 | `0.2.2` → `0.3.0` | File tree CRUD (`0.2.2` = ignore removed + explorer toolbar) | 1–2 weeks |
 | 2 | `0.4.0` | Conda picker on spawn | 1–2 weeks |
 | 3 | `0.5.0` | JupyterLab in a browser tab | days |
 | 4 | `0.6.0` | Usable Python and Markdown LSPs | 1–2 months |

@@ -255,12 +255,8 @@ const api = {
   },
 
   // File browser
-  fbReadDirectory: (
-    projectCwd: string,
-    relativeDirPath: string,
-    options?: { ignore?: readonly string[]; includeIgnored?: boolean }
-  ): Promise<DirectoryEntry[]> =>
-    ipcRenderer.invoke('fb-read-directory', projectCwd, relativeDirPath, options),
+  fbReadDirectory: (projectCwd: string, relativeDirPath: string): Promise<DirectoryEntry[]> =>
+    ipcRenderer.invoke('fb-read-directory', projectCwd, relativeDirPath),
   fbReadFile: (projectCwd: string, relativeFilePath: string): Promise<string> =>
     ipcRenderer.invoke('fb-read-file', projectCwd, relativeFilePath),
   fbWriteFile: (projectCwd: string, relativeFilePath: string, content: string): Promise<void> =>

@@ -8,8 +8,6 @@ interface Props {
   projectDir: string
   gitStatus: GitStatusResult | null
   onFileClick: (filePath: string) => void
-  ignorePatterns?: readonly string[]
-  includeIgnored?: boolean
   filterQuery?: string
   onRevealInTerminal?: (relativeDir: string) => void
 }
@@ -335,14 +333,14 @@ function DraftInput({
 export type FileTreeHandle = {
   /** Create in the selected folder, the parent of a selected file, or the project root. */
   startCreate: (kind: 'file' | 'directory') => void
+  expandAll: () => Promise<void>
+  collapseAll: () => void
 }
 
 const FileTree = React.forwardRef<FileTreeHandle, Props>(function FileTree({
   projectDir,
   gitStatus,
   onFileClick,
-  ignorePatterns,
-  includeIgnored = false,
   filterQuery = '',
   onRevealInTerminal
 }, ref) {
@@ -373,16 +371,16 @@ const FileTree = React.forwardRef<FileTreeHandle, Props>(function FileTree({
         return next
       })
       try {
-        const entries = await window.api.fbReadDirectory(projectDir, relativePath, {
-          ignore: ignorePatterns,
-          includeIgnored
-        })
-        if (directoryVersion !== directoryVersionRef.current) return
+        const entries = await window.api.fbReadDirectory(projectDir, relativePath)
+        if (directoryVersion !== directoryVersionRef.current) return undefined
         setChildrenCache((prev) => ({ ...prev, [relativePath]: entries }))
+        childrenCacheRef.current = { ...childrenCacheRef.current, [relativePath]: entries }
+        return entries
       } catch (error) {
-        if (directoryVersion !== directoryVersionRef.current) return
+        if (directoryVersion !== directoryVersionRef.current) return undefined
         const message = error instanceof Error ? error.message : String(error)
         setDirectoryErrors((prev) => ({ ...prev, [relativePath]: message }))
+        return undefined
       } finally {
         if (directoryVersion !== directoryVersionRef.current) return
         setLoadingDirs((prev) => {
@@ -392,7 +390,7 @@ const FileTree = React.forwardRef<FileTreeHandle, Props>(function FileTree({
         })
       }
     },
-    [projectDir, ignorePatterns, includeIgnored]
+    [projectDir]
   )
   const fetchDirectoryRef = React.useRef(fetchDirectory)
   fetchDirectoryRef.current = fetchDirectory
@@ -405,10 +403,7 @@ const FileTree = React.forwardRef<FileTreeHandle, Props>(function FileTree({
     const results = await Promise.all(
       paths.map(async (relativePath) => {
         try {
-          return { relativePath, entries: await window.api.fbReadDirectory(projectDir, relativePath, {
-            ignore: ignorePatterns,
-            includeIgnored
-          }) }
+          return { relativePath, entries: await window.api.fbReadDirectory(projectDir, relativePath) }
         } catch {
           return { relativePath, entries: null }
         }
@@ -472,7 +467,7 @@ const FileTree = React.forwardRef<FileTreeHandle, Props>(function FileTree({
       for (const relativePath of resolved) delete next[relativePath]
       return next
     })
-  }, [projectDir, ignorePatterns, includeIgnored])
+  }, [projectDir])
 
   useEffect(() => {
     directoryVersionRef.current += 1
@@ -487,10 +482,6 @@ const FileTree = React.forwardRef<FileTreeHandle, Props>(function FileTree({
       directoryVersionRef.current += 1
     }
   }, [projectDir])
-
-  useEffect(() => {
-    void refreshVisibleDirectories()
-  }, [ignorePatterns, includeIgnored, refreshVisibleDirectories])
 
   useEffect(() => {
     if (!projectDir) return
@@ -550,6 +541,35 @@ const FileTree = React.forwardRef<FileTreeHandle, Props>(function FileTree({
     setDraft({ mode: 'create', parent, kind })
   }, [fetchDirectory])
 
+  const collapseAll = useCallback(() => {
+    setExpandedDirs(new Set())
+  }, [])
+
+  const expandAll = useCallback(async () => {
+    const expanded = new Set<string>()
+    const queue = ['']
+    let opened = 0
+    const version = directoryVersionRef.current
+    const maxOpen = 200
+    while (queue.length > 0 && opened < maxOpen) {
+      const dir = queue.shift() as string
+      let entries = childrenCacheRef.current[dir]
+      if (!entries) {
+        const fetched = await fetchDirectoryRef.current(dir)
+        if (version !== directoryVersionRef.current) return
+        if (!fetched) continue
+        entries = fetched
+      }
+      for (const entry of entries) {
+        if (entry.type !== 'directory') continue
+        expanded.add(entry.relativePath)
+        queue.push(entry.relativePath)
+        opened += 1
+      }
+    }
+    setExpandedDirs(expanded)
+  }, [])
+
   React.useImperativeHandle(ref, () => ({
     startCreate: (kind: 'file' | 'directory') => {
       const selected = selectedPath
@@ -560,8 +580,10 @@ const FileTree = React.forwardRef<FileTreeHandle, Props>(function FileTree({
         parent = entry?.type === 'directory' ? selected : parentDirOf(selected)
       }
       startCreate(parent, kind)
-    }
-  }), [selectedPath, startCreate])
+    },
+    expandAll,
+    collapseAll
+  }), [selectedPath, startCreate, expandAll, collapseAll])
 
   const startRename = useCallback((relativePath: string, isDirectory: boolean, name: string) => {
     setMenu(null)
