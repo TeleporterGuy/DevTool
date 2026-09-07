@@ -65,7 +65,9 @@ describe('file-browser-fs', () => {
   it('rejects overwrite on create and rename, and path escape', async () => {
     const root = makeProject()
     await createProjectFile(root, '', 'a.txt')
-    await expect(createProjectFile(root, '', 'a.txt')).rejects.toThrow()
+    await expect(createProjectFile(root, '', 'a.txt')).rejects.toThrow(
+      'A file named "a.txt" already exists'
+    )
     await createProjectFile(root, '', 'b.txt')
     await expect(renameProjectEntry(root, 'a.txt', 'b.txt')).rejects.toThrow(/already exists/)
     await expect(renameProjectEntry(root, '../secret', 'x')).rejects.toThrow(/Path traversal/)

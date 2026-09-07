@@ -249,6 +249,38 @@ describe('FileTree', () => {
     })
   })
 
+  it('keeps the name field and shows an in-tree error when the file already exists', async () => {
+    window.api.fbReadDirectory = vi.fn(() =>
+      Promise.resolve([{ name: 'a.ts', type: 'file' as const, relativePath: 'a.ts' }])
+    )
+    window.api.fbCreateFile = vi.fn().mockRejectedValue(
+      new Error("Error invoking remote method 'fb-create-file': Error: EEXIST: file already exists, open '/project/a.ts'")
+    )
+
+    const treeRef = React.createRef<FileTreeHandle>()
+    render(
+      <FileTree
+        ref={treeRef}
+        projectDir="/project"
+        gitStatus={null}
+        onFileClick={vi.fn()}
+      />
+    )
+    expect(await screen.findByText('a.ts')).toBeTruthy()
+    act(() => {
+      treeRef.current?.startCreate('file')
+    })
+    const input = screen.getByPlaceholderText('file name') as HTMLInputElement
+    fireEvent.change(input, { target: { value: 'a.ts' } })
+    fireEvent.keyDown(input, { key: 'Enter' })
+
+    const alert = await screen.findByRole('alert')
+    expect(alert.textContent).toBe('A file or folder with that name already exists')
+    expect(window.alert).not.toHaveBeenCalled()
+    const retry = screen.getByPlaceholderText('file name') as HTMLInputElement
+    expect(retry.value).toBe('a.ts')
+  })
+
   it('renames and deletes with confirm', async () => {
     let listing = [{ name: 'a.ts', type: 'file' as const, relativePath: 'a.ts' }]
     window.api.fbReadDirectory = vi.fn(() => Promise.resolve(listing))

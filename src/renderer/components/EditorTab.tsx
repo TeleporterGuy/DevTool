@@ -32,7 +32,9 @@ export default function EditorTab({ tabId, visible, filePath, projectDir, projec
   // unsaved buffer (and its undo history) whenever another tab is activated.
   const [everVisible, setEverVisible] = useState(visible)
   const editorRef = useRef<editor.IStandaloneCodeEditor | null>(null)
-  const savedContentRef = useRef<string>('')
+  // null = never loaded. '' is a real empty file; if we started at '' the
+  // "disk matches last saved" skip would leave new files stuck on Loading.
+  const savedContentRef = useRef<string | null>(null)
   const currentContentRef = useRef<string>('')
   const dirtyRef = useRef(false)
   const requestIdRef = useRef(0)
@@ -68,7 +70,7 @@ export default function EditorTab({ tabId, visible, filePath, projectDir, projec
       setError(null)
 
       if (!force && dirtyRef.current) return
-      if (!force && text === savedContentRef.current) return
+      if (!force && savedContentRef.current !== null && text === savedContentRef.current) return
 
       savedContentRef.current = text
       currentContentRef.current = text
@@ -85,7 +87,7 @@ export default function EditorTab({ tabId, visible, filePath, projectDir, projec
 
       setError('Unable to read file.')
       setContent(null)
-      savedContentRef.current = ''
+      savedContentRef.current = null
       currentContentRef.current = ''
       dirtyRef.current = false
       setDirty(false)
@@ -96,7 +98,7 @@ export default function EditorTab({ tabId, visible, filePath, projectDir, projec
     setContent(null)
     setError(null)
     setSaveError(null)
-    savedContentRef.current = ''
+    savedContentRef.current = null
     currentContentRef.current = ''
     dirtyRef.current = false
     setDirty(false)

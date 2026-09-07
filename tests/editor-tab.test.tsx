@@ -135,6 +135,15 @@ afterEach(() => {
 })
 
 describe('EditorTab', () => {
+  it('opens an empty file instead of staying on Loading', async () => {
+    ;(window as any).api.fbReadFile = vi.fn().mockResolvedValue('')
+
+    renderTab(true)
+
+    await waitFor(() => expect(editor().value).toBe(''))
+    expect(screen.queryByText('Loading...')).toBeNull()
+  })
+
   it('keeps an unsaved buffer and its dirty state across hide/show', async () => {
     const view = renderTab(true)
 

@@ -15,8 +15,18 @@ interface Props {
 type StatusColor = 'var(--color-danger)' | 'var(--color-warn)' | 'var(--color-success)' | undefined
 
 type Draft =
-  | { mode: 'create'; parent: string; kind: 'file' | 'directory' }
+  | { mode: 'create'; parent: string; kind: 'file' | 'directory'; seed: string }
   | { mode: 'rename'; relativePath: string; name: string; kind: 'file' | 'directory' }
+
+/** Strip Electron's IPC wrapper and turn syscall errors into a short UI line. */
+function fileActionErrorMessage(error: unknown): string {
+  const raw = error instanceof Error ? error.message : String(error)
+  const message = raw.replace(/^Error invoking remote method '[^']+': (?:Error: )?/u, '')
+  if (/\bEEXIST\b/i.test(message) || /file already exists/i.test(message)) {
+    return 'A file or folder with that name already exists'
+  }
+  return message
+}
 
 type ContextMenuState = {
   x: number
@@ -123,6 +133,7 @@ interface TreeNodeProps {
   selectedPath: string | null
   filterQuery: string
   draft: Draft | null
+  draftNonce: number
   onToggleDir: (relativePath: string) => void
   onFileClick: (filePath: string) => void
   onSelect: (relativePath: string) => void
@@ -142,6 +153,7 @@ function TreeNode({
   selectedPath,
   filterQuery,
   draft,
+  draftNonce,
   onToggleDir,
   onFileClick,
   onSelect,
@@ -195,7 +207,8 @@ function TreeNode({
         }
         {renaming ? (
           <DraftInput
-            initialValue={entry.name}
+            key={draftNonce}
+            initialValue={draft.name}
             placeholder={isDirectory ? 'folder name' : 'file name'}
             onSubmit={onSubmitDraft}
             onCancel={onCancelDraft}
@@ -224,6 +237,8 @@ function TreeNode({
             <DraftRow
               level={level + 1}
               kind={draft.kind}
+              initialValue={draft.seed}
+              draftNonce={draftNonce}
               onSubmit={onSubmitDraft}
               onCancel={onCancelDraft}
             />
@@ -241,6 +256,7 @@ function TreeNode({
               selectedPath={selectedPath}
               filterQuery={filterQuery}
               draft={draft}
+              draftNonce={draftNonce}
               onToggleDir={onToggleDir}
               onFileClick={onFileClick}
               onSelect={onSelect}
@@ -258,11 +274,15 @@ function TreeNode({
 function DraftRow({
   level,
   kind,
+  initialValue,
+  draftNonce,
   onSubmit,
   onCancel
 }: {
   level: number
   kind: 'file' | 'directory'
+  initialValue: string
+  draftNonce: number
   onSubmit: (name: string) => void
   onCancel: () => void
 }): React.ReactElement {
@@ -277,7 +297,8 @@ function DraftRow({
         : <FileText size={12} className="mr-1.5 text-text-muted shrink-0" />
       }
       <DraftInput
-        initialValue=""
+        key={draftNonce}
+        initialValue={initialValue}
         placeholder={kind === 'directory' ? 'folder name' : 'file name'}
         onSubmit={onSubmit}
         onCancel={onCancel}
@@ -350,6 +371,8 @@ const FileTree = React.forwardRef<FileTreeHandle, Props>(function FileTree({
   const [directoryErrors, setDirectoryErrors] = useState<Record<string, string>>({})
   const [selectedPath, setSelectedPath] = useState<string | null>(null)
   const [draft, setDraft] = useState<Draft | null>(null)
+  const [draftNonce, setDraftNonce] = useState(0)
+  const [actionError, setActionError] = useState<string | null>(null)
   const [menu, setMenu] = useState<ContextMenuState | null>(null)
   const directoryVersionRef = React.useRef(0)
   const expandedDirsRef = React.useRef(expandedDirs)
@@ -477,6 +500,7 @@ const FileTree = React.forwardRef<FileTreeHandle, Props>(function FileTree({
     setDirectoryErrors({})
     setSelectedPath(null)
     setDraft(null)
+    setActionError(null)
     void fetchDirectoryRef.current('')
     return () => {
       directoryVersionRef.current += 1
@@ -538,7 +562,8 @@ const FileTree = React.forwardRef<FileTreeHandle, Props>(function FileTree({
       })
       if (!childrenCacheRef.current[parent]) void fetchDirectory(parent)
     }
-    setDraft({ mode: 'create', parent, kind })
+    setActionError(null)
+    setDraft({ mode: 'create', parent, kind, seed: '' })
   }, [fetchDirectory])
 
   const collapseAll = useCallback(() => {
@@ -588,6 +613,7 @@ const FileTree = React.forwardRef<FileTreeHandle, Props>(function FileTree({
   const startRename = useCallback((relativePath: string, isDirectory: boolean, name: string) => {
     setMenu(null)
     if (!relativePath) return
+    setActionError(null)
     setDraft({ mode: 'rename', relativePath, name, kind: isDirectory ? 'directory' : 'file' })
   }, [])
 
@@ -603,9 +629,10 @@ const FileTree = React.forwardRef<FileTreeHandle, Props>(function FileTree({
     if (!ok) return
     try {
       await window.api.fbDelete(projectDir, relativePath)
+      setActionError(null)
       notifyTreeChanged()
     } catch (error) {
-      window.alert(error instanceof Error ? error.message : String(error))
+      setActionError(fileActionErrorMessage(error))
     }
   }, [projectDir, notifyTreeChanged])
 
@@ -615,6 +642,7 @@ const FileTree = React.forwardRef<FileTreeHandle, Props>(function FileTree({
     const trimmed = name.trim()
     if (!trimmed) {
       setDraft(null)
+      setActionError(null)
       return
     }
     try {
@@ -632,9 +660,16 @@ const FileTree = React.forwardRef<FileTreeHandle, Props>(function FileTree({
         setSelectedPath(posixRelativeJoin(parent, trimmed))
       }
       setDraft(null)
+      setActionError(null)
       notifyTreeChanged()
     } catch (error) {
-      window.alert(error instanceof Error ? error.message : String(error))
+      setActionError(fileActionErrorMessage(error))
+      setDraftNonce((n) => n + 1)
+      if (current.mode === 'create') {
+        setDraft({ ...current, seed: trimmed })
+      } else {
+        setDraft({ ...current, name: trimmed })
+      }
     }
   }, [draft, projectDir, notifyTreeChanged])
 
@@ -702,12 +737,22 @@ const FileTree = React.forwardRef<FileTreeHandle, Props>(function FileTree({
           </button>
         </div>
       )}
+      {actionError && (
+        <div role="alert" className="text-danger px-2 py-1 text-sm">
+          {actionError}
+        </div>
+      )}
       {creatingAtRoot && (
         <DraftRow
           level={0}
           kind={draft.kind}
+          initialValue={draft.seed}
+          draftNonce={draftNonce}
           onSubmit={(name) => { void handleSubmitDraft(name) }}
-          onCancel={() => setDraft(null)}
+          onCancel={() => {
+            setDraft(null)
+            setActionError(null)
+          }}
         />
       )}
       {visibleRoot.map((entry) => (
@@ -723,12 +768,16 @@ const FileTree = React.forwardRef<FileTreeHandle, Props>(function FileTree({
           selectedPath={selectedPath}
           filterQuery={filterQuery}
           draft={draft}
+          draftNonce={draftNonce}
           onToggleDir={handleToggleDir}
           onFileClick={onFileClick}
           onSelect={setSelectedPath}
           onContextMenu={handleContextMenu}
           onSubmitDraft={(name) => { void handleSubmitDraft(name) }}
-          onCancelDraft={() => setDraft(null)}
+          onCancelDraft={() => {
+            setDraft(null)
+            setActionError(null)
+          }}
         />
       ))}
       {menu && (

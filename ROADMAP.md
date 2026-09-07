@@ -145,7 +145,7 @@ Work items:
 1. **New file / New folder toolbar** — icon buttons above the filter (VS Code-like; room to add more later). **Landed.**
 2. **Reconsider the ignore list** — dropped. The Files tree lists every name, including `.env` / `.git`.
 
-`package.json` is **0.2.2**. **0.3.0** still waits on Windows verify of the full Phase 1 explorer.
+`package.json` is **0.2.3**. **0.3.0** still waits on Windows verify of the full Phase 1 explorer.
 
 ---
 

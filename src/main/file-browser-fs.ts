@@ -43,7 +43,11 @@ export async function createProjectFile(
   const relativePath = posixRelativeJoin(parentRelativePath, fileName)
   const fullPath = resolveSafeProjectPath(projectCwd, relativePath)
   // wx: fail if the file already exists instead of overwriting.
-  await fsPromises.writeFile(fullPath, '', { encoding: 'utf-8', flag: 'wx' })
+  try {
+    await fsPromises.writeFile(fullPath, '', { encoding: 'utf-8', flag: 'wx' })
+  } catch (error) {
+    throwFriendlyFsError(error, `A file named "${fileName}" already exists`)
+  }
   return { name: fileName, type: 'file', relativePath }
 }
 
@@ -55,8 +59,19 @@ export async function createProjectDirectory(
   const dirName = assertFileName(name)
   const relativePath = posixRelativeJoin(parentRelativePath, dirName)
   const fullPath = resolveSafeProjectPath(projectCwd, relativePath)
-  await fsPromises.mkdir(fullPath)
+  try {
+    await fsPromises.mkdir(fullPath)
+  } catch (error) {
+    throwFriendlyFsError(error, `A folder named "${dirName}" already exists`)
+  }
   return { name: dirName, type: 'directory', relativePath }
+}
+
+function throwFriendlyFsError(error: unknown, alreadyExistsMessage: string): never {
+  if ((error as NodeJS.ErrnoException).code === 'EEXIST') {
+    throw new Error(alreadyExistsMessage)
+  }
+  throw error
 }
 
 function sameResolvedPath(a: string, b: string): boolean {
