@@ -208,10 +208,19 @@ Parking lot. Do not start these instead of the numbered phases. Several items al
 | JupyterLab in a browser tab | Phase 3 |
 | Language servers (Python, Markdown) | Phase 4 |
 | Native notebook cells + kernel | Phase 5 |
+| Open workspace in VS Code / Cursor / Spyder | Ideas (below); Spyder after Phase 2 |
 
 **Git tree.** A branch/commit graph in the UI (log, parents, maybe checkout). Useful for “where am I” without leaving DevTool. Phase 1 explicitly stays out of a git graph so the file explorer does not grow into an IDE. If it happens, it is Phase 5-or-later: read-only first, no rebase UI.
 
 **Generate commit message with a specified agent.** Pre-fill the existing git commit box from Pi (or Claude/Codex) given the staged diff. Low confidence this needs a DevTool feature: you can already ask Pi in a tab to write the message and paste it. Only worth it if the commit UI is used a lot and the round-trip is annoying. Prefer “use the project’s default agent” over a per-commit picker.
+
+**Open this workspace in an external IDE.** DevTool is the orchestrator, not Cursor/VS Code/Spyder. The useful move is an escape hatch: spawn the user’s real editor on the **current project folder** (task worktree when that is the cwd). Do **not** put a branded button per IDE in the Files header — that header already has filter + new file/folder + expand/collapse, and a row of logos would look like a launcher.
+
+Preferred chrome: **one** control, “Open in IDE”, whose click launches the **configured default**. A small chevron (split button) or a long-press opens the other configured editors. Same action on the folder context menu next to Reveal in Git Bash, and as command-palette entries (`Open in Cursor`, `Open in VS Code`, …). Icon: Lucide `ExternalLink` (box + arrow **up-right**). That is the usual “open elsewhere” glyph. An arrow up-left is the wrong compass; do not invent an “IDE ↖” word-button.
+
+Settings: a short list of editors (name, command or URL protocol, default flag). Seed with auto-detect of `code` / `cursor` on PATH. Spyder is a conda CLI (`spyder` in the project env), so it belongs **after Phase 2**, not as a protocol handler. First cut can be VS Code + Cursor only. Open the **folder**, not a single file, unless the tree context menu is “Open this folder in IDE”. Local projects only until SSH remotes have a story.
+
+This stays in the parking lot until Phase 1 is verified. It is a small spawn, not a numbered phase.
 
 ---
 
