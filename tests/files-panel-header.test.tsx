@@ -16,7 +16,6 @@ function renderHeader(overrides: Partial<React.ComponentProps<typeof FilesPanelH
     onFilterChange: vi.fn(),
     onNewFile: vi.fn(),
     onNewFolder: vi.fn(),
-    onExpandAll: vi.fn(),
     onCollapseAll: vi.fn(),
     ...overrides
   }
@@ -25,24 +24,22 @@ function renderHeader(overrides: Partial<React.ComponentProps<typeof FilesPanelH
 }
 
 describe('FilesPanelHeader', () => {
-  it('keeps filter and actions on one row', () => {
+  it('keeps filter and actions on one row without expand-all', () => {
     renderHeader()
     expect(screen.getByLabelText('Filter files')).toBeTruthy()
     expect(screen.getByRole('button', { name: 'New file' })).toBeTruthy()
     expect(screen.getByRole('button', { name: 'New folder' })).toBeTruthy()
-    expect(screen.getByRole('button', { name: 'Expand all' })).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Collapse all' })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Expand all' })).toBeNull()
   })
 
-  it('calls create and expand handlers from the toolbar', () => {
+  it('calls create and collapse handlers from the toolbar', () => {
     const props = renderHeader()
     fireEvent.click(screen.getByRole('button', { name: 'New file' }))
     fireEvent.click(screen.getByRole('button', { name: 'New folder' }))
-    fireEvent.click(screen.getByRole('button', { name: 'Expand all' }))
     fireEvent.click(screen.getByRole('button', { name: 'Collapse all' }))
     expect(props.onNewFile).toHaveBeenCalledTimes(1)
     expect(props.onNewFolder).toHaveBeenCalledTimes(1)
-    expect(props.onExpandAll).toHaveBeenCalledTimes(1)
     expect(props.onCollapseAll).toHaveBeenCalledTimes(1)
   })
 

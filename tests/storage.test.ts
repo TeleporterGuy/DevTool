@@ -41,6 +41,7 @@ describe('Storage', () => {
     expect(config.codexCommand).toBe('')
     expect(config.portableNodeDir).toBe('')
     expect(config.windowsTerminal).toBe('git-bash')
+    expect(config.externalEditors).toEqual({ editors: [], defaultId: null })
   })
 
   it('fills in new config defaults for configs written before the key existed', () => {
@@ -53,6 +54,7 @@ describe('Storage', () => {
     expect(config.piCommand).toBe('')
     expect(config.portableNodeDir).toBe('')
     expect(config.windowsTerminal).toBe('git-bash')
+    expect(config.externalEditors).toEqual({ editors: [], defaultId: null })
   })
 
   it('round-trips the portable Node directory', () => {

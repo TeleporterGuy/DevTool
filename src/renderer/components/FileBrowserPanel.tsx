@@ -3,6 +3,7 @@ import { useApp } from '../context/AppContext'
 import { useGitStatus } from '../hooks/useGitStatus'
 import { isRemoteProject, isShellCommandProject } from '../../shared/types'
 import { joinWorkspaceDir } from '../../shared/workspace-path'
+import { openWorkspaceInIde } from '../openWorkspaceInIde'
 import FileTree, { type FileTreeHandle } from './FileTree'
 import FilesPanelHeader from './FilesPanelHeader'
 import GitStatus from './GitStatus'
@@ -19,6 +20,7 @@ export default function FileBrowserPanel(): React.ReactElement | null {
     selectedTaskId,
     selectedProject,
     selectedTask,
+    config,
     openOrFocusDiffTab,
     openOrFocusEditorTab,
     addTab
@@ -137,7 +139,6 @@ export default function FileBrowserPanel(): React.ReactElement | null {
                 onFilterChange={setFilterQuery}
                 onNewFile={() => fileTreeRef.current?.startCreate('file')}
                 onNewFolder={() => fileTreeRef.current?.startCreate('directory')}
-                onExpandAll={() => { void fileTreeRef.current?.expandAll() }}
                 onCollapseAll={() => fileTreeRef.current?.collapseAll()}
               />
               <div className="flex-1 overflow-auto min-h-0">
@@ -148,6 +149,8 @@ export default function FileBrowserPanel(): React.ReactElement | null {
                   onFileClick={handleFileClick}
                   filterQuery={filterQuery}
                   onRevealInTerminal={handleRevealInTerminal}
+                  ideEditors={config?.externalEditors?.editors ?? []}
+                  onOpenInIde={(editorId) => openWorkspaceInIde(editorId, effectiveDir)}
                 />
               </div>
             </>

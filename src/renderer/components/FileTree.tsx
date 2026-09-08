@@ -10,6 +10,8 @@ interface Props {
   onFileClick: (filePath: string) => void
   filterQuery?: string
   onRevealInTerminal?: (relativeDir: string) => void
+  ideEditors?: Array<{ id: string; name: string }>
+  onOpenInIde?: (editorId: string) => Promise<string | null>
 }
 
 type StatusColor = 'var(--color-danger)' | 'var(--color-warn)' | 'var(--color-success)' | undefined
@@ -363,7 +365,9 @@ const FileTree = React.forwardRef<FileTreeHandle, Props>(function FileTree({
   gitStatus,
   onFileClick,
   filterQuery = '',
-  onRevealInTerminal
+  onRevealInTerminal,
+  ideEditors = [],
+  onOpenInIde
 }, ref) {
   const [expandedDirs, setExpandedDirs] = useState<Set<string>>(new Set())
   const [childrenCache, setChildrenCache] = useState<Record<string, DirectoryEntry[]>>({})
@@ -825,6 +829,21 @@ const FileTree = React.forwardRef<FileTreeHandle, Props>(function FileTree({
                 Reveal in Git Bash
               </button>
             )}
+            {onOpenInIde && ideEditors.map((editor) => (
+              <button
+                key={editor.id}
+                className={menuItemCls}
+                onClick={() => {
+                  setMenu(null)
+                  void onOpenInIde(editor.id).then((message) => {
+                    if (message) setActionError(message)
+                    else setActionError(null)
+                  })
+                }}
+              >
+                Open in {editor.name || 'editor'}
+              </button>
+            ))}
           </div>
         </>
       )}

@@ -88,6 +88,11 @@ const api = {
   pickFile: (title?: string): Promise<string | null> =>
     ipcRenderer.invoke('pick-file', title),
 
+  externalIdeDetect: (): Promise<Array<{ name: string; command: string }>> =>
+    ipcRenderer.invoke('external-ide-detect'),
+  openInIde: (editorId: string, folder: string): Promise<void> =>
+    ipcRenderer.invoke('open-in-ide', editorId, folder),
+
   /** Main-process platform. Renderer uses this for Windows-only Settings. */
   platform: process.platform,
 

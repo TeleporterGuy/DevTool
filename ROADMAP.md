@@ -149,11 +149,11 @@ Work items:
 
 ---
 
-## Phase 1.2 — Open workspace in an external IDE (mid-phase)
+## Phase 1.2 — Open workspace in an external IDE (mid-phase) — landed
 
 Not a new numbered phase. Same explorer closeout before `0.3.0`: DevTool hosts Pi and the tree; heavier editing happens in the user’s real IDE. This is a **handover**, not a fourth Files/Git/Notes view.
 
-**Chrome:** one control in the **content toolbar** — the row that already has Files, Git, Notes (and the split-pane toggle). Sit it in that cluster, after the panel tabs and before the split button. Click = configured default editor; chevron = other configured editors. It is an action (spawn and leave), so it must not look like a panel tab. Icon: Lucide `ExternalLink` (box + arrow **up-right**), tooltip “Open in {default}”. Secondary: folder context menu next to Reveal in Git Bash, and palette commands (`Open in Cursor`, …). Local projects only. Open the **project folder** (task worktree when that is the cwd), not a single file.
+**Chrome:** one control in the **content toolbar** — the row that already has Files, Git, Notes (and the split-pane toggle). Sit it in that cluster, after the panel tabs and before the split button. Click = configured default editor; chevron = other configured editors. It is an action (spawn and leave), so it must not look like a panel tab. Icon: Lucide `ExternalLink` (box + arrow **up-right**), tooltip “Open in {default}”. Secondary: folder context menu next to Reveal in Git Bash, and palette commands (`Open in Cursor`, …). Local projects only. Open the **project folder** (task worktree when that is the cwd), not a single file. **Landed.**
 
 **Settings (required).** Today Settings has Appearance / Terminal / Editor & Diff / AI Tools / Sidebar / Tasks. Editor & Diff is Monaco-only (“Applies to Monaco-backed file editor and diff tabs”). Do **not** overload that copy. Add a second group on that same tab — **External IDEs** — or a small extra settings tab if the list UI needs room. No new Settings category for two binaries.
 
@@ -168,7 +168,7 @@ Persist on `AppConfig` (app-wide, not per-project). Spawn the process with the f
 
 **Spyder** is a conda CLI in the project env. Out of 1.2; pick it up after Phase 2.
 
-**Effort:** small spawn + Settings list + one toolbar split button. Ships in the same `0.2.y` / `0.3.0` train as the rest of Phase 1, after 1.1.
+**Effort:** small spawn + Settings list + one toolbar split button. Landed in `0.2.y`; still ships in the same `0.3.0` train as the rest of Phase 1 after Windows verify.
 
 ---
 
@@ -249,8 +249,8 @@ Keep upstream `master` as a remote (`upstream`) and rebase or merge periodically
 1. Windows shell resolution + Git Bash PTY + documented rebuild. **Done** (Git Bash default + Settings presets; portable Node PATH and rebuild docs landed earlier).
 2. Configurable spawn PATH (portable Node) + env passthrough. **Done.**
 3. Win dir packaging notes / script. **Done.** (`npm run build:win` → `dist/win-unpacked`.)
-4. File explorer CRUD. **Landed** (filter, Reveal in Git Bash, 1.1 toolbar; ignore list removed). Verify on Windows before bumping to `0.3.0`.
-5. Open workspace in external IDE (Phase 1.2: toolbar split button + Settings list). Same `0.3.0` train.
+4. File explorer CRUD. **Landed** (filter, Reveal in Git Bash, 1.1 toolbar, 1.2 external IDE handover; ignore list removed). Verify on Windows before bumping to `0.3.0`.
+5. Open workspace in external IDE (Phase 1.2: toolbar split button + Settings list). **Landed.** Same `0.3.0` train.
 6. Conda env picker on spawn.
 7. JupyterLab browser-tab launcher.
 8. Python and Markdown LSP spike, then harden.

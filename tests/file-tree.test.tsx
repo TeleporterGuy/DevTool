@@ -328,6 +328,34 @@ describe('FileTree', () => {
     expect(onReveal).toHaveBeenCalledWith('src')
   })
 
+  it('offers Open in Cursor from the context menu when editors are configured', async () => {
+    window.api.fbReadDirectory = vi.fn(() =>
+      Promise.resolve([{ name: 'src', type: 'directory' as const, relativePath: 'src' }])
+    )
+    const onOpenInIde = vi.fn().mockResolvedValue(null)
+    render(
+      <FileTree
+        projectDir="/project"
+        gitStatus={null}
+        onFileClick={vi.fn()}
+        ideEditors={[{ id: 'cursor', name: 'Cursor' }]}
+        onOpenInIde={onOpenInIde}
+      />
+    )
+    fireEvent.contextMenu(await screen.findByText('src'))
+    fireEvent.click(screen.getByText('Open in Cursor'))
+    expect(onOpenInIde).toHaveBeenCalledWith('cursor')
+  })
+
+  it('omits Open in when no editors are configured', async () => {
+    window.api.fbReadDirectory = vi.fn(() =>
+      Promise.resolve([{ name: 'src', type: 'directory' as const, relativePath: 'src' }])
+    )
+    render(<FileTree projectDir="/project" gitStatus={null} onFileClick={vi.fn()} />)
+    fireEvent.contextMenu(await screen.findByText('src'))
+    expect(screen.queryByText(/Open in /)).toBeNull()
+  })
+
   it('creates a file from startCreate on the tree handle (toolbar)', async () => {
     const listing: Record<string, any[]> = { '': [{ name: 'a.ts', type: 'file', relativePath: 'a.ts' }] }
     window.api.fbReadDirectory = vi.fn((_dir: string, rel: string) =>

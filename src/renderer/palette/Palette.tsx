@@ -11,11 +11,14 @@ import { projectsToEntities } from './sources/projects'
 import { tasksToEntities } from './sources/tasks'
 import { openTabsToEntities } from './sources/openTabs'
 import { notesToEntities } from './sources/notes'
+import { openInIdeToEntities } from './sources/openInIde'
 import './sources/commands' // side-effect: register commands
 import { PaletteFooter } from './PaletteFooter'
 import { PaletteList } from './PaletteList'
 import { usePaletteHotkey } from './usePaletteHotkey'
 import type { PaletteEntity, ScoredResult, Prefix, EntityKind } from './types'
+import { localProjectFolder } from '../../shared/external-editors'
+import { openWorkspaceInIde } from '../openWorkspaceInIde'
 
 type FooterPrefix = Prefix | '*'
 
@@ -96,13 +99,16 @@ export function Palette(): React.ReactElement | null {
     const openTabsEnts = openTabsToEntities(actions, { allProjects: parsed.allProjects })
     const notesEnts = notesToEntities(actions, { allProjects: parsed.allProjects })
     const ctx = { actions }
-    const commandsEnts: PaletteEntity[] = commandRegistry.getAvailable(ctx).map(c => ({
-      kind: 'command' as const,
-      id: `command:${c.id}`,
-      title: c.title,
-      searchable: [c.title, ...(c.aliases ?? [])].join(' '),
-      shortcut: c.shortcut
-    }))
+    const commandsEnts: PaletteEntity[] = [
+      ...commandRegistry.getAvailable(ctx).map(c => ({
+        kind: 'command' as const,
+        id: `command:${c.id}`,
+        title: c.title,
+        searchable: [c.title, ...(c.aliases ?? [])].join(' '),
+        shortcut: c.shortcut
+      })),
+      ...openInIdeToEntities(actions)
+    ]
 
     if (parsed.prefix !== null) {
       const wantedKind = KIND_FOR_PREFIX[parsed.prefix]
@@ -146,8 +152,16 @@ export function Palette(): React.ReactElement | null {
 
     if (e.kind === 'command') {
       const cmdId = id.slice('command:'.length)
-      const cmd = commandRegistry.getById(cmdId)
-      if (cmd) Promise.resolve(cmd.run({ actions })).catch(() => {})
+      if (cmdId.startsWith('open-ide:')) {
+        const editorId = cmdId.slice('open-ide:'.length)
+        const project = actions.projects.find(p => p.id === actions.selectedProjectId)
+        const task = project?.tasks.find(t => t.id === actions.selectedTaskId)
+        const folder = localProjectFolder(project, task ?? null)
+        if (folder) void openWorkspaceInIde(editorId, folder)
+      } else {
+        const cmd = commandRegistry.getById(cmdId)
+        if (cmd) Promise.resolve(cmd.run({ actions })).catch(() => {})
+      }
     } else if (e.kind === 'project') {
       const projectId = id.slice('project:'.length)
       actions.selectProjectHome(projectId)

@@ -83,6 +83,13 @@ export class Storage {
       const { collapsedFolderIds: _legacy, ...rest } = parsed
       const config = { ...DEFAULT_CONFIG, ...rest } as AppConfig
       config.windowsTerminal = coerceWindowsTerminal(config.windowsTerminal)
+      const savedEditors = (rest.externalEditors && typeof rest.externalEditors === 'object')
+        ? rest.externalEditors as { editors?: unknown; defaultId?: unknown }
+        : null
+      config.externalEditors = {
+        editors: Array.isArray(savedEditors?.editors) ? savedEditors.editors as AppConfig['externalEditors']['editors'] : [],
+        defaultId: typeof savedEditors?.defaultId === 'string' ? savedEditors.defaultId : null
+      }
       return config
     } catch {
       return { ...DEFAULT_CONFIG }

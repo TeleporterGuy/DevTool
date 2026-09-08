@@ -22,6 +22,7 @@ import { parseNumstat } from './git-diff-summary'
 import { GIT_STATUS_ARGS, parseGitStatusZ } from './git-status-parse'
 import { AI_TAB_META } from '../shared/types'
 import { agentCommandOverride, conptySpawnArgv, isAiAgentCommand, resolveAgentCommand } from './resolve-agent-command'
+import { detectExternalEditors, openFolderInEditor } from './external-ide'
 import { isLocalInteractiveTerminal, resolveLocalTerminalSpawn } from './resolve-local-terminal'
 import { findGitBashExe, setPortableNodeDir } from './shell-env'
 import { resolveSafeProjectPath } from './project-fs-path'
@@ -601,6 +602,15 @@ export class AppRuntime {
       this.storage.saveConfig(this.config)
       setPortableNodeDir(this.config.portableNodeDir)
       this.broadcastToAllWindows('config-updated', clone(this.config))
+      return undefined
+    })
+
+    ipcMain.handle('external-ide-detect', () => detectExternalEditors())
+    ipcMain.handle('open-in-ide', async (_event, editorId: string, folder: string) => {
+      const editors = this.config.externalEditors?.editors ?? []
+      const editor = editors.find((item) => item.id === editorId)
+      if (!editor) throw new Error('That editor is not in Settings.')
+      await openFolderInEditor(editor, folder)
       return undefined
     })
 

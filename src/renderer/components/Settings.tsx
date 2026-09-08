@@ -12,6 +12,7 @@ import {
   EDITOR_TAB_SIZE_MIN
 } from './monacoOptions'
 import { GrpHead, FormGroup, SetBlock, Group, GroupRow, SegCtl, Switch, Field, Select, HelperText, Disclosure, LinkBtn } from './ui'
+import ExternalIdesSettings from './ExternalIdesSettings'
 
 interface Props {
   onClose: () => void
@@ -377,6 +378,10 @@ export default function Settings({ onClose }: Props): React.ReactElement {
                 }
               />
             </Group>
+            <ExternalIdesSettings
+              value={config.externalEditors ?? { editors: [], defaultId: null }}
+              onChange={(externalEditors) => updateConfig({ externalEditors })}
+            />
           </>
         )
 

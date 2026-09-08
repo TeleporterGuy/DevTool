@@ -5,10 +5,12 @@ import { useMetaHeld } from '../hooks/useMetaHeld'
 import { useGitStatus } from '../hooks/useGitStatus'
 import { buildWindowTitle } from '../hooks/useAppState'
 import { isRemoteProject, isRenamableTab, isShellCommandProject, type FileBrowserTab } from '../../shared/types'
+import { localProjectFolder } from '../../shared/external-editors'
 import Pane from './Pane'
 import TunnelPopup from './TunnelPopup'
 import UnsavedChangesModal from './UnsavedChangesModal'
 import StateSyncErrorModal from './StateSyncErrorModal'
+import OpenInIdeButton from './OpenInIdeButton'
 import { getPaneFromValue, resolvePaneForMenuAction, type PaneSide } from './paneFocus'
 import type { TabDragState, TabDropTarget } from './tabDrag'
 import type { TunnelConfig, TunnelState } from '../../shared/types'
@@ -63,7 +65,8 @@ export default function ContentArea(): React.ReactElement {
     zoomTerminal,
     zoomBrowser,
     getTaskViewState,
-    updateProject
+    updateProject,
+    config
   } = useApp()
   useMetaHeld()
   const panesRef = useRef<HTMLDivElement | null>(null)
@@ -78,6 +81,7 @@ export default function ContentArea(): React.ReactElement {
   const [sshStatuses, setSshStatuses] = useState<Record<string, string>>({})
   const [tunnelStates, setTunnelStates] = useState<Record<string, TunnelState>>({})
   const [tunnelPopupOpen, setTunnelPopupOpen] = useState(false)
+  const [openInIdeError, setOpenInIdeError] = useState<string | null>(null)
 
   useEffect(() => {
     window.api.onSshStatusChanged((projectId: string, status: string) => {
@@ -450,6 +454,14 @@ export default function ContentArea(): React.ReactElement {
               />
             </>
           )}
+          {canShowLocalTabs && (
+            <OpenInIdeButton
+              editors={config?.externalEditors?.editors ?? []}
+              defaultId={config?.externalEditors?.defaultId ?? null}
+              folder={localProjectFolder(selectedProject, selectedTask)}
+              onError={setOpenInIdeError}
+            />
+          )}
           {selectedTask && (
             <button
               className={`bg-transparent border-0 cursor-pointer w-[30px] h-6 rounded-md leading-none inline-flex items-center justify-center hover:bg-surface-3 [-webkit-app-region:no-drag] transition-colors duration-(--motion-fast) ${selectedTaskView?.splitOpen ? 'text-accent' : 'text-text-muted hover:text-text'}`}
@@ -462,6 +474,11 @@ export default function ContentArea(): React.ReactElement {
             </button>
           )}
           </div>
+        </div>
+      )}
+      {openInIdeError && (
+        <div role="alert" className="px-2 py-1 text-sm text-danger bg-surface-2 border-b-[0.5px] border-border">
+          {openInIdeError}
         </div>
       )}
 

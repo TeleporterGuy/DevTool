@@ -372,6 +372,8 @@ export interface AppConfig {
   editorTabSize: number
   diffRenderSideBySide: boolean
   diffIgnoreTrimWhitespace: boolean
+  /** App-wide list of external IDEs. Empty until the user adds or Detects them. */
+  externalEditors: ExternalEditorsConfig
   enableClaude: boolean
   enableCodex: boolean
   enablePi: boolean
@@ -395,6 +397,21 @@ export interface AppConfig {
     heightPx: number
   }
   idleTaskCleanup: IdleTaskCleanupConfig
+}
+
+/** One configured editor used to open the local project folder. */
+export interface ExternalEditor {
+  id: string
+  name: string
+  /** Absolute path preferred; a command name on PATH is also accepted. */
+  command: string
+  /** Extra CLI flags, split on whitespace. The folder is always appended last. */
+  extraArgs: string
+}
+
+export interface ExternalEditorsConfig {
+  editors: ExternalEditor[]
+  defaultId: string | null
 }
 
 /**
@@ -602,7 +619,8 @@ export const DEFAULT_CONFIG: AppConfig = {
     combine: 'and',
     settledOnly: true,
     includeCleanWorkspaces: false
-  }
+  },
+  externalEditors: { editors: [], defaultId: null }
 }
 
 export function createTaskViewState(task: Task): TaskViewState {
