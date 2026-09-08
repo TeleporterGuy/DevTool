@@ -124,7 +124,7 @@ Upstream tree can list and open files. Extend it; do not replace it.
 
 **Outcome:** create / rename / delete files and folders, plus a quick filter in the Files panel. Optional: reveal in Git Bash.
 
-Stay out of: full project search, git graph (see Ideas), VS Code-style explorer features.
+Stay out of: full project search, git graph (see Ideas), VS Code-style explorer features. Handing the **folder** to an external IDE is Phase 1.2, not an in-app IDE.
 
 Work items:
 
@@ -146,6 +146,29 @@ Work items:
 2. **Reconsider the ignore list** — dropped. The Files tree lists every name, including `.env` / `.git`.
 
 `package.json` is **0.2.3**. **0.3.0** still waits on Windows verify of the full Phase 1 explorer.
+
+---
+
+## Phase 1.2 — Open workspace in an external IDE (mid-phase)
+
+Not a new numbered phase. Same explorer closeout before `0.3.0`: DevTool hosts Pi and the tree; heavier editing happens in the user’s real IDE. This is a **handover**, not a fourth Files/Git/Notes view.
+
+**Chrome:** one control in the **content toolbar** — the row that already has Files, Git, Notes (and the split-pane toggle). Sit it in that cluster, after the panel tabs and before the split button. Click = configured default editor; chevron = other configured editors. It is an action (spawn and leave), so it must not look like a panel tab. Icon: Lucide `ExternalLink` (box + arrow **up-right**), tooltip “Open in {default}”. Secondary: folder context menu next to Reveal in Git Bash, and palette commands (`Open in Cursor`, …). Local projects only. Open the **project folder** (task worktree when that is the cwd), not a single file.
+
+**Settings (required).** Today Settings has Appearance / Terminal / Editor & Diff / AI Tools / Sidebar / Tasks. Editor & Diff is Monaco-only (“Applies to Monaco-backed file editor and diff tabs”). Do **not** overload that copy. Add a second group on that same tab — **External IDEs** — or a small extra settings tab if the list UI needs room. No new Settings category for two binaries.
+
+Minimum fields (same pattern as Git Bash path + Browse on the Terminal tab):
+
+- List of editors: display name, executable path, optional extra args.
+- Which one is the **default**.
+- Browse (pick the `.exe`) and a **Detect** action for `code` / `cursor` on PATH (VS Code / Cursor first cut).
+- Hide or disable the toolbar control when the list is empty, with a tooltip that points at Settings.
+
+Persist on `AppConfig` (app-wide, not per-project). Spawn the process with the folder as the argument (`code <abs-path>` / `cursor <abs-path>`). Do not invent protocol-URL settings unless Detect needs them.
+
+**Spyder** is a conda CLI in the project env. Out of 1.2; pick it up after Phase 2.
+
+**Effort:** small spawn + Settings list + one toolbar split button. Ships in the same `0.2.y` / `0.3.0` train as the rest of Phase 1, after 1.1.
 
 ---
 
@@ -208,10 +231,14 @@ Parking lot. Do not start these instead of the numbered phases. Several items al
 | JupyterLab in a browser tab | Phase 3 |
 | Language servers (Python, Markdown) | Phase 4 |
 | Native notebook cells + kernel | Phase 5 |
+| Open workspace in VS Code / Cursor | Phase 1.2 |
+| Spyder as an external IDE | after Phase 2 |
 
 **Git tree.** A branch/commit graph in the UI (log, parents, maybe checkout). Useful for “where am I” without leaving DevTool. Phase 1 explicitly stays out of a git graph so the file explorer does not grow into an IDE. If it happens, it is Phase 5-or-later: read-only first, no rebase UI.
 
 **Generate commit message with a specified agent.** Pre-fill the existing git commit box from Pi (or Claude/Codex) given the staged diff. Low confidence this needs a DevTool feature: you can already ask Pi in a tab to write the message and paste it. Only worth it if the commit UI is used a lot and the round-trip is annoying. Prefer “use the project’s default agent” over a per-commit picker.
+
+**Open this workspace in an external IDE.** Sequenced as **Phase 1.2**. Spyder waits for conda (Phase 2).
 
 ---
 
@@ -223,9 +250,10 @@ Keep upstream `master` as a remote (`upstream`) and rebase or merge periodically
 2. Configurable spawn PATH (portable Node) + env passthrough. **Done.**
 3. Win dir packaging notes / script. **Done.** (`npm run build:win` → `dist/win-unpacked`.)
 4. File explorer CRUD. **Landed** (filter, Reveal in Git Bash, 1.1 toolbar; ignore list removed). Verify on Windows before bumping to `0.3.0`.
-5. Conda env picker on spawn.
-6. JupyterLab browser-tab launcher.
-7. Python and Markdown LSP spike, then harden.
+5. Open workspace in external IDE (Phase 1.2: toolbar split button + Settings list). Same `0.3.0` train.
+6. Conda env picker on spawn.
+7. JupyterLab browser-tab launcher.
+8. Python and Markdown LSP spike, then harden.
 
 Skip a step only if the previous phase already includes it by accident (e.g. PATH work that makes conda trivial).
 
@@ -260,7 +288,7 @@ Work machine constraints to re-test every phase: Git Bash, portable Node zip, Pi
 | --- | --- | --- | --- |
 | 0 | `0.2.0` (shipped) | Git Bash + Pi in DevTool on Windows | 1–2 months calendar / 2–4 weeks focused |
 | 0.5 | (no bump, done) | No DevTool inference UI (Pi keeps its settings) | n/a |
-| 1 | `0.2.2` → `0.3.0` | File tree CRUD (`0.2.2` = ignore removed + explorer toolbar) | 1–2 weeks |
+| 1 | `0.2.2` → `0.3.0` | File tree CRUD + 1.2 external IDE handover | 1–2 weeks |
 | 2 | `0.4.0` | Conda picker on spawn | 1–2 weeks |
 | 3 | `0.5.0` | JupyterLab in a browser tab | days |
 | 4 | `0.6.0` | Usable Python and Markdown LSPs | 1–2 months |
