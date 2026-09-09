@@ -2,6 +2,7 @@
 import { commandRegistry } from '../CommandRegistry'
 import { paletteEvents } from '../paletteEvents'
 import { AI_TAB_TYPES, AI_TAB_META, isHomeTask, isShellCommandProject, pinnedItemKey, type AiTabType, type PinnedItem } from '../../../shared/types'
+import { shortcutPlatform } from '../../../shared/shortcut-label'
 
 function currentPinTargets(actions: any): { project: PinnedItem | null; task: PinnedItem | null; isPinned: (item: PinnedItem) => boolean } {
   const { selectedProjectId, selectedTaskId, projects, pinnedItems } = actions
@@ -26,7 +27,8 @@ commandRegistry.register({
   id: 'cmd.openSettings',
   title: 'Open Settings',
   aliases: ['settings', 'prefs'],
-  shortcut: '⌘,',
+  // Menu binds Cmd+, on macOS only — do not claim Ctrl+, on Windows.
+  shortcut: shortcutPlatform() === 'darwin' ? 'Command+,' : undefined,
   run: () => paletteEvents.emit('open-settings')
 })
 
@@ -52,6 +54,7 @@ commandRegistry.register({
   id: 'cmd.newTerminalTab',
   title: 'New Terminal Tab',
   aliases: ['terminal', 'term'],
+  shortcut: 'CmdOrCtrl+T',
   when: ctx => !!ctx.actions.selectedProjectId && !!ctx.actions.selectedTaskId,
   run: ctx => {
     const { selectedProjectId, selectedTaskId } = ctx.actions
@@ -120,6 +123,7 @@ commandRegistry.register({
   id: 'cmd.toggleSidebar',
   title: 'Toggle Sidebar',
   aliases: ['sidebar'],
+  shortcut: 'CmdOrCtrl+B',
   run: () => paletteEvents.emit('toggle-sidebar')
 })
 
@@ -127,6 +131,7 @@ commandRegistry.register({
   id: 'cmd.toggleFileBrowser',
   title: 'Toggle File Browser',
   aliases: ['files', 'browser panel'],
+  shortcut: 'CmdOrCtrl+Shift+E',
   run: () => paletteEvents.emit('toggle-file-browser')
 })
 
@@ -151,6 +156,7 @@ commandRegistry.register({
   id: 'cmd.openDevTools',
   title: 'Open DevTools',
   aliases: ['devtools', 'inspect'],
+  shortcut: 'CmdOrCtrl+Alt+I',
   run: () => paletteEvents.emit('open-devtools')
 })
 

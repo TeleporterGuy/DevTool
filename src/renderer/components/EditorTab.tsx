@@ -8,6 +8,7 @@ import { FILE_BROWSER_REFRESH_MS } from '../hooks/fileBrowserRefresh'
 import { buildMonacoEditorOptions, getLanguageFromPath } from './monacoOptions'
 import { defineMonacoThemes, monacoThemeFor } from './monacoTheme'
 import MarkdownPreview from './MarkdownPreview'
+import { formatShortcutForApp } from '../../shared/shortcut-label'
 
 interface Props {
   tabId: string
@@ -258,7 +259,9 @@ export default function EditorTab({ tabId, visible, filePath, projectDir, projec
             <button
               className="absolute top-1.5 right-7 z-(--z-sticky) bg-surface border border-border text-accent cursor-pointer px-2 py-0.5 rounded-md text-sm leading-snug hover:underline"
               onClick={handleToggleView}
-              title={viewMode === 'source' ? 'Show preview (⌘⇧V)' : 'Show source (⌘⇧V)'}
+              title={viewMode === 'source'
+                ? `Show preview (${formatShortcutForApp('CmdOrCtrl+Shift+V')})`
+                : `Show source (${formatShortcutForApp('CmdOrCtrl+Shift+V')})`}
             >
               {viewMode === 'source' ? 'Preview' : 'Source'}
             </button>

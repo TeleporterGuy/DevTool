@@ -13,6 +13,7 @@ import {
 } from './monacoOptions'
 import { GrpHead, FormGroup, SetBlock, Group, GroupRow, SegCtl, Switch, Field, Select, HelperText, Disclosure, LinkBtn } from './ui'
 import ExternalIdesSettings from './ExternalIdesSettings'
+import { formatShortcutForApp } from '../../shared/shortcut-label'
 
 interface Props {
   onClose: () => void
@@ -637,7 +638,7 @@ export default function Settings({ onClose }: Props): React.ReactElement {
                 </Select>
                 <HelperText>
                   {isAutoOpenAvailable(config.newTaskAutoOpen, config)
-                    ? 'Applies to the New task composer (⌘N, or the pencil in the inbox) — the + Task button in the project tree still makes an empty task.'
+                    ? `Applies to the New task composer (${formatShortcutForApp('CmdOrCtrl+N')}, or the pencil in the inbox) — the + Task button in the project tree still makes an empty task.`
                     : 'That tool is turned off under AI Tools, so new tasks open nothing. Turn it on there, or pick another option.'}
                 </HelperText>
               </SetBlock>

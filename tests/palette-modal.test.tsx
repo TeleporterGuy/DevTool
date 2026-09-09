@@ -44,6 +44,32 @@ describe('Palette', () => {
     expect(screen.queryByPlaceholderText('type to search…')).toBeNull()
   })
 
+  it('opens on Ctrl+K', async () => {
+    render(<Palette />)
+    await act(async () => { fireEvent.keyDown(window, { key: 'k', ctrlKey: true }) })
+    expect(screen.getByPlaceholderText('type to search…')).toBeTruthy()
+  })
+
+  it('Open Settings has no shortcut glyph or Ctrl+, on Windows', async () => {
+    render(<Palette />)
+    await act(async () => { pressCmdK() })
+    const input = screen.getByPlaceholderText('type to search…') as HTMLInputElement
+    await act(async () => { fireEvent.change(input, { target: { value: 'Open Settings' } }) })
+    const row = screen.getByRole('button', { name: /Open Settings/ })
+    expect(row.textContent).not.toMatch(/⌘/)
+    expect(row.textContent).not.toMatch(/Ctrl\+,/)
+  })
+
+  it('Toggle Sidebar shows the menu equivalent on this OS', async () => {
+    render(<Palette />)
+    await act(async () => { pressCmdK() })
+    const input = screen.getByPlaceholderText('type to search…') as HTMLInputElement
+    await act(async () => { fireEvent.change(input, { target: { value: 'Toggle Sidebar' } }) })
+    const row = screen.getByRole('button', { name: /Toggle Sidebar/ })
+    const expected = process.platform === 'darwin' ? '⌘B' : 'Ctrl+B'
+    expect(row.textContent).toContain(expected)
+  })
+
   it('clicking the > prefix in the footer inserts it into the input', async () => {
     render(<Palette />)
     await act(async () => { pressCmdK() })

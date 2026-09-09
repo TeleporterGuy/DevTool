@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import React from 'react'
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { createHomeTask, DEFAULT_CONFIG, type Project, type Task } from '../src/shared/types'
+import { formatShortcutForApp } from '../src/shared/shortcut-label'
 
 // React import is required by the JSX runtime under vitest's default transform.
 void React
@@ -225,6 +226,17 @@ afterEach(() => {
 })
 
 describe('closing an editor with unsaved changes', () => {
+  it('shows Windows Ctrl labels on tab chrome (not ⌘)', async () => {
+    await mountApp()
+    const close = `Close tab (${formatShortcutForApp('CmdOrCtrl+W')})`
+    const terminal = `New terminal (${formatShortcutForApp('CmdOrCtrl+T')})`
+    const split = `Open right pane (${formatShortcutForApp('CmdOrCtrl+D')})`
+    expect(close).not.toContain('⌘')
+    expect(screen.getAllByTitle(close).length).toBeGreaterThan(0)
+    expect(screen.getAllByTitle(terminal).length).toBeGreaterThan(0)
+    expect(screen.getByTitle(split)).toBeTruthy()
+  })
+
   it('prompts on ⌘W and leaves the tab and its buffer alone on Cancel', async () => {
     await mountApp()
     await type(0, 'unsaved a')
@@ -250,7 +262,7 @@ describe('closing an editor with unsaved changes', () => {
     await type(0, 'unsaved a')
 
     await act(async () => {
-      fireEvent.click(screen.getAllByTitle('Close tab (⌘W)')[0])
+      fireEvent.click(screen.getAllByTitle(`Close tab (${formatShortcutForApp('CmdOrCtrl+W')})`)[0])
       await new Promise(resolve => setTimeout(resolve, 0))
     })
 

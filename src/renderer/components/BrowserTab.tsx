@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect, useCallback } from 'react'
 import { useApp } from '../context/AppContext'
 import type { SshConfig } from '../../shared/types'
 import { BLANK_BROWSER_URL, normalizeBrowserUrl } from '../browserUrl'
+import { formatShortcutForApp } from '../../shared/shortcut-label'
 import LinkContextMenu, { type LinkMenuState } from './LinkContextMenu'
 
 interface Props {
@@ -198,7 +199,7 @@ export default function BrowserTab({ tabId, visible, initialUrl, projectId, task
       <div className="flex items-center gap-1 px-2 py-1 bg-surface-2 border-b-[0.5px] border-border">
         <button className="bg-transparent border-0 text-text-muted cursor-pointer px-2 py-1 rounded-md text-md hover:bg-surface-3 hover:text-text transition-colors duration-(--motion-fast)" onClick={() => webviewRef.current?.goBack()} title="Back">&larr;</button>
         <button className="bg-transparent border-0 text-text-muted cursor-pointer px-2 py-1 rounded-md text-md hover:bg-surface-3 hover:text-text transition-colors duration-(--motion-fast)" onClick={() => webviewRef.current?.goForward()} title="Forward">&rarr;</button>
-        <button className="bg-transparent border-0 text-text-muted cursor-pointer px-2 py-1 rounded-md text-md hover:bg-surface-3 hover:text-text transition-colors duration-(--motion-fast)" onClick={() => webviewRef.current?.reload()} title="Reload (⌘R)">&#8635;</button>
+        <button className="bg-transparent border-0 text-text-muted cursor-pointer px-2 py-1 rounded-md text-md hover:bg-surface-3 hover:text-text transition-colors duration-(--motion-fast)" onClick={() => webviewRef.current?.reload()} title={`Reload (${formatShortcutForApp('CmdOrCtrl+R')})`}>&#8635;</button>
         <div className="flex-1 flex items-center relative">
           {isRemote && proxyEnabled && <span className="absolute right-2 bg-accent text-accent-ink text-2xs font-semibold px-1.5 py-px rounded-sm uppercase tracking-wider pointer-events-none z-(--z-sticky)">Remote</span>}
           <input
@@ -229,7 +230,7 @@ export default function BrowserTab({ tabId, visible, initialUrl, projectId, task
             }
             setDevToolsOpen(!devToolsOpen)
           }}
-          title="Toggle DevTools (⌘⌥I)"
+          title={`Toggle DevTools (${formatShortcutForApp('CmdOrCtrl+Alt+I')})`}
         >
           &#9874;
         </button>

@@ -16,6 +16,7 @@ import type { TabDragState, TabDropTarget } from './tabDrag'
 import type { TunnelConfig, TunnelState } from '../../shared/types'
 
 import { joinWorkspaceDir } from '../../shared/workspace-path'
+import { formatShortcutForApp } from '../../shared/shortcut-label'
 
 function FileBrowserTabButton({
   icon,
@@ -466,7 +467,9 @@ export default function ContentArea(): React.ReactElement {
             <button
               className={`bg-transparent border-0 cursor-pointer w-[30px] h-6 rounded-md leading-none inline-flex items-center justify-center hover:bg-surface-3 [-webkit-app-region:no-drag] transition-colors duration-(--motion-fast) ${selectedTaskView?.splitOpen ? 'text-accent' : 'text-text-muted hover:text-text'}`}
               onClick={() => toggleSplit(selectedProject.id, selectedTask.id)}
-              title={selectedTaskView?.splitOpen ? 'Close right pane (⌘D)' : 'Open right pane (⌘D)'}
+              title={selectedTaskView?.splitOpen
+                ? `Close right pane (${formatShortcutForApp('CmdOrCtrl+D')})`
+                : `Open right pane (${formatShortcutForApp('CmdOrCtrl+D')})`}
             >
               {selectedTaskView?.splitOpen
                 ? <PanelRightClose size={15} />

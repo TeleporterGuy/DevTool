@@ -23,6 +23,7 @@ import { ChevronRight, Filter, Plus, Search, Settings as SettingsIcon, Plug, Squ
 import { RowActions, RowAction } from './ui'
 import { paletteEvents } from '../palette/paletteEvents'
 import { dashboardIconUrl, fetchDashboardIconsMetadata, type DashboardIconsMetadata } from './dashboardIcons'
+import { formatShortcutForApp } from '../../shared/shortcut-label'
 
 type DragState = {
   type: 'project' | 'task'
@@ -1052,7 +1053,7 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
           <button
             className={headerIconCls}
             onClick={() => setSwitcherActive(true)}
-            title="Quick switch (⌘P)"
+            title={`Quick switch (${formatShortcutForApp('CmdOrCtrl+P')})`}
           ><Search size={14} /></button>
           {sortedTags.length > 0 && (
             <div className="relative">

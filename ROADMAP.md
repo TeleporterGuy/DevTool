@@ -26,7 +26,7 @@ Company-deploy security snapshot (what this app actually is on a workstation): [
 
 Stay on **0.x** until the app is something you would tell a friend to unzip. **1.0.0** is that call, not “Phase 6 finished.”
 
-`package.json` is **0.3.1** (Phase 1 done; Phase 1.3 tagged). Shape:
+`package.json` is **0.3.2** (Phase 1 done; Phase 1.4 tagged). Shape:
 
 | Part | Meaning |
 | --- | --- |
@@ -41,7 +41,7 @@ Work inside a phase is `0.x.y`; shipping the phase is the next `0.(x+1).0`.
 | Phase 0 done | `0.2.0` |
 | Phase 1 done | `0.3.0` |
 | Phase 1.3 (Electron line) | `0.3.1` (tagged; not a numbered bump) |
-| Phase 1.4 (Windows shortcut labels) | `0.3.y`; not a numbered bump |
+| Phase 1.4 (Windows shortcut labels) | `0.3.2` (tagged; not a numbered bump) |
 | Phase 2 done | `0.4.0` |
 | Phase 3 done | `0.5.0` |
 | Phase 4 done | `0.6.0` |
@@ -139,7 +139,7 @@ Work items:
 
 **Verify:** done on Windows (CRUD / filter / 1.1 toolbar; Open in Cursor and VS Code for small folders and a large git repo). If VS Code seems to do nothing, leftover `Code.exe` processes can already own that folder — quit them in Task Manager and retry.
 
-**Closeout:** done. Phase 1 shipped as **0.3.0**. Phase 1.3 tagged **0.3.1**. Next is Phase 1.4 (Windows shortcut labels), then Phase 2 (hook auth + SSH trust). Conda is Phase 3.
+**Closeout:** done. Phase 1 shipped as **0.3.0**. Phase 1.3 tagged **0.3.1**. Phase 1.4 tagged **0.3.2**. Next is Phase 2 (hook auth + SSH trust). Conda is Phase 3.
 
 **Effort:** 1–2 weeks. Mid-phase **0.2.2** / **0.2.3** followed 1.1 polish. Shipped as **0.3.0** after Windows verify.
 
@@ -199,27 +199,29 @@ Work items:
 
 **Verify:** done on Windows (`npm install` → `npm run dev` → Git Bash → Pi TUI + hook status dot → blank Browser tab + navigate → Open in VS Code). SSH not part of this closeout. `npm run build:win` is the tagged copy.
 
-**Closeout:** done. `package.json` is **0.3.1**. Next is Phase 1.4 (Windows shortcut labels), then Phase 2 (hooks + SSH).
+**Closeout:** done. `package.json` was **0.3.1**. Next was Phase 1.4 (Windows shortcut labels), then Phase 2 (hooks + SSH).
 
 ---
 
-## Phase 1.4 — Windows shortcut map and labels (mid-phase)
+## Phase 1.4 — Windows shortcut map and labels (mid-phase) — done (`0.3.2`)
 
-Not a new numbered phase. Same `0.3.x` until you tag a build you would copy. Does **not** block Phase 1.3 or Phase 2. The Electron menu already uses `CmdOrCtrl`; this is the **visible** map, not new bindings.
+Not a new numbered phase. Tagged **`0.3.2`**. `package.json` minor stays **0.3** until Phase 2. The Electron menu already uses `CmdOrCtrl`; this is the **visible** map, not new bindings.
 
 **Outcome:** every shortcut that already exists is listed once (menu, palette, tooltips, tab chrome, settings copy) with its **Windows** equivalent, and the UI on Windows shows that map. No new shortcuts. Do not invent a keybinding editor.
 
 Work items:
 
-1. **Inventory what is already bound.** Menu accelerators in `src/main/index.ts`, renderer handlers (`ContentArea`, editor save/preview, palette), and any hardcoded ⌘ copy (tab bar, Files/Git chrome, Settings, Browser tab). One list: action → macOS key → Windows key (`Ctrl` for `Cmd`, `Alt` for `⌥`, `Shift` as `Shift`). Include chorded ones (`⌘⇧T`, `⌘⌥I`, tab `⌘1` / `⇧1`).
+1. **Inventory what is already bound.** **Landed.** Menu accelerators in `src/main/index.ts`, renderer handlers (`ContentArea`, editor save/preview, palette), and hardcoded ⌘ copy (tab bar, Settings, Browser tab). Files/Git chrome had none.
 
-2. **Visualize Windows keys in the UI.** On `win32`, tooltips, palette `shortcut` strings, and titles must not show `⌘`. Use the same labels Windows users already know (`Ctrl+W`, `Ctrl+Shift+T`, `Ctrl+Alt+I`). macOS can keep ⌘. One helper for display; do not duplicate the map in every tooltip.
+2. **Visualize Windows keys in the UI.** **Landed.** `src/shared/shortcut-label.ts` formats Electron accelerators. On `win32`, tooltips, palette rows, and titles use `Ctrl` / `Alt` / `Shift`. macOS keeps ⌘. Open Settings stays Mac-only (`Cmd+,`); the palette does not claim `Ctrl+,` on Windows.
 
 Stay out of: remapping, user-defined keys, PowerShell chords, teaching Git Bash its own readline bindings.
 
-**Verify on Windows:** hover the controls that currently say ⌘ (close tab, new terminal, palette, split pane, reload, DevTools, Settings mentions of ⌘N). Palette rows match the menu. The keys still fire; only the labels change.
+**Verify:** labels covered in unit tests on Windows (`Ctrl+W` / `Ctrl+T` / `Ctrl+D` chrome, palette `Ctrl+B`, Open Settings has no `⌘,`). Bindings unchanged.
 
-**Effort:** a short pass. Ships in `0.3.y` if tagged; otherwise land before Phase 2 so daily-driver Windows does not look like a Mac app.
+**Closeout:** done. `package.json` is **0.3.2**. Next is Phase 2 (hooks + SSH).
+
+**Effort:** a short pass. Tagged **0.3.2**.
 
 ---
 
@@ -334,7 +336,7 @@ Keep upstream `master` as a remote (`upstream`) and rebase or merge periodically
 4. File explorer CRUD. **Done** in `0.3.0` (filter, Reveal in Git Bash, 1.1 toolbar, 1.2 external IDE handover; ignore list removed).
 5. Open workspace in external IDE (Phase 1.2: toolbar split button + Settings list). **Done** in `0.3.0`.
 6. Supported Electron line + blank browser tab (Phase 1.3). **Done** in `0.3.1`.
-7. Windows shortcut map + labels (Phase 1.4: inventory existing bindings, show Ctrl/Alt on Windows). Can land before or after 1.3; do not invent a keybinding editor.
+7. Windows shortcut map + labels (Phase 1.4). **Done** in `0.3.2`.
 8. Hook authentication + SSH trust (Phase 2).
 9. Conda env picker on spawn (Phase 3).
 10. JupyterLab browser-tab launcher (Phase 4).
@@ -375,7 +377,7 @@ Work machine constraints to re-test every phase: Git Bash, portable Node zip, Pi
 | 0.5 | (no bump, done) | No DevTool inference UI (Pi keeps its settings) | n/a |
 | 1 | `0.3.0` (shipped) | File tree CRUD + 1.2 external IDE handover | 1–2 weeks |
 | 1.3 | `0.3.1` (shipped) | Supported Electron + blank browser tab (webview stays) | a few evenings to a week |
-| 1.4 | `0.3.y` | Existing shortcuts listed and shown as Windows keys | a short pass |
+| 1.4 | `0.3.2` (shipped) | Existing shortcuts listed and shown as Windows keys | a short pass |
 | 2 | `0.4.0` | Hook secret + Pi extension off `/tmp` + SSH known_hosts | ~1 week |
 | 3 | `0.5.0` | Conda picker on spawn | 1–2 weeks |
 | 4 | `0.6.0` | JupyterLab in a browser tab | days |

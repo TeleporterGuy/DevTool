@@ -1,6 +1,6 @@
 # Security audit (company-deploy readiness)
 
-Snapshot of what this fork actually is, from a security point of view, before putting it on company machines. Dated against **`0.3.1`** (Phase 1 shipped; Phase 1.3 tagged). Not a pentest. Not a promise that later phases stay clean.
+Snapshot of what this fork actually is, from a security point of view, before putting it on company machines. Dated against **`0.3.2`** (Phase 1 shipped; Phase 1.4 tagged). Not a pentest. Not a promise that later phases stay clean.
 
 This repository is a fork of [join3r/claude-project](https://github.com/join3r/claude-project). Work stays on [TeleporterGuy/DevTool](https://github.com/TeleporterGuy/DevTool). Product direction is in [ROADMAP.md](./ROADMAP.md).
 
@@ -125,7 +125,7 @@ Typical IT checklist items this repo does not provide:
 
 ## Decisions after the 0.3.0 audit
 
-Recorded so this file and [ROADMAP.md](./ROADMAP.md) stay aligned. Findings below the closeout paragraph are what is **still open** at `0.3.1`.
+Recorded so this file and [ROADMAP.md](./ROADMAP.md) stay aligned. Findings below the closeout paragraph are what is **still open** at `0.3.2`.
 
 | Audit item | Decision | Where it lives |
 | --- | --- | --- |
@@ -146,7 +146,7 @@ Work in this order so each step is demoable. Roadmap numbering after the audit:
 
 1. **Policy accept** — done as “same as a terminal.”
 2. **Phase 1.3** — **done** (`0.3.1`): Electron 43.6.0; blank browser tab; guest Node off; signing still off.
-3. **Phase 1.4** (optional, same `0.3.x`) — Windows shortcut labels. Does not block Phase 2.
+3. **Phase 1.4** — **done** (`0.3.2`): Windows shortcut labels. Labels only; no security change. Does not block Phase 2.
 4. **Phase 2** — hook authentication; Pi extension off `/tmp`; SSH `IdentitiesOnly` + DevTool `known_hosts` + socket dir `0700`.
 5. Then conda (Phase 3), Jupyter (Phase 4), LSP (Phase 5) as before.
 6. **Deferred:** config-dir ACLs, scrollback `tabId`, IPC cwd allow-list, Authenticode, a formal pilot.
@@ -180,4 +180,4 @@ Roadmap phases (conda, Jupyter, LSP) add more child processes and another browse
 
 Parking-lot ideas that would *increase* surface if pulled in: native notebook kernels, Windows OpenSSH as a second remote stack, extra LSPs talking stdio as the same user.
 
-This audit started as a snapshot at `0.3.0`. **Phase 1.3 (`0.3.1`):** Electron 43.6.0, `about:blank` new tabs, guest webview Node locked off. Still open: unsigned Windows folder, no CSP, unauthenticated hook server, SSH TOFU, wide IPC, plaintext `~/.devtool`. When Phase 2 lands, add another closeout paragraph here.
+This audit started as a snapshot at `0.3.0`. **Phase 1.3 (`0.3.1`):** Electron 43.6.0, `about:blank` new tabs, guest webview Node locked off. **Phase 1.4 (`0.3.2`):** Windows shortcut labels only. Still open: unsigned Windows folder, no CSP, unauthenticated hook server, SSH TOFU, wide IPC, plaintext `~/.devtool`. When Phase 2 lands, add another closeout paragraph here.

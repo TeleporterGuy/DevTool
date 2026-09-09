@@ -18,6 +18,7 @@ import { PaletteList } from './PaletteList'
 import { usePaletteHotkey } from './usePaletteHotkey'
 import type { PaletteEntity, ScoredResult, Prefix, EntityKind } from './types'
 import { localProjectFolder } from '../../shared/external-editors'
+import { formatShortcutForApp } from '../../shared/shortcut-label'
 import { openWorkspaceInIde } from '../openWorkspaceInIde'
 
 type FooterPrefix = Prefix | '*'
@@ -105,7 +106,7 @@ export function Palette(): React.ReactElement | null {
         id: `command:${c.id}`,
         title: c.title,
         searchable: [c.title, ...(c.aliases ?? [])].join(' '),
-        shortcut: c.shortcut
+        shortcut: c.shortcut ? formatShortcutForApp(c.shortcut) : undefined
       })),
       ...openInIdeToEntities(actions)
     ]

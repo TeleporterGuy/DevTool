@@ -6,6 +6,7 @@ import type { Tab, TabType } from '../../shared/types'
 import { useMenuPosition } from '../hooks/useMenuPosition'
 import { getTabDropIndex } from './tabDrag'
 import type { TabDragState, TabDropTarget } from './tabDrag'
+import { formatShortcutForApp } from '../../shared/shortcut-label'
 
 interface Props {
   tabs: Tab[]
@@ -271,7 +272,9 @@ export default function TabBar({
             >
               {index < 9 && (
                 <span className="text-2xs text-text-subtle px-1 py-px rounded-sm bg-surface-3 pointer-events-none shrink-0 invisible [body.meta-held_&]:visible">
-                  {pane === 'left' ? `⌘${index + 1}` : `⇧${index + 1}`}
+                  {pane === 'left'
+                    ? formatShortcutForApp(`CmdOrCtrl+${index + 1}`)
+                    : formatShortcutForApp(`CmdOrCtrl+Shift+${index + 1}`)}
                 </span>
               )}
               <span className="text-xs shrink-0">{tabIcon(tab.type)}</span>
@@ -306,7 +309,7 @@ export default function TabBar({
                     e.stopPropagation()
                     void removeTab(projectId, taskId, pane, tab.id)
                   }}
-                  title="Close tab (⌘W)"
+                  title={`Close tab (${formatShortcutForApp('CmdOrCtrl+W')})`}
                 >
                   &times;
                 </button>
@@ -319,7 +322,7 @@ export default function TabBar({
         )}
       </div>
       <div className="flex px-1 gap-0.5 [-webkit-app-region:no-drag]">
-        <button className="bg-transparent border-0 text-text-muted cursor-pointer px-1.5 py-1 rounded-md text-xs font-mono hover:bg-surface-3 hover:text-text transition-colors duration-(--motion-fast)" onClick={() => handleAdd('terminal')} title="New terminal (⌘T)">
+        <button className="bg-transparent border-0 text-text-muted cursor-pointer px-1.5 py-1 rounded-md text-xs font-mono hover:bg-surface-3 hover:text-text transition-colors duration-(--motion-fast)" onClick={() => handleAdd('terminal')} title={`New terminal (${formatShortcutForApp('CmdOrCtrl+T')})`}>
           &gt;_
         </button>
         <button className="bg-transparent border-0 text-text-muted cursor-pointer px-1.5 py-1 rounded-md text-xs font-mono hover:bg-surface-3 hover:text-text transition-colors duration-(--motion-fast)" onClick={() => handleAdd('browser')} title="New browser">
