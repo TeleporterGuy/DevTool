@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { normalizeBrowserUrl } from '../src/renderer/browserUrl'
+import { BLANK_BROWSER_URL, normalizeBrowserUrl } from '../src/renderer/browserUrl'
 
 describe('normalizeBrowserUrl', () => {
   it('preserves http and https urls', () => {
@@ -13,5 +13,11 @@ describe('normalizeBrowserUrl', () => {
 
   it('trims whitespace before normalizing', () => {
     expect(normalizeBrowserUrl('  example.com/test  ')).toBe('https://example.com/test')
+  })
+
+  it('uses a blank page for empty input instead of a search engine', () => {
+    expect(normalizeBrowserUrl('')).toBe(BLANK_BROWSER_URL)
+    expect(normalizeBrowserUrl('   ')).toBe(BLANK_BROWSER_URL)
+    expect(normalizeBrowserUrl('about:blank')).toBe(BLANK_BROWSER_URL)
   })
 })

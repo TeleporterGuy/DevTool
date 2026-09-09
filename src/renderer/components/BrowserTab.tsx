@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react'
 import { useApp } from '../context/AppContext'
 import type { SshConfig } from '../../shared/types'
-import { normalizeBrowserUrl } from '../browserUrl'
+import { BLANK_BROWSER_URL, normalizeBrowserUrl } from '../browserUrl'
 import LinkContextMenu, { type LinkMenuState } from './LinkContextMenu'
 
 interface Props {
@@ -16,7 +16,7 @@ interface Props {
 
 export default function BrowserTab({ tabId, visible, initialUrl, projectId, taskId, pane, sshConfig }: Props): React.ReactElement {
   const { updateTabUrl, browserZoomFactor, markTaskInteracted, addTab } = useApp()
-  const [url, setUrl] = useState(initialUrl || 'https://www.google.com')
+  const [url, setUrl] = useState(initialUrl || BLANK_BROWSER_URL)
   const [inputUrl, setInputUrl] = useState(url)
   const [devToolsOpen, setDevToolsOpen] = useState(false)
   const [proxyEnabled, setProxyEnabled] = useState(!!sshConfig)
@@ -240,6 +240,8 @@ export default function BrowserTab({ tabId, visible, initialUrl, projectId, task
             ref={webviewRef}
             src={url}
             className="flex-1 w-full h-full"
+            // Guest pages are a real browser for the agent — not a Node process.
+            webpreferences="contextIsolation=yes, nodeIntegration=no, sandbox=yes, webSecurity=yes"
             {...(partition ? { partition } : {})}
           />
         ) : (

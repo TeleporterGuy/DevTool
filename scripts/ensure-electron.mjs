@@ -117,6 +117,29 @@ const zipName = `electron-v${version}-${platform}-${arch}.zip`
 const zipPath = findCachedZip(zipName)
 
 if (!zipPath) {
+  const installer = join(electronDir, 'install.js')
+  if (existsSync(installer)) {
+    console.warn(
+      `[ensure-electron] Electron ${version} is not fully unpacked and ${zipName} is not in the ` +
+        `download cache — running install.js (Electron 42+ may skip postinstall download).`
+    )
+    try {
+      execFileSync(process.execPath, [installer], { stdio: 'inherit', cwd: electronDir, env: process.env })
+    } catch (err) {
+      console.warn(
+        `[ensure-electron] install.js failed: ${err instanceof Error ? err.message : String(err)}\n` +
+          `[ensure-electron] Run: rm -rf node_modules/electron && npm install`
+      )
+      process.exit(0)
+    }
+    const repairedVersion = existsSync(join(distDir, 'version'))
+      ? readFileSync(join(distDir, 'version'), 'utf-8').trim().replace(/^v/, '')
+      : null
+    if (repairedVersion === version && existsSync(pathTxt) && existsSync(join(distDir, execName))) {
+      console.warn(`[ensure-electron] Electron ${version} installed via install.js.`)
+      process.exit(0)
+    }
+  }
   console.warn(
     `[ensure-electron] Electron ${version} is not fully unpacked and ${zipName} is not in the ` +
       `download cache.\n[ensure-electron] Run: rm -rf node_modules/electron && npm install`

@@ -10,7 +10,7 @@ Persistent state lives in a config dir resolved in `src/main/config-dir.ts`: `~/
 
 ## Electron binary install
 
-`npm install` can leave `node_modules/electron/dist` half-unpacked: Electron's postinstall extracts its zip with `extract-zip@2`/`yauzl@2`, which on Node >=26 can abort mid-extraction without settling its promise, so `install.js` exits 0 with a near-empty `dist` and no `path.txt`. npm reports success and the failure only surfaces later as `Error: Electron uninstall` from electron-vite. `scripts/ensure-electron.mjs` (first step of `postinstall`) detects this and re-extracts the cached zip with a system unzip tool; run it directly to repair an existing tree.
+`npm install` can leave `node_modules/electron/dist` half-unpacked: Electron's postinstall extracts its zip with `extract-zip@2`/`yauzl@2`, which on Node >=26 can abort mid-extraction without settling its promise, so `install.js` exits 0 with a near-empty `dist` and no `path.txt`. npm reports success, then electron-vite fails later with `Error: Electron uninstall`. From Electron 42 the package also **skips downloading the binary in its own postinstall**. `scripts/ensure-electron.mjs` (first step of our `postinstall`) detects a missing/partial `dist`, runs `install.js` if the zip is not cached, and otherwise re-extracts the cached zip with a system unzip tool. Run it directly to repair an existing tree.
 
 Don't `chmod +s` `dist/chrome-sandbox` to chase sandbox errors — a setuid binary not owned by root makes Chromium reject it outright rather than fall back to the user-namespace sandbox.
 
@@ -18,7 +18,7 @@ npm >=11.17 blocks dependency install scripts until they're approved, which woul
 
 ## Windows native rebuild (`node-pty`)
 
-`postinstall` runs `@electron/rebuild` so `node-pty` matches Electron, not the host Node. On Windows that compile needs **admin rights** to install or modify Visual Studio 2022 Build Tools, plus the **MSVC v143 Spectre-mitigated libs** component (`MSB8040` if it is missing). Do not strip `SpectreMitigation` from `binding.gyp`. Git Bash/MinGW is not a substitute. Details: [README.md](./README.md) (Install → Windows).
+`postinstall` runs `@electron/rebuild` so `node-pty` matches Electron, not the host Node. `package.json` overrides `node-abi` so rebuild knows this Electron major. On Windows that compile needs **admin rights** to install or modify Visual Studio 2022 Build Tools, plus the **MSVC v143 Spectre-mitigated libs** component (`MSB8040` if it is missing). Do not strip `SpectreMitigation` from `binding.gyp`. Git Bash/MinGW is not a substitute. Details: [README.md](./README.md) (Install → Windows).
 
 Machines without admin do not `npm install` from git. Produce a portable folder on a VS machine with `npm run build:win` and copy `dist/win-unpacked`. That path is run-only (`DevTool.exe`); it does not unlock `npm run dev`.
 

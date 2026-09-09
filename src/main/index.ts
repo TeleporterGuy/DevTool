@@ -8,6 +8,23 @@ if (process.env.DEVTOOL_CDP_PORT) {
   app.commandLine.appendSwitch('remote-debugging-port', process.env.DEVTOOL_CDP_PORT)
 }
 
+/**
+ * Browser tabs stay — they are how the agent (and the user) open web pages.
+ * Visited pages must not get Node or a preload into DevTool's IPC.
+ * Register before any BrowserWindow / <webview> is created.
+ */
+app.on('web-contents-created', (_event, contents) => {
+  contents.on('will-attach-webview', (_attachEvent, webPreferences) => {
+    webPreferences.nodeIntegration = false
+    webPreferences.nodeIntegrationInSubFrames = false
+    webPreferences.contextIsolation = true
+    webPreferences.sandbox = true
+    webPreferences.webSecurity = true
+    delete webPreferences.preload
+    delete (webPreferences as { preloadURL?: string }).preloadURL
+  })
+})
+
 let appRuntime: AppRuntime | null = null
 
 function buildAppMenu(): void {
@@ -158,6 +175,8 @@ function createWindow(initialViewState?: WindowViewState | null, geometry?: Wind
     trafficLightPosition: { x: 12, y: 12 },
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
       sandbox: false,
       webviewTag: true
     }
