@@ -1,6 +1,6 @@
 # Security audit (company-deploy readiness)
 
-Snapshot of what this fork actually is, from a security point of view, before putting it on company machines. Dated against **`0.3.0`** (Phase 1 shipped). Not a pentest. Not a promise that later phases stay clean.
+Snapshot of what this fork actually is, from a security point of view, before putting it on company machines. Dated against **`0.3.1`** (Phase 1 shipped; Phase 1.3 tagged). Not a pentest. Not a promise that later phases stay clean.
 
 This repository is a fork of [join3r/claude-project](https://github.com/join3r/claude-project). Work stays on [TeleporterGuy/DevTool](https://github.com/TeleporterGuy/DevTool). Product direction is in [ROADMAP.md](./ROADMAP.md).
 
@@ -39,7 +39,7 @@ If “an AI CLI with the developer’s credentials, on company source” is alre
 | **Local** process or another user on the same machine | Hook server is unauthenticated HTTP on `127.0.0.1`. Config/scrollback are plaintext. |
 | Process on an **SSH remote** (shared Linux box) | Hook port is reverse-forwarded (`ssh -R`). Pi extension is written under `/tmp`. |
 | **Network** MITM on first SSH connect | `StrictHostKeyChecking=accept-new` trusts the first host key it sees. |
-| **Supply chain / stale Chromium** | Electron **35.7.5** is end-of-support. Windows `DevTool.exe` is **unsigned**. |
+| **Supply chain / stale Chromium** | Keep Electron on a supported line (now **43.6.0**). Windows `DevTool.exe` is still **unsigned**. |
 | The **agent itself** | By design it can read `.env`, run commands, and `git push`. Policy problem, not a missing `if`. |
 
 Out of scope for this snapshot: a full dependency CVE dump, physical theft of an unlocked laptop (same as any editor), and “make Pi unable to see the repo.”
@@ -51,6 +51,7 @@ Out of scope for this snapshot: a full dependency CVE dump, physical theft of an
 Keep these; do not regress them.
 
 - Preload uses `contextBridge`. `openExternal` allows only `http:` / `https:`.
+- Main window sets `contextIsolation: true` and `nodeIntegration: false`. Guest `<webview>` pages cannot get Node or a preload (`will-attach-webview` plus `webpreferences` on the tag). New browser tabs default to `about:blank`, not Google.
 - File-tree create / rename / delete goes through `resolveSafeProjectPath` (`src/main/project-fs-path.ts`) and rejects `..` / other-drive escapes **relative to the given project cwd**.
 - Workspace delete refuses to recursively remove a path that is not a registered git worktree.
 - Hook HTTP server binds **`127.0.0.1`**, not all interfaces. SOCKS and SSH `-L` are localhost-style binds by default.
@@ -73,9 +74,7 @@ Severity is “what a company security review usually does with it,” not CVSS.
 
 ### High
 
-**Electron 35.7.5 is end-of-support.** No more security patches on that line. Chromium 134 is behind current stables. Scanners will flag this even if you never demonstrate an exploit.
-
-**Renderer / webview hardening is below Electron baseline.** Main window sets `sandbox: false` and `webviewTag: true` and does not set `contextIsolation` / `nodeIntegration` explicitly (`src/main/index.ts`). There is no CSP in `src/renderer/index.html`, no `will-attach-webview` / `web-contents-created` lock, no `setWindowOpenHandler`, no guest `webpreferences` on `<webview>`. DevTools are always available (app menu and the browser-tab button). Local browser tabs use the default session; new tabs default to `https://www.google.com`. Remote tabs use `persist:browser-${projectId}` plus SOCKS through the SSH host — company browsing can egress via that box.
+**Renderer / webview: remaining gaps.** Main window still has `sandbox: false` and `webviewTag: true`. There is no CSP in `src/renderer/index.html`, no `setWindowOpenHandler`. DevTools are always available (app menu and the browser-tab button). Local browser tabs use the default session. Remote tabs use `persist:browser-${projectId}` plus SOCKS through the SSH host — company browsing can egress via that box. Guest Node is locked off (Phase 1.3); that does not sandbox the rest of the IPC surface.
 
 **Hook server is unauthenticated localhost HTTP, then reverse-tunneled.** `src/main/hook-server.ts` accepts any POST to `/hook/{session-start,working,stopped,notification}` if `X-Tab-Id` is set. No shared secret, no body-size cap. SSH connect does `-R 0:localhost:<hookPort>`, so a process on the remote that can hit the allocated port can spoof inbox/status. Remote Pi extension path is `/tmp/devtool-<user>/pi-status-extension.mjs` — on a shared host, `/tmp` pre-create / symlink races can plant code Pi will load.
 
@@ -126,15 +125,15 @@ Typical IT checklist items this repo does not provide:
 
 ## Decisions after the 0.3.0 audit
 
-Recorded so this file and [ROADMAP.md](./ROADMAP.md) stay aligned. Findings above are still the snapshot of **what the code does today**.
+Recorded so this file and [ROADMAP.md](./ROADMAP.md) stay aligned. Findings below the closeout paragraph are what is **still open** at `0.3.1`.
 
 | Audit item | Decision | Where it lives |
 | --- | --- | --- |
 | 1. Policy (agent = user) | Accept. Same as running Pi in Git Bash. | Not a phase. |
 | 2. Sign Windows build | Considered, not required yet. Stay unsigned portable folder. | Phase 6 unless IT blocks |
-| 2. Upgrade Electron | **Do.** Off 35.x onto a supported major. | **Phase 1.3** |
-| 3. Default browser page | **Do.** New tabs are blank, not Google. | **Phase 1.3** |
-| 3. Webview / Node | **Keep the webview** (agent + user browse pages). Guest pages do **not** get Node — that is a normal browser, not a removed feature. | Phase 1.3 (clarify + optional `will-attach-webview`) |
+| 2. Upgrade Electron | **Done** in `0.3.1` (43.6.0). Stay on a supported major. | **Phase 1.3** |
+| 3. Default browser page | **Done.** New tabs are `about:blank`, not Google. | **Phase 1.3** |
+| 3. Webview / Node | **Done.** Webview kept; guest pages do not get Node. | **Phase 1.3** |
 | 4. Hook secret, Pi off `/tmp`, SSH known_hosts | **Do in a new session.** | **Phase 2** (conda/Jupyter/LSP each +1) |
 | 5. Config dir `0700`, scrollback id, IPC cwd allow-list | Deferred. | Phase 6 |
 | 6. Company pilot / DLP | Deferred. | Phase 6 / outside the repo |
@@ -145,15 +144,16 @@ Recorded so this file and [ROADMAP.md](./ROADMAP.md) stay aligned. Findings abov
 
 Work in this order so each step is demoable. Roadmap numbering after the audit:
 
-1. **Policy accept** — done as “same as a terminal.” Approved models and “no prod creds in the tree” stay a personal/company note, not code.
-2. **Phase 1.3** — supported Electron line; blank browser tab; webview stays; signing still off.
-3. **Phase 2** — hook authentication; Pi extension off `/tmp`; SSH `IdentitiesOnly` + DevTool `known_hosts` + socket dir `0700`.
-4. Then conda (Phase 3), Jupyter (Phase 4), LSP (Phase 5) as before.
-5. **Deferred:** config-dir ACLs, scrollback `tabId`, IPC cwd allow-list, Authenticode, a formal pilot.
+1. **Policy accept** — done as “same as a terminal.”
+2. **Phase 1.3** — **done** (`0.3.1`): Electron 43.6.0; blank browser tab; guest Node off; signing still off.
+3. **Phase 1.4** (optional, same `0.3.x`) — Windows shortcut labels. Does not block Phase 2.
+4. **Phase 2** — hook authentication; Pi extension off `/tmp`; SSH `IdentitiesOnly` + DevTool `known_hosts` + socket dir `0700`.
+5. Then conda (Phase 3), Jupyter (Phase 4), LSP (Phase 5) as before.
+6. **Deferred:** config-dir ACLs, scrollback `tabId`, IPC cwd allow-list, Authenticode, a formal pilot.
 
-Do not start Phase 5 LSP work instead of 1.3–2 if company deploy is still the goal.
+Do not start Phase 5 LSP work instead of Phase 2 if company deploy is still the goal.
 
-Highest-leverage engineering pass (bounded, unlike “make the agent safe”): **Phase 1.3 then Phase 2**.
+Highest-leverage remaining engineering pass: **Phase 2**.
 
 ---
 
@@ -180,4 +180,4 @@ Roadmap phases (conda, Jupyter, LSP) add more child processes and another browse
 
 Parking-lot ideas that would *increase* surface if pulled in: native notebook kernels, Windows OpenSSH as a second remote stack, extra LSPs talking stdio as the same user.
 
-This audit is a snapshot at `0.3.0`. When Phase 1.3 or Phase 2 lands, note it here the same way the roadmap notes closeout — one paragraph, what changed, what is still open.
+This audit started as a snapshot at `0.3.0`. **Phase 1.3 (`0.3.1`):** Electron 43.6.0, `about:blank` new tabs, guest webview Node locked off. Still open: unsigned Windows folder, no CSP, unauthenticated hook server, SSH TOFU, wide IPC, plaintext `~/.devtool`. When Phase 2 lands, add another closeout paragraph here.

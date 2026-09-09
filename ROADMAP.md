@@ -26,7 +26,7 @@ Company-deploy security snapshot (what this app actually is on a workstation): [
 
 Stay on **0.x** until the app is something you would tell a friend to unzip. **1.0.0** is that call, not “Phase 6 finished.”
 
-`package.json` is **0.3.0** (Phase 1 done). Shape:
+`package.json` is **0.3.1** (Phase 1 done; Phase 1.3 tagged). Shape:
 
 | Part | Meaning |
 | --- | --- |
@@ -40,7 +40,8 @@ Work inside a phase is `0.x.y`; shipping the phase is the next `0.(x+1).0`.
 | --- | --- |
 | Phase 0 done | `0.2.0` |
 | Phase 1 done | `0.3.0` |
-| Phase 1.3 (Electron line) | `0.3.y` until tagged; not a numbered bump |
+| Phase 1.3 (Electron line) | `0.3.1` (tagged; not a numbered bump) |
+| Phase 1.4 (Windows shortcut labels) | `0.3.y`; not a numbered bump |
 | Phase 2 done | `0.4.0` |
 | Phase 3 done | `0.5.0` |
 | Phase 4 done | `0.6.0` |
@@ -138,7 +139,7 @@ Work items:
 
 **Verify:** done on Windows (CRUD / filter / 1.1 toolbar; Open in Cursor and VS Code for small folders and a large git repo). If VS Code seems to do nothing, leftover `Code.exe` processes can already own that folder — quit them in Task Manager and retry.
 
-**Closeout:** done. `package.json` is **0.3.0**. Next is Phase 1.3 (Electron line + blank browser tab), then Phase 2 (hook auth + SSH trust). Conda is Phase 3.
+**Closeout:** done. Phase 1 shipped as **0.3.0**. Phase 1.3 tagged **0.3.1**. Next is Phase 1.4 (Windows shortcut labels), then Phase 2 (hook auth + SSH trust). Conda is Phase 3.
 
 **Effort:** 1–2 weeks. Mid-phase **0.2.2** / **0.2.3** followed 1.1 polish. Shipped as **0.3.0** after Windows verify.
 
@@ -180,29 +181,45 @@ Persist on `AppConfig` (app-wide, not per-project). Spawn the process with the f
 
 ---
 
-## Phase 1.3 — Supported Electron line + blank browser tab (mid-phase)
+## Phase 1.3 — Supported Electron line + blank browser tab (mid-phase) — done (`0.3.1`)
 
-Not a new numbered phase. Same `0.3.x` until you tag a build you would copy. Do this **before** Phase 2: hook/SSH work should not land on an end-of-support Chromium.
+Not a new numbered phase. Tagged **`0.3.1`** after Windows verify. `package.json` minor stays **0.3** until Phase 2.
 
-`package.json` is on **Electron 35.7.5** (Chromium 134, Node 22). That line reached end-of-support on 2025-09-02. Electron only patches the latest three majors; as of this writing that is **43 / 44** (42 EOLs 2026-10-20 — skip it).
-
-**Outcome:** `npm run dev` and `npm run build:win` run a currently supported Electron. A new browser tab does not open Google. The in-app **webview stays** — that is how the agent (and you) interact with web pages.
+**Outcome:** `npm run dev` and `npm run build:win` run Electron **43.6.0**. A new browser tab is `about:blank`, not Google. The in-app **webview stays**.
 
 Work items:
 
-1. **Pick a supported major and bump.** Target the newest *baked* supported line at the time of the work (today: latest **43.x**, or **44.x** if electron-vite already starts it cleanly). Do not hop 35 → 44 in one untested jump if 43 starts; one supported major is the win. Node ABI goes **22 → 24**, so `node-pty` must rebuild (`postinstall` / `@electron/rebuild`). Pin the new `electron@…` in `allowScripts` (npm ≥11.17). Refresh `scripts/ensure-electron.mjs` if 42+ no longer downloads the binary in postinstall.
+1. **Supported major** — landed. Electron **35.7.5 → 43.6.0**. `node-pty` rebuilds via `@electron/rebuild` (direct dep) and a `node-abi` override. `allowScripts` pin is `electron@43.6.0`. `ensure-electron.mjs` runs `install.js` because Electron 42+ skips its own postinstall download.
 
-2. **Keep the webview; do not give visited pages Node.** `<webview>` is the product browser. “No Node in the guest” means `example.com` cannot `require('fs')` or call DevTool IPC. Page JavaScript still runs. That is a normal browser, which is what the agent needs. Do **not** set `nodeIntegration: true` on the guest. Do **not** remove `webviewTag`. Optional in this pass, not a gate: explicit `contextIsolation` / `nodeIntegration: false` on the *DevTool UI* window, `will-attach-webview` so a guest cannot request Node. Packaged DevTools stay for now (daily-driver). CSP can wait.
+2. **Keep the webview; guest pages do not get Node** — landed. Explicit `contextIsolation` / `nodeIntegration: false` on the DevTool UI window. `will-attach-webview` strips guest preload/Node. `<webview webpreferences="… nodeIntegration=no …">`. Packaged DevTools stay. CSP still out.
 
-3. **Default browser page is blank, not Google.** `BrowserTab` and `normalizeBrowserUrl('')` currently fall back to `https://www.google.com`. Empty / new tabs should be `about:blank`. Typing `github.com` in the URL bar still becomes `https://github.com`. Company machines should not phone Google just because someone opened a Browser tab. Existing tabs that already stored a Google URL in project state keep it until the user navigates away.
+3. **Default browser page is blank** — landed. `BLANK_BROWSER_URL` / `about:blank`. Bare hosts still become `https://…`. Old tabs that stored Google keep that URL until navigated away.
 
-4. **Signing stays considered, not required.** `signAndEditExecutable: false` and no `electron-winstaller` until there is a certificate and an installer is actually wanted. Phase 1.3 does not block on Authenticode. Document the unsigned portable folder the same as today.
+4. **Signing stays considered, not required** — unchanged. `signAndEditExecutable: false`.
 
-**Verify on Windows:** `npm install` (Spectre still required) → `npm run dev` → Git Bash tab → Pi TUI + status dot → open a Browser tab (blank, then navigate) → `npm run build:win` still produces `dist/win-unpacked`. If ConPTY or the webview dies on the new ABI, stop; do not paper over it with conda.
+**Verify:** done on Windows (`npm install` → `npm run dev` → Git Bash → Pi TUI + hook status dot → blank Browser tab + navigate → Open in VS Code). SSH not part of this closeout. `npm run build:win` is the tagged copy.
 
-**Closeout:** tag `0.3.y` if you copy the folder. `package.json` minor stays **0.3** until Phase 2. Next is Phase 2 (hooks + SSH).
+**Closeout:** done. `package.json` is **0.3.1**. Next is Phase 1.4 (Windows shortcut labels), then Phase 2 (hooks + SSH).
 
-**Effort:** a few evenings if the bump is clean; a week if electron-vite / `node-pty` / `ensure-electron.mjs` fight Node 24.
+---
+
+## Phase 1.4 — Windows shortcut map and labels (mid-phase)
+
+Not a new numbered phase. Same `0.3.x` until you tag a build you would copy. Does **not** block Phase 1.3 or Phase 2. The Electron menu already uses `CmdOrCtrl`; this is the **visible** map, not new bindings.
+
+**Outcome:** every shortcut that already exists is listed once (menu, palette, tooltips, tab chrome, settings copy) with its **Windows** equivalent, and the UI on Windows shows that map. No new shortcuts. Do not invent a keybinding editor.
+
+Work items:
+
+1. **Inventory what is already bound.** Menu accelerators in `src/main/index.ts`, renderer handlers (`ContentArea`, editor save/preview, palette), and any hardcoded ⌘ copy (tab bar, Files/Git chrome, Settings, Browser tab). One list: action → macOS key → Windows key (`Ctrl` for `Cmd`, `Alt` for `⌥`, `Shift` as `Shift`). Include chorded ones (`⌘⇧T`, `⌘⌥I`, tab `⌘1` / `⇧1`).
+
+2. **Visualize Windows keys in the UI.** On `win32`, tooltips, palette `shortcut` strings, and titles must not show `⌘`. Use the same labels Windows users already know (`Ctrl+W`, `Ctrl+Shift+T`, `Ctrl+Alt+I`). macOS can keep ⌘. One helper for display; do not duplicate the map in every tooltip.
+
+Stay out of: remapping, user-defined keys, PowerShell chords, teaching Git Bash its own readline bindings.
+
+**Verify on Windows:** hover the controls that currently say ⌘ (close tab, new terminal, palette, split pane, reload, DevTools, Settings mentions of ⌘N). Palette rows match the menu. The keys still fire; only the labels change.
+
+**Effort:** a short pass. Ships in `0.3.y` if tagged; otherwise land before Phase 2 so daily-driver Windows does not look like a Mac app.
 
 ---
 
@@ -288,6 +305,7 @@ Parking lot. Do not start these instead of the numbered phases. Several items al
 | Idea | Where it lives |
 | --- | --- |
 | Supported Electron line + blank browser tab | Phase 1.3 |
+| Map existing shortcuts and show Windows keys (Ctrl, not ⌘) | Phase 1.4 |
 | Hook auth + SSH known_hosts / IdentitiesOnly / no `/tmp` Pi drop | Phase 2 |
 | Conda env on spawn | Phase 3 |
 | JupyterLab in a browser tab | Phase 4 |
@@ -315,11 +333,12 @@ Keep upstream `master` as a remote (`upstream`) and rebase or merge periodically
 3. Win dir packaging notes / script. **Done.** (`npm run build:win` → `dist/win-unpacked`.)
 4. File explorer CRUD. **Done** in `0.3.0` (filter, Reveal in Git Bash, 1.1 toolbar, 1.2 external IDE handover; ignore list removed).
 5. Open workspace in external IDE (Phase 1.2: toolbar split button + Settings list). **Done** in `0.3.0`.
-6. Supported Electron line + blank browser tab (Phase 1.3).
-7. Hook authentication + SSH trust (Phase 2).
-8. Conda env picker on spawn (Phase 3).
-9. JupyterLab browser-tab launcher (Phase 4).
-10. Python and Markdown LSP spike, then harden (Phase 5).
+6. Supported Electron line + blank browser tab (Phase 1.3). **Done** in `0.3.1`.
+7. Windows shortcut map + labels (Phase 1.4: inventory existing bindings, show Ctrl/Alt on Windows). Can land before or after 1.3; do not invent a keybinding editor.
+8. Hook authentication + SSH trust (Phase 2).
+9. Conda env picker on spawn (Phase 3).
+10. JupyterLab browser-tab launcher (Phase 4).
+11. Python and Markdown LSP spike, then harden (Phase 5).
 
 Skip a step only if the previous phase already includes it by accident (e.g. PATH work that makes conda trivial).
 
@@ -355,7 +374,8 @@ Work machine constraints to re-test every phase: Git Bash, portable Node zip, Pi
 | 0 | `0.2.0` (shipped) | Git Bash + Pi in DevTool on Windows | 1–2 months calendar / 2–4 weeks focused |
 | 0.5 | (no bump, done) | No DevTool inference UI (Pi keeps its settings) | n/a |
 | 1 | `0.3.0` (shipped) | File tree CRUD + 1.2 external IDE handover | 1–2 weeks |
-| 1.3 | `0.3.y` | Supported Electron + blank browser tab (webview stays) | a few evenings to a week |
+| 1.3 | `0.3.1` (shipped) | Supported Electron + blank browser tab (webview stays) | a few evenings to a week |
+| 1.4 | `0.3.y` | Existing shortcuts listed and shown as Windows keys | a short pass |
 | 2 | `0.4.0` | Hook secret + Pi extension off `/tmp` + SSH known_hosts | ~1 week |
 | 3 | `0.5.0` | Conda picker on spawn | 1–2 weeks |
 | 4 | `0.6.0` | JupyterLab in a browser tab | days |
