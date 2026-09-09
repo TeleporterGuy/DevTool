@@ -124,18 +124,36 @@ Typical IT checklist items this repo does not provide:
 
 ---
 
+## Decisions after the 0.3.0 audit
+
+Recorded so this file and [ROADMAP.md](./ROADMAP.md) stay aligned. Findings above are still the snapshot of **what the code does today**.
+
+| Audit item | Decision | Where it lives |
+| --- | --- | --- |
+| 1. Policy (agent = user) | Accept. Same as running Pi in Git Bash. | Not a phase. |
+| 2. Sign Windows build | Considered, not required yet. Stay unsigned portable folder. | Phase 6 unless IT blocks |
+| 2. Upgrade Electron | **Do.** Off 35.x onto a supported major. | **Phase 1.3** |
+| 3. Default browser page | **Do.** New tabs are blank, not Google. | **Phase 1.3** |
+| 3. Webview / Node | **Keep the webview** (agent + user browse pages). Guest pages do **not** get Node — that is a normal browser, not a removed feature. | Phase 1.3 (clarify + optional `will-attach-webview`) |
+| 4. Hook secret, Pi off `/tmp`, SSH known_hosts | **Do in a new session.** | **Phase 2** (conda/Jupyter/LSP each +1) |
+| 5. Config dir `0700`, scrollback id, IPC cwd allow-list | Deferred. | Phase 6 |
+| 6. Company pilot / DLP | Deferred. | Phase 6 / outside the repo |
+
+---
+
 ## Suggested order if you want to deploy anyway
 
-Work in this order so each step is demoable. Do not start Phase 4 LSP work instead of this if company deploy is the goal.
+Work in this order so each step is demoable. Roadmap numbering after the audit:
 
-1. **Policy accept.** User-equivalent agent + terminal + SSH. If that’s a no, stop. Write down: approved models, no prod creds in the tree, idle cleanup off, remotes you will allow SOCKS through.
-2. **Sign the Windows build** (or wrap it in your internal installer) and **upgrade Electron** off the 35.x EOS line. Turn on Electron fuses when you package. Until then, treat `dist/win-unpacked` as a known-hash exception, not a general-install package.
-3. **Harden Electron.** CSP on the renderer; `will-attach-webview` / `web-contents-created` so guests cannot get Node; explicit `contextIsolation` + `nodeIntegration: false`; packaged DevTools off or behind a flag; don’t default new browser tabs at Google.
-4. **Hook authentication** (shared secret on POSTs) and **stop writing the Pi extension under `/tmp`**. Tighten SSH: known_hosts or CA, `IdentitiesOnly=yes`, control-socket dir `0700`. Do not reverse-forward the hook port to untrusted shared remotes.
-5. **Config dir `0700`**, sanitize scrollback `tabId`, bind file/git IPC cwd to projects the app already knows. Optional: drop `extraEnv` to an allow-list (`DEVTOOL_TAB_ID`, `DEVTOOL_HOOK_PORT`).
-6. **Pilot** a small group. DLP/backup tools should know about `~/.devtool` and Electron `userData`. SSH only to hosts you trust. Watch leftover `.claude/settings.local.json` hooks.
+1. **Policy accept** — done as “same as a terminal.” Approved models and “no prod creds in the tree” stay a personal/company note, not code.
+2. **Phase 1.3** — supported Electron line; blank browser tab; webview stays; signing still off.
+3. **Phase 2** — hook authentication; Pi extension off `/tmp`; SSH `IdentitiesOnly` + DevTool `known_hosts` + socket dir `0700`.
+4. Then conda (Phase 3), Jupyter (Phase 4), LSP (Phase 5) as before.
+5. **Deferred:** config-dir ACLs, scrollback `tabId`, IPC cwd allow-list, Authenticode, a formal pilot.
 
-Highest-leverage engineering pass (bounded, unlike “make the agent safe”): **steps 3–5**.
+Do not start Phase 5 LSP work instead of 1.3–2 if company deploy is still the goal.
+
+Highest-leverage engineering pass (bounded, unlike “make the agent safe”): **Phase 1.3 then Phase 2**.
 
 ---
 
@@ -158,8 +176,8 @@ Highest-leverage engineering pass (bounded, unlike “make the agent safe”): *
 
 ## How this file relates to the roadmap
 
-Roadmap phases (conda, Jupyter, LSP) add more child processes and another browser use. They do not remove anything above. Do not declare Phase 2–4 “company ready” without revisiting this file.
+Roadmap phases (conda, Jupyter, LSP) add more child processes and another browser use. They do not remove anything above. Do not declare Phase 3–5 “company ready” without revisiting this file.
 
 Parking-lot ideas that would *increase* surface if pulled in: native notebook kernels, Windows OpenSSH as a second remote stack, extra LSPs talking stdio as the same user.
 
-This audit is a snapshot at `0.3.0`. When a numbered hardening pass lands, note it here the same way the roadmap notes closeout — one paragraph, what changed, what is still open.
+This audit is a snapshot at `0.3.0`. When Phase 1.3 or Phase 2 lands, note it here the same way the roadmap notes closeout — one paragraph, what changed, what is still open.

@@ -24,7 +24,7 @@ Company-deploy security snapshot (what this app actually is on a workstation): [
 
 ## Versioning (`0.x.y`)
 
-Stay on **0.x** until the app is something you would tell a friend to unzip. **1.0.0** is that call, not “Phase 5 finished.”
+Stay on **0.x** until the app is something you would tell a friend to unzip. **1.0.0** is that call, not “Phase 6 finished.”
 
 `package.json` is **0.3.0** (Phase 1 done). Shape:
 
@@ -40,10 +40,12 @@ Work inside a phase is `0.x.y`; shipping the phase is the next `0.(x+1).0`.
 | --- | --- |
 | Phase 0 done | `0.2.0` |
 | Phase 1 done | `0.3.0` |
+| Phase 1.3 (Electron line) | `0.3.y` until tagged; not a numbered bump |
 | Phase 2 done | `0.4.0` |
 | Phase 3 done | `0.5.0` |
 | Phase 4 done | `0.6.0` |
-| Phase 5 slices | keep bumping `0.6.y` / `0.7.0` as you tag them |
+| Phase 5 done | `0.7.0` |
+| Phase 6 slices | keep bumping `0.7.y` / `0.8.0` as you tag them |
 
 Phase 0.5 does not get a version. Ideas in the parking lot do not get a version until they are pulled into a phase.
 
@@ -63,7 +65,7 @@ Known gaps this fork must treat as work, not surprises:
 
 - Windows packaging is a portable folder (`npm run build:win` → `dist/win-unpacked`), not a Setup.exe. `electron-winstaller` stays unapproved until an installer is required. From-source `npm install` on Windows still needs admin + VS Build Tools + Spectre libs (see README).
 - Local Windows terminals are Git Bash (`Git\bin\bash.exe --login -i`, auto-detect; Settings can set a `bash.exe` path). PowerShell and Command Prompt are not product surfaces. Login-shell env **is** captured in `shell-env.ts`; do not copy that Unix PATH onto `process.env.PATH` (ConPTY `cmd.exe` lookup breaks — see AGENTS.md).
-- POSIX assumptions: worktree paths, hook inject (`curl` + `python3`), remote Pi extension under `/tmp/...`.
+- POSIX assumptions: worktree paths, hook inject (`curl` + `python3`), remote Pi extension under `/tmp/...` (Phase 2 moves that off `/tmp`).
 
 **Go/no-go:** if Git Bash + ConPTY + Pi TUI is unusable after Phase 0, stop. Nothing else in this plan can paper over a broken terminal.
 
@@ -81,7 +83,7 @@ Work items:
 2. **Spawn environment** — done for Phase 0.  
    Replace the “skip win32” shell-env path. Build env explicitly:
    - prepend portable Node directory
-   - conda env prepend is **Phase 2**, not required for 0.2.0
+   - conda env prepend is **Phase 3**, not required for 0.2.0
    Apply the same env to terminal tabs **and** Pi/Claude/Codex tabs. Do not add inference URL/key vars here — Pi already has its own settings.
 
 3. **node-pty** — done.  
@@ -100,7 +102,7 @@ Work items:
 
 **Closeout:** done. `package.json` is **0.2.0**. License is **MIT** (`LICENSE`; copyright join3r and TeleporterGuy).
 
-**Effort:** about 2–4 focused weeks. Next is Phase 1 (file explorer). Conda is Phase 2.
+**Effort:** about 2–4 focused weeks. Next is Phase 1 (file explorer). Conda is Phase 3.
 
 ---
 
@@ -136,7 +138,7 @@ Work items:
 
 **Verify:** done on Windows (CRUD / filter / 1.1 toolbar; Open in Cursor and VS Code for small folders and a large git repo). If VS Code seems to do nothing, leftover `Code.exe` processes can already own that folder — quit them in Task Manager and retry.
 
-**Closeout:** done. `package.json` is **0.3.0**. Next is Phase 2 (conda spawn picker).
+**Closeout:** done. `package.json` is **0.3.0**. Next is Phase 1.3 (Electron line + blank browser tab), then Phase 2 (hook auth + SSH trust). Conda is Phase 3.
 
 **Effort:** 1–2 weeks. Mid-phase **0.2.2** / **0.2.3** followed 1.1 polish. Shipped as **0.3.0** after Windows verify.
 
@@ -172,15 +174,65 @@ Minimum fields (same pattern as Git Bash path + Browse on the Terminal tab):
 
 Persist on `AppConfig` (app-wide, not per-project). Spawn the process with the folder as the argument (`code <abs-path>` / `cursor <abs-path>`). Do not invent protocol-URL settings unless Detect needs them.
 
-**Spyder** is a conda CLI in the project env. Out of 1.2; pick it up after Phase 2.
+**Spyder** is a conda CLI in the project env. Out of 1.2; pick it up after Phase 3.
 
 **Effort:** small spawn + Settings list + one toolbar split button. Landed in `0.2.y`; shipped in **0.3.0** after Windows verify. Spawn `Code.exe` / `Cursor.exe` (not `cursor.cmd`). If a large repo does not appear in VS Code, quit leftover `Code.exe` processes and retry.
 
 ---
 
-## Phase 2 — Conda as a spawn picker
+## Phase 1.3 — Supported Electron line + blank browser tab (mid-phase)
 
-**Outcome:** pick an env per project (or task). Every PTY and later LSP/Jupyter child inherits it. No env-create/delete UI.
+Not a new numbered phase. Same `0.3.x` until you tag a build you would copy. Do this **before** Phase 2: hook/SSH work should not land on an end-of-support Chromium.
+
+`package.json` is on **Electron 35.7.5** (Chromium 134, Node 22). That line reached end-of-support on 2025-09-02. Electron only patches the latest three majors; as of this writing that is **43 / 44** (42 EOLs 2026-10-20 — skip it).
+
+**Outcome:** `npm run dev` and `npm run build:win` run a currently supported Electron. A new browser tab does not open Google. The in-app **webview stays** — that is how the agent (and you) interact with web pages.
+
+Work items:
+
+1. **Pick a supported major and bump.** Target the newest *baked* supported line at the time of the work (today: latest **43.x**, or **44.x** if electron-vite already starts it cleanly). Do not hop 35 → 44 in one untested jump if 43 starts; one supported major is the win. Node ABI goes **22 → 24**, so `node-pty` must rebuild (`postinstall` / `@electron/rebuild`). Pin the new `electron@…` in `allowScripts` (npm ≥11.17). Refresh `scripts/ensure-electron.mjs` if 42+ no longer downloads the binary in postinstall.
+
+2. **Keep the webview; do not give visited pages Node.** `<webview>` is the product browser. “No Node in the guest” means `example.com` cannot `require('fs')` or call DevTool IPC. Page JavaScript still runs. That is a normal browser, which is what the agent needs. Do **not** set `nodeIntegration: true` on the guest. Do **not** remove `webviewTag`. Optional in this pass, not a gate: explicit `contextIsolation` / `nodeIntegration: false` on the *DevTool UI* window, `will-attach-webview` so a guest cannot request Node. Packaged DevTools stay for now (daily-driver). CSP can wait.
+
+3. **Default browser page is blank, not Google.** `BrowserTab` and `normalizeBrowserUrl('')` currently fall back to `https://www.google.com`. Empty / new tabs should be `about:blank`. Typing `github.com` in the URL bar still becomes `https://github.com`. Company machines should not phone Google just because someone opened a Browser tab. Existing tabs that already stored a Google URL in project state keep it until the user navigates away.
+
+4. **Signing stays considered, not required.** `signAndEditExecutable: false` and no `electron-winstaller` until there is a certificate and an installer is actually wanted. Phase 1.3 does not block on Authenticode. Document the unsigned portable folder the same as today.
+
+**Verify on Windows:** `npm install` (Spectre still required) → `npm run dev` → Git Bash tab → Pi TUI + status dot → open a Browser tab (blank, then navigate) → `npm run build:win` still produces `dist/win-unpacked`. If ConPTY or the webview dies on the new ABI, stop; do not paper over it with conda.
+
+**Closeout:** tag `0.3.y` if you copy the folder. `package.json` minor stays **0.3** until Phase 2. Next is Phase 2 (hooks + SSH).
+
+**Effort:** a few evenings if the bump is clean; a week if electron-vite / `node-pty` / `ensure-electron.mjs` fight Node 24.
+
+---
+
+## Phase 2 — Hook authentication + SSH trust
+
+Completely new session. Do not mix this with the Electron bump. Ships as **`0.4.0`**.
+
+The inbox status dot is a local HTTP server (`src/main/hook-server.ts`) on `127.0.0.1` plus, for remotes, `ssh -R` to that port. Pi’s remote helper is written to `/tmp/devtool-<user>/…`. SSH uses `StrictHostKeyChecking=accept-new`. Details: [SECURITY.md](./SECURITY.md).
+
+**Outcome:** a random local process (or a process on the SSH host) cannot spoof inbox events without a secret DevTool minted. Remote Pi code is not planted via `/tmp`. New SSH sessions use a DevTool-managed `known_hosts`, `IdentitiesOnly`, and a `0700` control-socket directory.
+
+Work items:
+
+1. **Hook shared secret.** Mint a per-process (or per-session) token when the hook server starts. Pi extension and Claude `curl` hooks send it (header or body). Server rejects POSTs without it. Cap body size. Keep bind on `127.0.0.1`. The reverse forward can stay — the secret is what makes a shared remote less able to spoof the inbox.
+
+2. **Pi extension off `/tmp`.** Write `pi-status-extension.mjs` under the remote home (e.g. `~/.devtool-remote/` or `~/.devtool/`) with a directory mode that is not world-writable. Same for any Claude remote inject helper. Local `-e` path is already asar-unpacked; leave it.
+
+3. **SSH hardening (practical, not a company CA).** `IdentitiesOnly=yes` when a `keyFile` is set. Create `~/.devtool/ssh` as `0700`. Point `UserKnownHostsFile` at `~/.devtool/ssh/known_hosts` so the TOFU file is visible and not mixed with the user’s other SSH. Prefer failing a *changed* host key loudly over silent `accept-new` forever. A full SSH CA / `StrictHostKeyChecking=yes` with preloaded keys can wait for a company install; this phase makes first-connect TOFU reviewable.
+
+Stay out of: config-dir `0700` for all of `~/.devtool`, scrollback `tabId` sanitizing, IPC cwd allow-list (deferred). Stay out of conda.
+
+**Verify:** local Pi/Claude status dots still work; a POST without the secret is 401/403; remote Pi still loads the extension from the new path; a second connect to the same host reuses the stored key.
+
+**Effort:** about a week. Windows + Git Bash local hooks, then one Linux SSH box.
+
+---
+
+## Phase 3 — Conda as a spawn picker
+
+Was Phase 2. **Outcome:** pick an env per project (or task). Every PTY and later LSP/Jupyter child inherits it. No env-create/delete UI.
 
 Work items:
 
@@ -188,40 +240,42 @@ Work items:
 - List envs, persist name on the project.
 - Activate the Git Bash way: `eval "$(conda shell.bash hook)"` + `conda activate <name>`, or prepend env paths. Prefer one method and test with `which python` / `python -c "import sys; print(sys.prefix)"`.
 
-**Effort:** 1–2 weeks. Windows + Git Bash activation is the only tricky part.
+**Effort:** 1–2 weeks. Windows + Git Bash activation is the only tricky part. Ships as **`0.5.0`**.
 
 ---
 
-## Phase 3 — Jupyter via the browser tab
+## Phase 4 — Jupyter via the browser tab
 
-**Outcome:** command “Open JupyterLab for this project” starts (or reuses) a server in the conda env and opens an existing **browser tab**. SOCKS/SSH later if needed.
+Was Phase 3. **Outcome:** command “Open JupyterLab for this project” starts (or reuses) a server in the conda env and opens an existing **browser tab**. SOCKS/SSH later if needed.
 
-Do **not** build a native notebook editor here.
+Do **not** build a native notebook editor here. The browser tab is still the Phase 1.3 webview (blank default, no Node in the guest).
 
-**Effort:** days to a week if conda spawn works.
+**Effort:** days to a week if conda spawn works. Ships as **`0.6.0`**.
 
 ---
 
-## Phase 4 — Language servers (Python and Markdown)
+## Phase 5 — Language servers (Python and Markdown)
 
-**Outcome:** Monaco talks to a small set of servers — Python (`pylsp` or `pyright` in the **same conda env** as the terminals) and Markdown. Hover, go-to-definition, completion. Windows paths must round-trip.
+Was Phase 4. **Outcome:** Monaco talks to a small set of servers — Python (`pylsp` or `pyright` in the **same conda env** as the terminals) and Markdown. Hover, go-to-definition, completion. Windows paths must round-trip.
 
 Out of scope: every language, debugger, refactor-rename-across-repo, Pi-quality diagnostics duplication.
 
 Stack hint: `monaco-languageclient` + JSON-RPC stdio. Kill the server when the project/env changes.
 
-**Effort:** 1–3 months for “actually usable,” not “hello world.” Only start after Phases 0–2 are daily-driver quality.
+**Effort:** 1–3 months for “actually usable,” not “hello world.” Only start after Phases 0–3 are daily-driver quality (terminal, hooks, conda). Ships as **`0.7.0`**.
 
 ---
 
-## Phase 5 — Later, maybe
+## Phase 6 — Later, maybe
 
-Only after the above is boring and stable:
+Was Phase 5. Only after the above is boring and stable:
 
 - Native `.ipynb` cells in a tab (kernel via `jupyter_client` in the conda env).
 - TypeScript/JavaScript LSP if the Node zip is the runtime.
 - Windows OpenSSH for the existing remote-project flow (separate from Git Bash local).
 - Search-in-files, extra pane layouts.
+- Config-dir `0700`, scrollback `tabId` allow-list, file/git IPC bound to known project cwds (security audit items 5–6; deferred).
+- Authenticode / installer, if a certificate exists and Software Center requires it.
 
 Explicit non-goals unless the product bet changes: cloud VMs, embedding Pi’s UI, replacing Pi extensions with Electron linters, PowerShell, full Windows “IDE.”
 
@@ -233,18 +287,22 @@ Parking lot. Do not start these instead of the numbered phases. Several items al
 
 | Idea | Where it lives |
 | --- | --- |
-| Conda env on spawn | Phase 2 |
-| JupyterLab in a browser tab | Phase 3 |
-| Language servers (Python, Markdown) | Phase 4 |
-| Native notebook cells + kernel | Phase 5 |
+| Supported Electron line + blank browser tab | Phase 1.3 |
+| Hook auth + SSH known_hosts / IdentitiesOnly / no `/tmp` Pi drop | Phase 2 |
+| Conda env on spawn | Phase 3 |
+| JupyterLab in a browser tab | Phase 4 |
+| Language servers (Python, Markdown) | Phase 5 |
+| Native notebook cells + kernel | Phase 6 |
 | Open workspace in VS Code / Cursor | Phase 1.2 |
-| Spyder as an external IDE | after Phase 2 |
+| Spyder as an external IDE | after Phase 3 |
+| Config-dir `0700`, scrollback id, IPC cwd allow-list | Phase 6 (deferred) |
+| Authenticode / installer | Phase 6 unless IT blocks sooner |
 
-**Git tree.** A branch/commit graph in the UI (log, parents, maybe checkout). Useful for “where am I” without leaving DevTool. Phase 1 explicitly stays out of a git graph so the file explorer does not grow into an IDE. If it happens, it is Phase 5-or-later: read-only first, no rebase UI.
+**Git tree.** A branch/commit graph in the UI (log, parents, maybe checkout). Useful for “where am I” without leaving DevTool. Phase 1 explicitly stays out of a git graph so the file explorer does not grow into an IDE. If it happens, it is Phase 6-or-later: read-only first, no rebase UI.
 
 **Generate commit message with a specified agent.** Pre-fill the existing git commit box from Pi (or Claude/Codex) given the staged diff. Low confidence this needs a DevTool feature: you can already ask Pi in a tab to write the message and paste it. Only worth it if the commit UI is used a lot and the round-trip is annoying. Prefer “use the project’s default agent” over a per-commit picker.
 
-**Open this workspace in an external IDE.** Sequenced as **Phase 1.2**. Spyder waits for conda (Phase 2).
+**Open this workspace in an external IDE.** Sequenced as **Phase 1.2**. Spyder waits for conda (Phase 3).
 
 ---
 
@@ -257,9 +315,11 @@ Keep upstream `master` as a remote (`upstream`) and rebase or merge periodically
 3. Win dir packaging notes / script. **Done.** (`npm run build:win` → `dist/win-unpacked`.)
 4. File explorer CRUD. **Done** in `0.3.0` (filter, Reveal in Git Bash, 1.1 toolbar, 1.2 external IDE handover; ignore list removed).
 5. Open workspace in external IDE (Phase 1.2: toolbar split button + Settings list). **Done** in `0.3.0`.
-6. Conda env picker on spawn.
-7. JupyterLab browser-tab launcher.
-8. Python and Markdown LSP spike, then harden.
+6. Supported Electron line + blank browser tab (Phase 1.3).
+7. Hook authentication + SSH trust (Phase 2).
+8. Conda env picker on spawn (Phase 3).
+9. JupyterLab browser-tab launcher (Phase 4).
+10. Python and Markdown LSP spike, then harden (Phase 5).
 
 Skip a step only if the previous phase already includes it by accident (e.g. PATH work that makes conda trivial).
 
@@ -295,9 +355,11 @@ Work machine constraints to re-test every phase: Git Bash, portable Node zip, Pi
 | 0 | `0.2.0` (shipped) | Git Bash + Pi in DevTool on Windows | 1–2 months calendar / 2–4 weeks focused |
 | 0.5 | (no bump, done) | No DevTool inference UI (Pi keeps its settings) | n/a |
 | 1 | `0.3.0` (shipped) | File tree CRUD + 1.2 external IDE handover | 1–2 weeks |
-| 2 | `0.4.0` | Conda picker on spawn | 1–2 weeks |
-| 3 | `0.5.0` | JupyterLab in a browser tab | days |
-| 4 | `0.6.0` | Usable Python and Markdown LSPs | 1–2 months |
-| 5 | `0.7.0`+ | Native notebooks / extra LSPs | open-ended |
+| 1.3 | `0.3.y` | Supported Electron + blank browser tab (webview stays) | a few evenings to a week |
+| 2 | `0.4.0` | Hook secret + Pi extension off `/tmp` + SSH known_hosts | ~1 week |
+| 3 | `0.5.0` | Conda picker on spawn | 1–2 weeks |
+| 4 | `0.6.0` | JupyterLab in a browser tab | days |
+| 5 | `0.7.0` | Usable Python and Markdown LSPs | 1–2 months |
+| 6 | `0.8.0`+ | Native notebooks / extra LSPs / deferred hardening | open-ended |
 
 A year of evenings can yield a personal orchestrator. It will not become Cursor. That is success.
