@@ -6,6 +6,8 @@ This fork keeps that orchestrator model, with **Pi** as the primary agent and Pi
 
 Do not try to become VS Code or Cursor. If a feature belongs in Pi, put it in Pi.
 
+Company-deploy security snapshot (what this app actually is on a workstation): [SECURITY.md](./SECURITY.md).
+
 ---
 
 ## Product bet (do not revisit every phase)
