@@ -279,6 +279,19 @@ describe('SshConnectionManager', () => {
     expect(args[args.length - 1]).toBe('printf %s "$HOME"')
   })
 
+  it('HOME probe keeps the key file so a mux fallback can still authenticate', () => {
+    const args = manager.buildReadHomeArgs('proj-1', {
+      host: 'dev.example.com',
+      port: 22,
+      username: 'deploy',
+      keyFile: '/home/user/.ssh/id_ed25519',
+      remoteDir: ''
+    })
+    expect(args).toContain('-i')
+    expect(args).toContain('/home/user/.ssh/id_ed25519')
+    expect(args).toContain('IdentitiesOnly=yes')
+  })
+
   it('uses bare cd when remote directory is blank', () => {
     expect(spawnCdCommand('')).toBe('cd')
     expect(spawnCdCommand('  ')).toBe('cd')
