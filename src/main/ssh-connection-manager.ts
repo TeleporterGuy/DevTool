@@ -12,6 +12,21 @@ export function shellQuote(s: string): string {
   return "'" + s.replace(/'/g, "'\\''") + "'"
 }
 
+/** True when the user left Remote directory blank (start in $HOME). */
+export function isBlankRemoteDir(dir: string | undefined): boolean {
+  return !dir || !dir.trim()
+}
+
+/**
+ * `cd` for the remote login shell. No directory → `cd` with no args, which
+ * bash treats as the user’s home (MobaXterm-style).
+ */
+export function spawnCdCommand(cwd: string): string {
+  const trimmed = cwd.trim()
+  if (!trimmed) return 'cd'
+  return `cd ${shellQuote(trimmed)}`
+}
+
 /** POSIX-join a remote base dir with a relative path */
 export function joinRemotePath(remoteDir: string, relative: string): string {
   if (!remoteDir) return relative
@@ -294,7 +309,7 @@ export class SshConnectionManager extends EventEmitter {
     // never apply and commands like `pi` come back "not found" even though they
     // work in a normal terminal. We always allocate a tty (-t), so interactive
     // matches what the user's own ssh session would get.
-    const innerCmd = `${prefix}cd ${shellQuote(cwd)} && ${envPrefix}exec ${command}${cmdSuffix}`
+    const innerCmd = `${prefix}${spawnCdCommand(cwd)} && ${envPrefix}exec ${command}${cmdSuffix}`
     args.push(`bash -l -i -c ${shellQuote(innerCmd)}`)
     return args
   }
@@ -310,6 +325,17 @@ export class SshConnectionManager extends EventEmitter {
       '-o', 'BatchMode=yes',
       `${config.username}@${config.host}`,
       'true'
+    ]
+  }
+
+  /** Ask the remote login environment for $HOME (passwd/LDAP home, not /home/<user> guessed locally). */
+  buildReadHomeArgs(projectId: string, config: SshConfig): string[] {
+    return [
+      ...this.buildBaseArgs(projectId, config),
+      '-o', 'ControlMaster=no',
+      '-o', 'BatchMode=yes',
+      `${config.username}@${config.host}`,
+      'printf %s "$HOME"'
     ]
   }
 
@@ -350,6 +376,21 @@ export class SshConnectionManager extends EventEmitter {
 
   getConfig(projectId: string): SshConfig | undefined {
     return this.configs.get(projectId)
+  }
+
+  /** remoteDir after connect: user value, or $HOME probed on the remote. */
+  effectiveRemoteDir(projectId: string, fallback: SshConfig): string {
+    const stored = this.configs.get(projectId)?.remoteDir
+    if (stored && stored.trim()) return stored.trim()
+    return (fallback.remoteDir || '').trim()
+  }
+
+  private async fillRemoteHomeIfNeeded(projectId: string, config: SshConfig): Promise<void> {
+    if (!isBlankRemoteDir(config.remoteDir)) return
+    const { stdout } = await this.execFileAsync('ssh', this.buildReadHomeArgs(projectId, config), { timeout: 10000 })
+    const home = stdout.trim()
+    if (!home) return
+    this.configs.set(projectId, { ...config, remoteDir: home })
   }
 
   getSocksProxy(projectId: string): { port: number } | undefined {
@@ -488,7 +529,7 @@ export class SshConnectionManager extends EventEmitter {
    *  forward (null clears it); omit `options` to reuse whatever was recorded
    *  last — which is what the internal auto-reconnect path does, so it restores
    *  the same tunnel the renderer-triggered connect established. */
-  async connect(projectId: string, config: SshConfig, options?: { tunnel?: TunnelConfig | null }): Promise<void> {
+  async connect(projectId: string, config: SshConfig, options?: { tunnel?: TunnelConfig | null }): Promise<{ remoteDir: string }> {
     if (options && 'tunnel' in options) {
       if (options.tunnel) this.desiredTunnels.set(projectId, options.tunnel)
       else this.desiredTunnels.delete(projectId)
@@ -501,13 +542,16 @@ export class SshConnectionManager extends EventEmitter {
     const existing = this.connectLocks.get(projectId)
     if (existing) {
       await existing.catch(() => {})
-      if (this.getStatus(projectId) === 'connected') return
+      if (this.getStatus(projectId) === 'connected') {
+        return { remoteDir: this.effectiveRemoteDir(projectId, config) }
+      }
     }
 
     const promise = this.doConnect(projectId, config)
     this.connectLocks.set(projectId, promise)
     try {
       await promise
+      return { remoteDir: this.effectiveRemoteDir(projectId, config) }
     } finally {
       if (this.connectLocks.get(projectId) === promise) {
         this.connectLocks.delete(projectId)
@@ -559,6 +603,13 @@ export class SshConnectionManager extends EventEmitter {
       this.setRemotePort(projectId, parseInt(portMatch[1], 10))
       this.autoReconnectEnabled.add(projectId)
       this.autoReconnectAttempts.delete(projectId)
+
+      // Empty Remote directory → ask the host for $HOME before tabs spawn.
+      try {
+        await this.fillRemoteHomeIfNeeded(projectId, config)
+      } catch {
+        // Spawn still uses `cd` (home). File tree fills in on a later successful probe.
+      }
 
       // Step 3: restore the configured local forward *before* announcing
       // 'connected'. Anyone who sees 'connected' must be able to rely on the

@@ -122,8 +122,9 @@ export async function registerIpcHandlers(mainWindow: BrowserWindow): Promise<{ 
   })
 
   ipcMain.handle('ssh-connect', async (_e, projectId: string, sshConfig: SshConfig) => {
-    await sshManager.connect(projectId, sshConfig)
+    const result = await sshManager.connect(projectId, sshConfig)
     sshManager.startHealthChecks(projectId, sshConfig)
+    return result
   })
 
   ipcMain.handle('ssh-disconnect', async (_e, projectId: string, sshConfig: SshConfig) => {
@@ -271,7 +272,7 @@ export async function registerIpcHandlers(mainWindow: BrowserWindow): Promise<{ 
       let hookInjectPrefix = ''
       let remoteArgs = args
       let remoteEnv = extraEnv
-      const remoteCwd = cwd || sshConfig.remoteDir
+      const remoteCwd = (cwd && cwd.trim()) || sshManager.effectiveRemoteDir(projectId, sshConfig)
       if (isClaudeRemote) {
         const remotePort = sshManager.getRemotePort(projectId)
         if (remotePort) {

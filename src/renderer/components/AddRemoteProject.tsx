@@ -36,7 +36,7 @@ export default function AddRemoteProject({ onAdd, onCancel, initialValues, allTa
   const [error, setError] = useState('')
   const [tagIds, setTagIds] = useState<string[]>([])
 
-  const isValid = host.trim() && username.trim() && remoteDir.trim()
+  const isValid = host.trim() && username.trim()
 
   const handleTest = async () => {
     if (!isValid) return
@@ -69,7 +69,10 @@ export default function AddRemoteProject({ onAdd, onCancel, initialValues, allTa
 
   const handleAdd = () => {
     if (!isValid) return
-    const name = `${username.trim()}@${host.trim()}:${remoteDir.trim().split('/').pop() || remoteDir.trim()}`
+    const dir = remoteDir.trim()
+    const name = dir
+      ? `${username.trim()}@${host.trim()}:${dir.split('/').pop() || dir}`
+      : `${username.trim()}@${host.trim()}`
     const cleaned: Partial<Record<AiTabType, string>> = {}
     for (const tool of AI_TAB_TYPES) {
       const val = aiArgs[tool]?.trim()
@@ -149,12 +152,13 @@ export default function AddRemoteProject({ onAdd, onCancel, initialValues, allTa
         </div>
       </SetBlock>
 
-      <SetBlock label="Remote directory">
+      <SetBlock label="Remote directory (optional)">
         <Field
           value={remoteDir}
           onChange={(e) => setRemoteDir(e.target.value)}
           placeholder="/home/deploy/my-project"
         />
+        <HelperText>Leave empty to start in that user’s home directory.</HelperText>
       </SetBlock>
 
       <SetBlock label="AI tool arguments (optional)">

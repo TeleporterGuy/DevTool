@@ -97,7 +97,7 @@ const api = {
   platform: process.platform,
 
   // SSH
-  sshConnect: (projectId: string, sshConfig: SshConfig): Promise<void> =>
+  sshConnect: (projectId: string, sshConfig: SshConfig): Promise<{ remoteDir: string }> =>
     ipcRenderer.invoke('ssh-connect', projectId, sshConfig),
   sshDisconnect: (projectId: string, sshConfig: SshConfig): Promise<void> =>
     ipcRenderer.invoke('ssh-disconnect', projectId, sshConfig),

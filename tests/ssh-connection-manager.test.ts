@@ -12,7 +12,8 @@ import {
   ensureSshDir,
   formatSshConnectError,
   knownHostsPath,
-  quoteSpawnArg
+  quoteSpawnArg,
+  spawnCdCommand
 } from '../src/main/ssh-connection-manager'
 import fs from 'fs'
 import path from 'path'
@@ -260,6 +261,36 @@ describe('SshConnectionManager', () => {
     expect(args[args.length - 1]).toBe('true')
   })
 
+  it('asks the remote login shell for $HOME instead of guessing /home/<user>', () => {
+    const args = manager.buildReadHomeArgs('proj-1', {
+      host: 'dev.example.com',
+      port: 22,
+      username: 'deploy',
+      remoteDir: ''
+    })
+    expect(args).toContain('-S')
+    expect(args).toContain(path.join(socketDir, 'proj-1.sock'))
+    expect(args).toContain('ControlMaster=no')
+    expect(args).toContain('BatchMode=yes')
+    expect(args[args.length - 1]).toBe('printf %s "$HOME"')
+  })
+
+  it('uses bare cd when remote directory is blank', () => {
+    expect(spawnCdCommand('')).toBe('cd')
+    expect(spawnCdCommand('  ')).toBe('cd')
+    expect(spawnCdCommand('/home/deploy')).toBe("cd '/home/deploy'")
+
+    const args = manager.buildSpawnArgs('proj-1', {
+      host: 'dev.example.com',
+      port: 22,
+      username: 'deploy',
+      remoteDir: ''
+    }, '/bin/zsh')
+    const lastArg = args[args.length - 1]
+    expect(lastArg).toContain('cd &&')
+    expect(lastArg).not.toContain("cd ''")
+  })
+
   it('builds SOCKS proxy args as standalone connection (no ControlMaster socket)', () => {
     const args = manager.buildSocksProxyArgs('proj-1', {
       host: 'dev.example.com',
@@ -345,6 +376,57 @@ describe('SshConnectionManager connect/disconnect', () => {
     expect(callCount).toBe(2)
     expect(statuses).toEqual(['connecting', 'connected'])
     expect(manager.getRemotePort('proj-1')).toBe(45678)
+  })
+
+  it('connect probes $HOME when remoteDir is blank and stores the path', async () => {
+    mockExecFile.mockImplementation(
+      (_cmd: string, args: string[], _opts: unknown, cb: unknown) => {
+        const argv = args as string[]
+        if (argv.includes('-M')) {
+          (cb as (err: null, stdout: string, stderr: string) => void)(null, '', '')
+        } else if (argv.includes('forward')) {
+          (cb as (err: null, stdout: string, stderr: string) => void)(null, 'Allocated port 45678 for remote forward to localhost:9999', '')
+        } else if (argv.includes('printf %s "$HOME"')) {
+          (cb as (err: null, stdout: string, stderr: string) => void)(null, '/home/deploy\n', '')
+        } else {
+          (cb as (err: Error) => void)(new Error(`unexpected ssh args: ${argv.join(' ')}`))
+        }
+        return {} as ReturnType<typeof execFile>
+      }
+    )
+
+    const blank: { host: string; port: number; username: string; remoteDir: string } = {
+      host: 'dev.example.com', port: 22, username: 'deploy', remoteDir: ''
+    }
+    const result = await manager.connect('proj-1', blank)
+
+    expect(result.remoteDir).toBe('/home/deploy')
+    expect(manager.effectiveRemoteDir('proj-1', blank)).toBe('/home/deploy')
+    expect(manager.getStatus('proj-1')).toBe('connected')
+  })
+
+  it('connect still succeeds if the $HOME probe fails', async () => {
+    mockExecFile.mockImplementation(
+      (_cmd: string, args: string[], _opts: unknown, cb: unknown) => {
+        const argv = args as string[]
+        if (argv.includes('-M')) {
+          (cb as (err: null, stdout: string, stderr: string) => void)(null, '', '')
+        } else if (argv.includes('forward')) {
+          (cb as (err: null, stdout: string, stderr: string) => void)(null, 'Allocated port 45678 for remote forward to localhost:9999', '')
+        } else if (argv.includes('printf %s "$HOME"')) {
+          (cb as (err: Error) => void)(new Error('HOME probe timed out'))
+        } else {
+          (cb as (err: Error) => void)(new Error(`unexpected ssh args: ${argv.join(' ')}`))
+        }
+        return {} as ReturnType<typeof execFile>
+      }
+    )
+
+    const blank = { host: 'dev.example.com', port: 22, username: 'deploy', remoteDir: '' }
+    const result = await manager.connect('proj-1', blank)
+
+    expect(manager.getStatus('proj-1')).toBe('connected')
+    expect(result.remoteDir).toBe('')
   })
 
   it('connect parses bare port number from -O forward stdout', async () => {
