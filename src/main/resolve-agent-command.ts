@@ -77,7 +77,7 @@ export function missingCommandError(command: string): Error {
 
 export function missingSshError(): Error {
   return new Error(
-    'Cannot find ssh.exe. Install Windows OpenSSH (Settings → Optional features) or Git for Windows, then open the remote tab again.'
+    'Cannot find ssh.exe. Install Git for Windows (Git\\usr\\bin\\ssh.exe) or Windows OpenSSH, then open the remote tab again.'
   )
 }
 
@@ -86,25 +86,34 @@ export function missingSshError(): Error {
  * A bare `ssh` yields `Error: File not found:` with an empty path.
  * Non-Windows keeps the name `ssh` so the OS searches PATH.
  *
- * Prefer System32 OpenSSH over Git\\usr\\bin. Git's ssh is MSYS/Cygwin and
- * cannot pass file descriptors over a ControlMaster socket, so every new
- * tab prints `mux_client_request_session: read from master failed` and
- * falls back to a fresh TCP connection.
+ * Prefer Git\\usr\\bin over System32 OpenSSH. Native Windows OpenSSH cannot
+ * own a ControlMaster socket (`getsockname failed: Not a socket`). Git's
+ * ssh can run the master and `-O` commands; PTY tabs on Windows still
+ * connect directly (no `-S`) because Git cannot mux a new TTY session.
  */
 export function resolveSshCommand(deps: ResolveCommandDeps = {}): string {
   const platform = deps.platform ?? process.platform
   if (platform !== 'win32') return 'ssh'
-  const env = deps.env ?? process.env
-  const existsSync = deps.existsSync ?? fs.existsSync
-  const pathMod = deps.path ?? path.win32
-  const systemRoot = env.SystemRoot || env.SYSTEMROOT || 'C:\\Windows'
-  const nativeOpenSsh = pathMod.join(systemRoot, 'System32', 'OpenSSH', 'ssh.exe')
-  if (existsSync(nativeOpenSsh)) return nativeOpenSsh
+  const gitSsh = windowsGitSshExe(deps)
+  if (gitSsh) return gitSsh
   try {
     return resolveAgentCommand('ssh', deps)
   } catch {
     throw missingSshError()
   }
+}
+
+/** Git\\usr\\bin\\ssh.exe when installed — the only Windows ssh that can host ControlMaster. */
+export function windowsGitSshExe(deps: ResolveCommandDeps = {}): string | null {
+  const env = deps.env ?? process.env
+  const existsSync = deps.existsSync ?? fs.existsSync
+  const pathMod = deps.path ?? path.win32
+  for (const dir of extraWindowsSearchDirs(env, pathMod)) {
+    if (!/git[/\\]usr[/\\]bin$/i.test(dir)) continue
+    const candidate = pathMod.join(dir, 'ssh.exe')
+    if (existsSync(candidate)) return candidate
+  }
+  return null
 }
 
 /** Same as {@link resolveSshCommand}, but `ssh` if nothing is installed (execFile PATH search). */

@@ -202,11 +202,11 @@ describe('resolveSshCommand', () => {
     expect(resolved.toLowerCase()).toBe('c:\\program files\\git\\usr\\bin\\ssh.exe')
   })
 
-  it('prefers Windows OpenSSH over Git ssh even when Git is first on PATH', () => {
+  it('prefers Git usr\\bin\\ssh.exe over Windows OpenSSH', () => {
     const resolved = resolveSshCommand({
       ...win,
       env: {
-        PATH: 'C:\\Program Files\\Git\\usr\\bin;C:\\Windows\\System32',
+        PATH: 'C:\\Windows\\System32\\OpenSSH;C:\\Program Files\\Git\\usr\\bin',
         PATHEXT: '.EXE',
         SystemRoot: 'C:\\Windows'
       },
@@ -216,7 +216,7 @@ describe('resolveSshCommand', () => {
           || lower === 'c:\\windows\\system32\\openssh\\ssh.exe'
       }
     })
-    expect(resolved.toLowerCase()).toBe('c:\\windows\\system32\\openssh\\ssh.exe')
+    expect(resolved.toLowerCase()).toBe('c:\\program files\\git\\usr\\bin\\ssh.exe')
   })
 
   it('throws a clear error when ssh.exe is missing', () => {

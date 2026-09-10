@@ -132,14 +132,18 @@ describe('SshConnectionManager', () => {
       username: 'deploy',
       remoteDir: '/home/deploy/app'
     }, '/bin/zsh')
-    expect(args).toContain('-S')
-    expect(args).toContain(path.join(socketDir, 'proj-1.sock'))
     expect(args).toContain('-t')
     expect(args).toContain('deploy@dev.example.com')
     const lastArg = args[args.length - 1]
     expect(lastArg).toMatch(/^bash -l -i -c /)
     expect(lastArg).toContain('/home/deploy/app')
     expect(lastArg).toContain('/bin/zsh')
+    if (process.platform === 'win32') {
+      expect(args).not.toContain('-S')
+    } else {
+      expect(args).toContain('-S')
+      expect(args).toContain(path.join(socketDir, 'proj-1.sock'))
+    }
   })
 
   it('builds spawn args with env vars for AI tools', () => {
@@ -289,6 +293,32 @@ describe('SshConnectionManager', () => {
     const lastArg = args[args.length - 1]
     expect(lastArg).toContain('cd &&')
     expect(lastArg).not.toContain("cd ''")
+  })
+
+  it('does not mux PTY tabs through ControlMaster on Windows', () => {
+    const winManager = new SshConnectionManager(socketDir, 9999, { platform: 'win32' })
+    const args = winManager.buildSpawnArgs('proj-1', {
+      host: 'dev.example.com',
+      port: 22,
+      username: 'deploy',
+      remoteDir: '/home/deploy/app'
+    }, '/bin/zsh')
+    expect(args).not.toContain('-S')
+    expect(args).not.toContain(path.join(socketDir, 'proj-1.sock'))
+    expect(args).toContain('-t')
+    expect(args).toContain('deploy@dev.example.com')
+  })
+
+  it('muxes PTY tabs through ControlMaster on non-Windows', () => {
+    const unixManager = new SshConnectionManager(socketDir, 9999, { platform: 'linux' })
+    const args = unixManager.buildSpawnArgs('proj-1', {
+      host: 'dev.example.com',
+      port: 22,
+      username: 'deploy',
+      remoteDir: '/home/deploy/app'
+    }, '/bin/zsh')
+    expect(args).toContain('-S')
+    expect(args).toContain(path.join(socketDir, 'proj-1.sock'))
   })
 
   it('builds SOCKS proxy args as standalone connection (no ControlMaster socket)', () => {
@@ -975,6 +1005,15 @@ describe('ssh trust helpers', () => {
   it('formatSshConnectError leaves unrelated errors alone', () => {
     const err = new Error('Connection refused')
     expect(formatSshConnectError(err, '/x')).toBe(err)
+  })
+
+  it('formatSshConnectError explains Windows OpenSSH ControlMaster failure', () => {
+    const err = Object.assign(new Error('Command failed: ssh -M'), {
+      stderr: 'getsockname failed: Not a socket\r\n'
+    })
+    const formatted = formatSshConnectError(err, '/x')
+    expect(formatted.message).toMatch(/Git for Windows/)
+    expect(formatted.message).not.toMatch(/getsockname/)
   })
 
   it('knownHostsPath sits next to the control sockets', () => {

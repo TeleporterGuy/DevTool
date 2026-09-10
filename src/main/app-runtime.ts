@@ -1344,8 +1344,8 @@ export class AppRuntime {
       }
 
       const sshArgs = this.sshManager.buildSpawnArgs(projectId, sshConfig, shell, remoteArgs, remoteEnv, hookInjectPrefix, remoteCwd)
-      // Same binary as the ControlMaster. Git's MSYS ssh cannot mux a PTY
-      // session; Windows OpenSSH can. ConPTY also needs an absolute path.
+      // Same binary as ControlMaster. On Windows that is Git ssh.exe (native
+      // OpenSSH cannot own the mux socket). ConPTY needs an absolute path.
       const sshFile = this.sshManager.getSshCommand()
       this.logDebug(`ptySpawn ssh id=${id} file=${sshFile}`)
       this.ptyManager.spawn(id, sshFile, os.tmpdir(), cols, rows, sshArgs, undefined, callbacks)

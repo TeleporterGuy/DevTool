@@ -84,6 +84,12 @@ export function formatSshConnectError(err: unknown, knownHostsFile: string): Err
       `${execErr.message ?? String(err)}`
     )
   }
+  if (/getsockname failed:\s*Not a socket/i.test(detail)) {
+    return new Error(
+      'This ssh.exe cannot share connections on Windows. Install Git for Windows ' +
+      '(DevTool uses Git\\usr\\bin\\ssh.exe for remote projects) and reconnect.'
+    )
+  }
   return err instanceof Error ? err : new Error(String(err))
 }
 
@@ -138,6 +144,7 @@ export class SshConnectionManager extends EventEmitter {
   private autoReconnectEnabled = new Set<string>()
   private tunnelRetryTimers = new Map<string, ReturnType<typeof setTimeout>>()
   private tunnelRetryAttempts = new Map<string, number>()
+  private platform: NodeJS.Platform
 
   /** Promisified execFile that always returns { stdout, stderr } */
   private execFileAsync(cmd: string, args: string[], opts: { timeout: number }): Promise<{ stdout: string; stderr: string }> {
@@ -156,14 +163,15 @@ export class SshConnectionManager extends EventEmitter {
     })
   }
 
-  constructor(socketDir: string, hookPort: number) {
+  constructor(socketDir: string, hookPort: number, options?: { platform?: NodeJS.Platform }) {
     super()
     this.socketDir = socketDir
     this.hookPort = hookPort
     this.sshBin = sshExecutable()
+    this.platform = options?.platform ?? process.platform
   }
 
-  /** Absolute ssh.exe on Windows (OpenSSH, not Git/MSYS) so mux slaves match the master. */
+  /** Absolute ssh.exe so ConPTY and ControlMaster use the same binary. */
   getSshCommand(): string {
     return this.sshBin
   }
@@ -293,6 +301,23 @@ export class SshConnectionManager extends EventEmitter {
     return args
   }
 
+  /**
+   * Shared args for a remote command. Unix slaves reuse ControlMaster (`-S`).
+   * Windows PTY tabs must not: Git ssh cannot mux a TTY, and Windows OpenSSH
+   * cannot create the control socket at all.
+   */
+  private buildSessionArgs(projectId: string, config: SshConfig, multiplex: boolean): string[] {
+    if (multiplex) return this.buildBaseArgs(projectId, config)
+    const args = [
+      ...sshTrustArgs(this.socketDir, config),
+      '-p', String(config.port)
+    ]
+    if (config.keyFile) {
+      args.push('-i', config.keyFile)
+    }
+    return args
+  }
+
   buildSpawnArgs(
     projectId: string,
     config: SshConfig,
@@ -303,7 +328,7 @@ export class SshConnectionManager extends EventEmitter {
     cwdOverride?: string
   ): string[] {
     const args = [
-      ...this.buildBaseArgs(projectId, config),
+      ...this.buildSessionArgs(projectId, config, this.platform !== 'win32'),
       '-t',
       `${config.username}@${config.host}`
     ]
