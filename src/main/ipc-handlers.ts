@@ -12,6 +12,7 @@ import { CodexSessionManager } from './codex-session-manager'
 import type { SshConfig, ProjectNote, GitPostureResult, GitPostureLastCommit, CommitHistoryResult } from '../shared/types'
 import { AppConfig, ProjectsData, AI_TAB_META } from '../shared/types'
 import { piExtensionLocalPath, piExtensionRemotePath, buildRemotePiExtensionScript } from './pi-extension-injector'
+import { resolveSshCommand } from './resolve-agent-command'
 import { NotesStorage } from './notes-storage'
 import { PaletteFrecencyStorage, type FrecencyFile } from './palette-frecency-storage'
 import os from 'os'
@@ -292,7 +293,7 @@ export async function registerIpcHandlers(mainWindow: BrowserWindow): Promise<{ 
       }
 
       const sshArgs = sshManager.buildSpawnArgs(projectId, sshConfig, shell, remoteArgs, remoteEnv, hookInjectPrefix, remoteCwd)
-      ptyManager.spawn(id, 'ssh', os.tmpdir(), cols, rows, sshArgs)
+      ptyManager.spawn(id, resolveSshCommand(), os.tmpdir(), cols, rows, sshArgs)
     } else {
       // Local spawn (existing behavior)
       const isPiLocal = shell === AI_TAB_META.pi.command && extraEnv?.DEVTOOL_TAB_ID

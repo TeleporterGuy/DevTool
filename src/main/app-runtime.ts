@@ -21,7 +21,7 @@ import { PaletteFrecencyStorage, type FrecencyFile } from './palette-frecency-st
 import { parseNumstat } from './git-diff-summary'
 import { GIT_STATUS_ARGS, parseGitStatusZ } from './git-status-parse'
 import { AI_TAB_META } from '../shared/types'
-import { agentCommandOverride, conptySpawnArgv, isAiAgentCommand, resolveAgentCommand } from './resolve-agent-command'
+import { agentCommandOverride, conptySpawnArgv, isAiAgentCommand, resolveAgentCommand, resolveSshCommand } from './resolve-agent-command'
 import { detectExternalEditors, openFolderInEditor } from './external-ide'
 import { isLocalInteractiveTerminal, resolveLocalTerminalSpawn } from './resolve-local-terminal'
 import { findGitBashExe, setPortableNodeDir } from './shell-env'
@@ -1342,7 +1342,11 @@ export class AppRuntime {
       }
 
       const sshArgs = this.sshManager.buildSpawnArgs(projectId, sshConfig, shell, remoteArgs, remoteEnv, hookInjectPrefix, remoteCwd)
-      this.ptyManager.spawn(id, 'ssh', os.tmpdir(), cols, rows, sshArgs, undefined, callbacks)
+      // ConPTY needs an absolute ssh.exe on Windows; `execFile('ssh')` for
+      // Test Connection can PATH-search, but node-pty cannot.
+      const sshFile = resolveSshCommand()
+      this.logDebug(`ptySpawn ssh id=${id} file=${sshFile}`)
+      this.ptyManager.spawn(id, sshFile, os.tmpdir(), cols, rows, sshArgs, undefined, callbacks)
     } else {
       const isClaudeLocal = shell === 'claude' && extraEnv?.DEVTOOL_TAB_ID
       const isPiLocal = shell === AI_TAB_META.pi.command && extraEnv?.DEVTOOL_TAB_ID

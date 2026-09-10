@@ -7,7 +7,8 @@ import {
   findCurlExe,
   isAiAgentCommand,
   quotePosixHookBin,
-  resolveAgentCommand
+  resolveAgentCommand,
+  resolveSshCommand
 } from '../src/main/resolve-agent-command'
 import { DEFAULT_CONFIG } from '../src/shared/types'
 
@@ -146,6 +147,7 @@ describe('extraWindowsSearchDirs', () => {
     )
     expect(dirs).toContain('C:\\Users\\me\\AppData\\Roaming\\npm')
     expect(dirs).toContain('C:\\Program Files\\Git\\usr\\bin')
+    expect(dirs).toContain('C:\\Windows\\System32\\OpenSSH')
   })
 })
 
@@ -170,6 +172,44 @@ describe('findCurlExe', () => {
         existsSync: () => false
       })
     ).toBeNull()
+  })
+})
+
+describe('resolveSshCommand', () => {
+  const win = { platform: 'win32' as const, path: path.win32 }
+
+  it('returns a bare ssh name on non-Windows', () => {
+    expect(resolveSshCommand({ platform: 'linux', path: path.posix, existsSync: () => false })).toBe('ssh')
+  })
+
+  it('finds ssh.exe on PATH', () => {
+    const resolved = resolveSshCommand({
+      ...win,
+      env: { PATH: 'C:\\Windows\\System32\\OpenSSH', PATHEXT: '.EXE' },
+      existsSync: (candidate) =>
+        candidate.toLowerCase() === 'c:\\windows\\system32\\openssh\\ssh.exe'
+    })
+    expect(resolved.toLowerCase()).toBe('c:\\windows\\system32\\openssh\\ssh.exe')
+  })
+
+  it('finds Git usr\\bin\\ssh.exe when PATH is thin', () => {
+    const resolved = resolveSshCommand({
+      ...win,
+      env: { PATH: 'C:\\Windows\\System32', PATHEXT: '.EXE' },
+      existsSync: (candidate) =>
+        candidate.toLowerCase() === 'c:\\program files\\git\\usr\\bin\\ssh.exe'
+    })
+    expect(resolved.toLowerCase()).toBe('c:\\program files\\git\\usr\\bin\\ssh.exe')
+  })
+
+  it('throws a clear error when ssh.exe is missing', () => {
+    expect(() =>
+      resolveSshCommand({
+        ...win,
+        env: { PATH: 'C:\\Windows\\System32' },
+        existsSync: () => false
+      })
+    ).toThrow(/Cannot find ssh\.exe/)
   })
 })
 

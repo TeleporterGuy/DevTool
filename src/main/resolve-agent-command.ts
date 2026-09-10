@@ -26,6 +26,8 @@ export function extraWindowsSearchDirs(env: NodeJS.ProcessEnv, pathMod: PathApi 
   dirs.push('C:\\Program Files\\Git\\bin')
   dirs.push('C:\\Program Files (x86)\\Git\\usr\\bin')
   dirs.push('C:\\Program Files (x86)\\Git\\bin')
+  const systemRoot = env.SystemRoot || env.SYSTEMROOT || 'C:\\Windows'
+  dirs.push(pathMod.join(systemRoot, 'System32', 'OpenSSH'))
   return dirs
 }
 
@@ -71,6 +73,27 @@ export function missingCommandError(command: string): Error {
     `Cannot find "${command}". Set a command path in Settings → AI Tools, ` +
       `or add the folder that contains it to PATH (on Windows this is often %AppData%\\npm\\pi.cmd).`
   )
+}
+
+export function missingSshError(): Error {
+  return new Error(
+    'Cannot find ssh.exe. Install Git for Windows (Git\\usr\\bin\\ssh.exe) or Windows OpenSSH, then open the remote tab again.'
+  )
+}
+
+/**
+ * Absolute `ssh.exe` on Windows so ConPTY/CreateProcess can open it.
+ * A bare `ssh` yields `Error: File not found:` with an empty path.
+ * Non-Windows keeps the name `ssh` so the OS searches PATH.
+ */
+export function resolveSshCommand(deps: ResolveCommandDeps = {}): string {
+  const platform = deps.platform ?? process.platform
+  if (platform !== 'win32') return 'ssh'
+  try {
+    return resolveAgentCommand('ssh', deps)
+  } catch {
+    throw missingSshError()
+  }
 }
 
 function pathLooksAbsolute(file: string, platform: NodeJS.Platform, pathMod: PathApi): boolean {
