@@ -7,7 +7,14 @@ vi.mock('child_process', async () => {
 })
 
 import { execFile } from 'child_process'
-import { SshConnectionManager } from '../src/main/ssh-connection-manager'
+import {
+  SshConnectionManager,
+  ensureSshDir,
+  formatSshConnectError,
+  knownHostsPath,
+  quoteSpawnArg,
+  spawnCdCommand
+} from '../src/main/ssh-connection-manager'
 import fs from 'fs'
 import path from 'path'
 import os from 'os'
@@ -52,6 +59,10 @@ describe('SshConnectionManager', () => {
     expect(args).toContain('-p')
     expect(args).toContain('2222')
     expect(args).toContain('deploy@dev.example.com')
+    expect(args).toContain(`UserKnownHostsFile=${path.join(socketDir, 'known_hosts')}`)
+    expect(args).toContain('StrictHostKeyChecking=accept-new')
+    expect(args).toContain('HashKnownHosts=no')
+    expect(args).not.toContain('IdentitiesOnly=yes')
   })
 
   it('builds ssh args with keyFile when provided', () => {
@@ -64,6 +75,7 @@ describe('SshConnectionManager', () => {
     })
     expect(args).toContain('-i')
     expect(args).toContain('/home/user/.ssh/id_ed25519')
+    expect(args).toContain('IdentitiesOnly=yes')
   })
 
   it('includes remote port forwarding in buildForwardArgs', () => {
@@ -120,14 +132,18 @@ describe('SshConnectionManager', () => {
       username: 'deploy',
       remoteDir: '/home/deploy/app'
     }, '/bin/zsh')
-    expect(args).toContain('-S')
-    expect(args).toContain(path.join(socketDir, 'proj-1.sock'))
     expect(args).toContain('-t')
     expect(args).toContain('deploy@dev.example.com')
     const lastArg = args[args.length - 1]
     expect(lastArg).toMatch(/^bash -l -i -c /)
     expect(lastArg).toContain('/home/deploy/app')
     expect(lastArg).toContain('/bin/zsh')
+    if (process.platform === 'win32') {
+      expect(args).not.toContain('-S')
+    } else {
+      expect(args).toContain('-S')
+      expect(args).toContain(path.join(socketDir, 'proj-1.sock'))
+    }
   })
 
   it('builds spawn args with env vars for AI tools', () => {
@@ -144,6 +160,18 @@ describe('SshConnectionManager', () => {
     expect(lastArg).toContain('exec claude')
     expect(lastArg).toContain('--resume')
     expect(lastArg).toContain('sess-123')
+  })
+
+  it('double-quotes $HOME paths so bash can expand the pi extension', () => {
+    const args = manager.buildSpawnArgs('proj-1', {
+      host: 'dev.example.com',
+      port: 22,
+      username: 'deploy',
+      remoteDir: '/home/deploy/app'
+    }, 'pi', ['-e', '$HOME/.devtool-remote/pi-status-extension.mjs'])
+    const lastArg = args[args.length - 1]
+    expect(lastArg).toContain('"$HOME/.devtool-remote/pi-status-extension.mjs"')
+    expect(lastArg).not.toContain("'$HOME/.devtool-remote/pi-status-extension.mjs'")
   })
 
   it('builds spawn args with command prefix', () => {
@@ -237,6 +265,75 @@ describe('SshConnectionManager', () => {
     expect(args[args.length - 1]).toBe('true')
   })
 
+  it('asks the remote login shell for $HOME instead of guessing /home/<user>', () => {
+    const args = manager.buildReadHomeArgs('proj-1', {
+      host: 'dev.example.com',
+      port: 22,
+      username: 'deploy',
+      remoteDir: ''
+    })
+    expect(args).toContain('-S')
+    expect(args).toContain(path.join(socketDir, 'proj-1.sock'))
+    expect(args).toContain('ControlMaster=no')
+    expect(args).toContain('BatchMode=yes')
+    expect(args[args.length - 1]).toBe('printf %s "$HOME"')
+  })
+
+  it('HOME probe keeps the key file so a mux fallback can still authenticate', () => {
+    const args = manager.buildReadHomeArgs('proj-1', {
+      host: 'dev.example.com',
+      port: 22,
+      username: 'deploy',
+      keyFile: '/home/user/.ssh/id_ed25519',
+      remoteDir: ''
+    })
+    expect(args).toContain('-i')
+    expect(args).toContain('/home/user/.ssh/id_ed25519')
+    expect(args).toContain('IdentitiesOnly=yes')
+  })
+
+  it('uses bare cd when remote directory is blank', () => {
+    expect(spawnCdCommand('')).toBe('cd')
+    expect(spawnCdCommand('  ')).toBe('cd')
+    expect(spawnCdCommand('/home/deploy')).toBe("cd '/home/deploy'")
+
+    const args = manager.buildSpawnArgs('proj-1', {
+      host: 'dev.example.com',
+      port: 22,
+      username: 'deploy',
+      remoteDir: ''
+    }, '/bin/zsh')
+    const lastArg = args[args.length - 1]
+    expect(lastArg).toContain('cd &&')
+    expect(lastArg).not.toContain("cd ''")
+  })
+
+  it('does not mux PTY tabs through ControlMaster on Windows', () => {
+    const winManager = new SshConnectionManager(socketDir, 9999, { platform: 'win32' })
+    const args = winManager.buildSpawnArgs('proj-1', {
+      host: 'dev.example.com',
+      port: 22,
+      username: 'deploy',
+      remoteDir: '/home/deploy/app'
+    }, '/bin/zsh')
+    expect(args).not.toContain('-S')
+    expect(args).not.toContain(path.join(socketDir, 'proj-1.sock'))
+    expect(args).toContain('-t')
+    expect(args).toContain('deploy@dev.example.com')
+  })
+
+  it('muxes PTY tabs through ControlMaster on non-Windows', () => {
+    const unixManager = new SshConnectionManager(socketDir, 9999, { platform: 'linux' })
+    const args = unixManager.buildSpawnArgs('proj-1', {
+      host: 'dev.example.com',
+      port: 22,
+      username: 'deploy',
+      remoteDir: '/home/deploy/app'
+    }, '/bin/zsh')
+    expect(args).toContain('-S')
+    expect(args).toContain(path.join(socketDir, 'proj-1.sock'))
+  })
+
   it('builds SOCKS proxy args as standalone connection (no ControlMaster socket)', () => {
     const args = manager.buildSocksProxyArgs('proj-1', {
       host: 'dev.example.com',
@@ -257,6 +354,8 @@ describe('SshConnectionManager', () => {
     expect(args).toContain('-N')
     expect(args).toContain('ExitOnForwardFailure=yes')
     expect(args).toContain('deploy@dev.example.com')
+    expect(args).toContain(`UserKnownHostsFile=${path.join(socketDir, 'known_hosts')}`)
+    expect(args).toContain('IdentitiesOnly=yes')
   })
 
   it('emits status-changed events', () => {
@@ -322,6 +421,57 @@ describe('SshConnectionManager connect/disconnect', () => {
     expect(manager.getRemotePort('proj-1')).toBe(45678)
   })
 
+  it('connect probes $HOME when remoteDir is blank and stores the path', async () => {
+    mockExecFile.mockImplementation(
+      (_cmd: string, args: string[], _opts: unknown, cb: unknown) => {
+        const argv = args as string[]
+        if (argv.includes('-M')) {
+          (cb as (err: null, stdout: string, stderr: string) => void)(null, '', '')
+        } else if (argv.includes('forward')) {
+          (cb as (err: null, stdout: string, stderr: string) => void)(null, 'Allocated port 45678 for remote forward to localhost:9999', '')
+        } else if (argv.includes('printf %s "$HOME"')) {
+          (cb as (err: null, stdout: string, stderr: string) => void)(null, '/home/deploy\n', '')
+        } else {
+          (cb as (err: Error) => void)(new Error(`unexpected ssh args: ${argv.join(' ')}`))
+        }
+        return {} as ReturnType<typeof execFile>
+      }
+    )
+
+    const blank: { host: string; port: number; username: string; remoteDir: string } = {
+      host: 'dev.example.com', port: 22, username: 'deploy', remoteDir: ''
+    }
+    const result = await manager.connect('proj-1', blank)
+
+    expect(result.remoteDir).toBe('/home/deploy')
+    expect(manager.effectiveRemoteDir('proj-1', blank)).toBe('/home/deploy')
+    expect(manager.getStatus('proj-1')).toBe('connected')
+  })
+
+  it('connect still succeeds if the $HOME probe fails', async () => {
+    mockExecFile.mockImplementation(
+      (_cmd: string, args: string[], _opts: unknown, cb: unknown) => {
+        const argv = args as string[]
+        if (argv.includes('-M')) {
+          (cb as (err: null, stdout: string, stderr: string) => void)(null, '', '')
+        } else if (argv.includes('forward')) {
+          (cb as (err: null, stdout: string, stderr: string) => void)(null, 'Allocated port 45678 for remote forward to localhost:9999', '')
+        } else if (argv.includes('printf %s "$HOME"')) {
+          (cb as (err: Error) => void)(new Error('HOME probe timed out'))
+        } else {
+          (cb as (err: Error) => void)(new Error(`unexpected ssh args: ${argv.join(' ')}`))
+        }
+        return {} as ReturnType<typeof execFile>
+      }
+    )
+
+    const blank = { host: 'dev.example.com', port: 22, username: 'deploy', remoteDir: '' }
+    const result = await manager.connect('proj-1', blank)
+
+    expect(manager.getStatus('proj-1')).toBe('connected')
+    expect(result.remoteDir).toBe('')
+  })
+
   it('connect parses bare port number from -O forward stdout', async () => {
     let callCount = 0
     mockExecFile.mockImplementation(
@@ -356,6 +506,47 @@ describe('SshConnectionManager connect/disconnect', () => {
     })).rejects.toThrow('Connection refused')
 
     expect(manager.getStatus('proj-1')).toBe('disconnected')
+  })
+
+  it('connect names the DevTool known_hosts file on host-key mismatch', async () => {
+    mockExecFile.mockImplementation(
+      (_cmd: string, _args: unknown, _opts: unknown, cb: unknown) => {
+        const err = new Error('Host key verification failed.')
+        ;(cb as (err: Error, stdout: string, stderr: string) => void)(
+          err,
+          '',
+          'WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED!'
+        )
+        return {} as ReturnType<typeof execFile>
+      }
+    )
+
+    await expect(manager.connect('proj-1', {
+      host: 'bad.example.com', port: 22, username: 'deploy', remoteDir: '/app'
+    })).rejects.toThrow(/SSH host key mismatch.*known_hosts/)
+  })
+
+  it('connect creates the ssh dir as 0700', async () => {
+    const dir = path.join(os.tmpdir(), `devtool-ssh-mode-${Date.now()}`)
+    const modeManager = new SshConnectionManager(dir, 9999)
+    mockExecFile.mockImplementation(
+      (_cmd: string, _args: unknown, _opts: unknown, cb: unknown) => {
+        (cb as (err: Error) => void)(new Error('Connection refused'))
+        return {} as ReturnType<typeof execFile>
+      }
+    )
+    try {
+      await modeManager.connect('proj-1', {
+        host: 'bad.example.com', port: 22, username: 'deploy', remoteDir: '/app'
+      }).catch(() => {})
+      expect(fs.existsSync(dir)).toBe(true)
+      if (process.platform !== 'win32') {
+        expect(fs.statSync(dir).mode & 0o777).toBe(0o700)
+      }
+    } finally {
+      modeManager.disconnectAll()
+      fs.rmSync(dir, { recursive: true, force: true })
+    }
   })
 
   it('disconnect sends exit command and clears state', async () => {
@@ -790,5 +981,62 @@ describe('SshConnectionManager SOCKS proxy', () => {
   it('stopSocksProxy is a no-op when no proxy exists', async () => {
     await manager.stopSocksProxy('proj-1')
     expect(manager.getSocksProxy('proj-1')).toBeUndefined()
+  })
+})
+
+describe('ssh trust helpers', () => {
+  it('ensureSshDir creates the directory as 0700', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'devtool-ssh-ensure-'))
+    fs.rmSync(dir, { recursive: true })
+    ensureSshDir(dir)
+    expect(fs.existsSync(dir)).toBe(true)
+    if (process.platform !== 'win32') {
+      expect(fs.statSync(dir).mode & 0o777).toBe(0o700)
+    }
+    fs.rmSync(dir, { recursive: true })
+  })
+
+  it('ensureSshDir chmods an existing directory to 0700', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'devtool-ssh-ensure-'))
+    fs.chmodSync(dir, 0o755)
+    ensureSshDir(dir)
+    if (process.platform !== 'win32') {
+      expect(fs.statSync(dir).mode & 0o777).toBe(0o700)
+    }
+    fs.rmSync(dir, { recursive: true })
+  })
+
+  it('formatSshConnectError names known_hosts on mismatch', () => {
+    const err = Object.assign(new Error('Host key verification failed.'), {
+      stderr: 'WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED!'
+    })
+    const formatted = formatSshConnectError(err, '/tmp/devtool-ssh/known_hosts')
+    expect(formatted.message).toContain('SSH host key mismatch')
+    expect(formatted.message).toContain('/tmp/devtool-ssh/known_hosts')
+  })
+
+  it('formatSshConnectError leaves unrelated errors alone', () => {
+    const err = new Error('Connection refused')
+    expect(formatSshConnectError(err, '/x')).toBe(err)
+  })
+
+  it('formatSshConnectError explains Windows OpenSSH ControlMaster failure', () => {
+    const err = Object.assign(new Error('Command failed: ssh -M'), {
+      stderr: 'getsockname failed: Not a socket\r\n'
+    })
+    const formatted = formatSshConnectError(err, '/x')
+    expect(formatted.message).toMatch(/Git for Windows/)
+    expect(formatted.message).not.toMatch(/getsockname/)
+  })
+
+  it('knownHostsPath sits next to the control sockets', () => {
+    expect(knownHostsPath('/cfg/ssh')).toBe(path.join('/cfg/ssh', 'known_hosts'))
+  })
+
+  it('quoteSpawnArg double-quotes $HOME paths and single-quotes others', () => {
+    expect(quoteSpawnArg('$HOME/.devtool-remote/pi-status-extension.mjs')).toBe(
+      '"$HOME/.devtool-remote/pi-status-extension.mjs"'
+    )
+    expect(quoteSpawnArg('--resume')).toBe("'--resume'")
   })
 })

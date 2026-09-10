@@ -238,7 +238,7 @@ export class AppRuntime {
 
     await this.hookServer.start()
     this.logDebug(`start hookPort=${this.hookServer.getPort()}`)
-    this.hookInjector = new HookInjector(this.hookServer.getPort())
+    this.hookInjector = new HookInjector(this.hookServer.getPort(), this.hookServer.getToken())
     this.sshManager = new SshConnectionManager(path.join(CONFIG_DIR, 'ssh'), this.hookServer.getPort())
     this.registerEventForwarders()
     this.registerIpcHandlers()
@@ -667,6 +667,7 @@ export class AppRuntime {
       clipboard.writeText(text)
       return undefined
     })
+    ipcMain.handle('clipboard-read-text', () => clipboard.readText())
     ipcMain.handle('open-external', async (_event, url: string) => {
       let parsed: URL
       try {
@@ -719,8 +720,9 @@ export class AppRuntime {
       // The tunnel and the SOCKS proxy are restored by the manager's connect
       // path and the 'connected' status handler respectively, so that automatic
       // reconnects go through exactly the same restoration as this one.
-      await this.sshManager.connect(projectId, sshConfig, { tunnel: this.getProjectTunnel(projectId) ?? null })
+      const result = await this.sshManager.connect(projectId, sshConfig, { tunnel: this.getProjectTunnel(projectId) ?? null })
       this.sshManager.startHealthChecks(projectId, sshConfig)
+      return result
     })
 
     ipcMain.handle('ssh-disconnect', async (_event, projectId: string, sshConfig: SshConfig) => {
@@ -835,7 +837,7 @@ export class AppRuntime {
       try {
         const { execFile: execFileCb } = await import('child_process')
         const { promisify } = await import('util')
-        const { stdout } = await promisify(execFileCb)('ssh', sshArgs, { timeout: 5000 })
+        const { stdout } = await promisify(execFileCb)(this.sshManager.getSshCommand(), sshArgs, { timeout: 5000 })
         return JSON.parse(stdout.trim()) as { sessionId: string | null }
       } catch (error) {
         throw new Error(`Failed to read Codex session: ${error instanceof Error ? error.message : String(error)}`)
@@ -872,7 +874,7 @@ export class AppRuntime {
         `${sshConfig.username}@${sshConfig.host}`,
         `ls "$HOME"/.claude/projects/*/${sessionId}.jsonl >/dev/null 2>&1 && echo yes || echo no`
       ]
-      const { stdout } = await execFileAsync('ssh', sshArgs, { timeout: 5000 })
+      const { stdout } = await execFileAsync(this.sshManager.getSshCommand(), sshArgs, { timeout: 5000 })
       return stdout.trim() === 'yes'
     })
 
@@ -1200,7 +1202,7 @@ export class AppRuntime {
       cleanupScript
     ]
     try {
-      await execFileAsync('ssh', cleanupArgs, { timeout: 5000 })
+      await execFileAsync(this.sshManager.getSshCommand(), cleanupArgs, { timeout: 5000 })
     } catch {
       // Best-effort cleanup
     }
@@ -1312,7 +1314,8 @@ export class AppRuntime {
         throw new Error('SSH connection not established')
       }
 
-      const remoteCwd = cwd || sshConfig.remoteDir
+      const storedDir = this.sshManager.effectiveRemoteDir(projectId, sshConfig)
+      const remoteCwd = (cwd && cwd.trim()) || storedDir
       const isClaudeRemote = shell === 'claude' && extraEnv?.DEVTOOL_TAB_ID
       const isPiRemote = shell === AI_TAB_META.pi.command && extraEnv?.DEVTOOL_TAB_ID
       let hookInjectPrefix = ''
@@ -1330,15 +1333,23 @@ export class AppRuntime {
         // point its callback at the reverse-tunnel port (reaches the local hook-server).
         const remotePort = this.sshManager.getRemotePort(projectId)
         if (remotePort) {
-          const remoteExtPath = piExtensionRemotePath(sshConfig.username)
-          hookInjectPrefix = buildRemotePiExtensionScript(remoteExtPath) + ' && '
+          const remoteExtPath = piExtensionRemotePath()
+          hookInjectPrefix = buildRemotePiExtensionScript() + ' && '
           remoteArgs = [...(args ?? []), '-e', remoteExtPath]
-          remoteEnv = { ...extraEnv, DEVTOOL_HOOK_PORT: String(remotePort) }
+          remoteEnv = {
+            ...extraEnv,
+            DEVTOOL_HOOK_PORT: String(remotePort),
+            DEVTOOL_HOOK_TOKEN: this.hookServer.getToken()
+          }
         }
       }
 
       const sshArgs = this.sshManager.buildSpawnArgs(projectId, sshConfig, shell, remoteArgs, remoteEnv, hookInjectPrefix, remoteCwd)
-      this.ptyManager.spawn(id, 'ssh', os.tmpdir(), cols, rows, sshArgs, undefined, callbacks)
+      // Same binary as ControlMaster. On Windows that is Git ssh.exe (native
+      // OpenSSH cannot own the mux socket). ConPTY needs an absolute path.
+      const sshFile = this.sshManager.getSshCommand()
+      this.logDebug(`ptySpawn ssh id=${id} file=${sshFile}`)
+      this.ptyManager.spawn(id, sshFile, os.tmpdir(), cols, rows, sshArgs, undefined, callbacks)
     } else {
       const isClaudeLocal = shell === 'claude' && extraEnv?.DEVTOOL_TAB_ID
       const isPiLocal = shell === AI_TAB_META.pi.command && extraEnv?.DEVTOOL_TAB_ID
@@ -1353,7 +1364,11 @@ export class AppRuntime {
       let localEnv = extraEnv
       if (isPiLocal) {
         localArgs = [...(args ?? []), '-e', piExtensionLocalPath()]
-        localEnv = { ...extraEnv, DEVTOOL_HOOK_PORT: String(this.hookServer.getPort()) }
+        localEnv = {
+          ...extraEnv,
+          DEVTOOL_HOOK_PORT: String(this.hookServer.getPort()),
+          DEVTOOL_HOOK_TOKEN: this.hookServer.getToken()
+        }
       }
       // Keep `shell` as `pi`/`claude`/`codex` for hook detection above. Resolve the
       // actual file CreateProcess can open (Windows needs pi.cmd, not a bare `pi`).

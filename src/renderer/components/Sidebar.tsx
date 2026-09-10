@@ -171,7 +171,7 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
     pinnedItems, togglePinnedItem, setPinnedOrder,
     selectedProjectId, selectedTaskId, selectedTagIds,
     switchToTask, selectProjectHome,
-    addProject, addRemoteProject, addShellCommandProject, addTag, removeProject, renameProject, updateProject,
+    addProject, addRemoteProject, connectSsh, addShellCommandProject, addTag, removeProject, renameProject, updateProject,
     addTask, addWorkspaceTask, removeTask, renameTask,
     reorderProjects, reorderTasks, getProjectDir,
     config, updateConfig,
@@ -1276,7 +1276,7 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
                 if (!project || !isRemoteProject(project)) return null
                 return (
                   <button className={menuItemCls} onClick={() => {
-                    window.api.sshConnect(project.id, project.ssh!).catch(() => {})
+                    connectSsh(project.id, project.ssh!).catch(() => {})
                     setContextMenu(null)
                   }}>Reconnect SSH</button>
                 )
@@ -1294,7 +1294,7 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
                   details.push({ label: 'Command', value: project.shellCommand!.command })
                 } else if (isRemoteProject(project)) {
                   details.push({ label: 'Connection', value: `${project.ssh!.username}@${project.ssh!.host}:${project.ssh!.port}` })
-                  details.push({ label: 'Dir', value: project.ssh!.remoteDir })
+                  details.push({ label: 'Dir', value: project.ssh!.remoteDir || '(remote home)' })
                 } else {
                   details.push({ label: 'Dir', value: project.directory })
                 }

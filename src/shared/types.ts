@@ -216,6 +216,7 @@ export interface SshConfig {
   port: number
   username: string
   keyFile?: string
+  /** Remote start directory. Empty means “the user’s home”; filled in on connect. */
   remoteDir: string
 }
 

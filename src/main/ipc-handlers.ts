@@ -29,7 +29,7 @@ export async function registerIpcHandlers(mainWindow: BrowserWindow): Promise<{ 
   // Start hook server BEFORE registering IPC handlers — no race condition
   const hookServer = new HookServer()
   await hookServer.start()
-  const hookInjector = new HookInjector(hookServer.getPort())
+  const hookInjector = new HookInjector(hookServer.getPort(), hookServer.getToken())
   const codexSessionManager = new CodexSessionManager()
 
   // Hook server events → renderer
@@ -121,8 +121,9 @@ export async function registerIpcHandlers(mainWindow: BrowserWindow): Promise<{ 
   })
 
   ipcMain.handle('ssh-connect', async (_e, projectId: string, sshConfig: SshConfig) => {
-    await sshManager.connect(projectId, sshConfig)
+    const result = await sshManager.connect(projectId, sshConfig)
     sshManager.startHealthChecks(projectId, sshConfig)
+    return result
   })
 
   ipcMain.handle('ssh-disconnect', async (_e, projectId: string, sshConfig: SshConfig) => {
@@ -223,7 +224,7 @@ export async function registerIpcHandlers(mainWindow: BrowserWindow): Promise<{ 
     try {
       const { execFile } = await import('child_process')
       const { promisify } = await import('util')
-      await promisify(execFile)('ssh', cleanupArgs, { timeout: 5000 })
+      await promisify(execFile)(sshManager.getSshCommand(), cleanupArgs, { timeout: 5000 })
     } catch {
       // Best-effort cleanup
     }
@@ -249,7 +250,7 @@ export async function registerIpcHandlers(mainWindow: BrowserWindow): Promise<{ 
     try {
       const { execFile: execFileCb } = await import('child_process')
       const { promisify } = await import('util')
-      const { stdout } = await promisify(execFileCb)('ssh', sshArgs, { timeout: 5000 })
+      const { stdout } = await promisify(execFileCb)(sshManager.getSshCommand(), sshArgs, { timeout: 5000 })
       return JSON.parse(stdout.trim()) as { sessionId: string | null }
     } catch (error) {
       throw new Error(`Failed to read Codex session: ${error instanceof Error ? error.message : String(error)}`)
@@ -270,7 +271,7 @@ export async function registerIpcHandlers(mainWindow: BrowserWindow): Promise<{ 
       let hookInjectPrefix = ''
       let remoteArgs = args
       let remoteEnv = extraEnv
-      const remoteCwd = cwd || sshConfig.remoteDir
+      const remoteCwd = (cwd && cwd.trim()) || sshManager.effectiveRemoteDir(projectId, sshConfig)
       if (isClaudeRemote) {
         const remotePort = sshManager.getRemotePort(projectId)
         if (remotePort) {
@@ -280,22 +281,27 @@ export async function registerIpcHandlers(mainWindow: BrowserWindow): Promise<{ 
       } else if (isPiRemote) {
         const remotePort = sshManager.getRemotePort(projectId)
         if (remotePort) {
-          const remoteExtPath = piExtensionRemotePath(sshConfig.username)
-          hookInjectPrefix = buildRemotePiExtensionScript(remoteExtPath) + ' && '
+          const remoteExtPath = piExtensionRemotePath()
+          hookInjectPrefix = buildRemotePiExtensionScript() + ' && '
           remoteArgs = [...(args ?? []), '-e', remoteExtPath]
-          remoteEnv = { ...extraEnv, DEVTOOL_HOOK_PORT: String(remotePort) }
+          remoteEnv = {
+            ...extraEnv,
+            DEVTOOL_HOOK_PORT: String(remotePort),
+            DEVTOOL_HOOK_TOKEN: hookServer.getToken()
+          }
         }
       }
 
       const sshArgs = sshManager.buildSpawnArgs(projectId, sshConfig, shell, remoteArgs, remoteEnv, hookInjectPrefix, remoteCwd)
-      ptyManager.spawn(id, 'ssh', os.tmpdir(), cols, rows, sshArgs)
+      ptyManager.spawn(id, sshManager.getSshCommand(), os.tmpdir(), cols, rows, sshArgs)
     } else {
       // Local spawn (existing behavior)
       const isPiLocal = shell === AI_TAB_META.pi.command && extraEnv?.DEVTOOL_TAB_ID
       if (isPiLocal) {
         ptyManager.spawn(id, shell, cwd, cols, rows, [...(args ?? []), '-e', piExtensionLocalPath()], {
           ...extraEnv,
-          DEVTOOL_HOOK_PORT: String(hookServer.getPort())
+          DEVTOOL_HOOK_PORT: String(hookServer.getPort()),
+          DEVTOOL_HOOK_TOKEN: hookServer.getToken()
         })
       } else {
         ptyManager.spawn(id, shell, cwd, cols, rows, args, extraEnv)

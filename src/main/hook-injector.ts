@@ -1,6 +1,7 @@
 import fs from 'fs'
 import path from 'path'
 import { findCurlExe, missingCurlError, quotePosixHookBin } from './resolve-agent-command'
+import { HOOK_TAB_ID_HEADER, HOOK_TOKEN_HEADER } from '../shared/hook-protocol'
 
 const DEVTOOL_HOOK_MARKER = '__devtool_injected'
 
@@ -12,6 +13,7 @@ interface HookEntry {
 
 export class HookInjector {
   private port: number
+  private token: string
   private resolveCurl: () => string | null
   /**
    * Tab ids that currently hold an injection, keyed by project dir.
@@ -25,8 +27,9 @@ export class HookInjector {
    */
   private localOwners = new Map<string, Set<string>>()
 
-  constructor(port: number, resolveCurl: () => string | null = findCurlExe) {
+  constructor(port: number, token: string, resolveCurl: () => string | null = findCurlExe) {
     this.port = port
+    this.token = token
     this.resolveCurl = resolveCurl
   }
 
@@ -49,7 +52,7 @@ export class HookInjector {
       matcher: '*',
       hooks: [{
         type: 'command',
-        command: `${curl} -s --max-time 5 -X POST ${base}/hook/${endpoint} -H "X-Tab-Id: $DEVTOOL_TAB_ID" -d @- 2>/dev/null; printf Success`
+        command: `${curl} -s --max-time 5 -X POST ${base}/hook/${endpoint} -H "${HOOK_TAB_ID_HEADER}: $DEVTOOL_TAB_ID" -H "${HOOK_TOKEN_HEADER}: ${this.token}" -d @- 2>/dev/null; printf Success`
       }],
       [DEVTOOL_HOOK_MARKER]: true
     })
@@ -203,7 +206,7 @@ export class HookInjector {
   buildRemoteInjectScript(remoteDir: string, remotePort: number): string {
     const base = `http://localhost:${remotePort}`
     const mkHookCmd = (endpoint: string): string =>
-      `curl -s --max-time 5 -X POST ${base}/hook/${endpoint} -H "X-Tab-Id: $DEVTOOL_TAB_ID" -d @- 2>/dev/null; printf Success`
+      `curl -s --max-time 5 -X POST ${base}/hook/${endpoint} -H "${HOOK_TAB_ID_HEADER}: $DEVTOOL_TAB_ID" -H "${HOOK_TOKEN_HEADER}: ${this.token}" -d @- 2>/dev/null; printf Success`
 
     const devtoolHooks = {
       SessionStart: [{ matcher: '*', hooks: [{ type: 'command', command: mkHookCmd('session-start') }], [DEVTOOL_HOOK_MARKER]: true }],

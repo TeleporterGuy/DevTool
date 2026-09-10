@@ -1,5 +1,6 @@
 import { execFile } from 'child_process'
 import type { SshConfig, WorkspaceCreateRequest, WorkspaceDeleteRequest, WorkspaceDeleteResult, WorkspaceListBranchesRequest } from '../shared/types'
+import { sshExecutable } from './resolve-agent-command'
 
 type RemoteWorkspaceResponse<T> =
   | { ok: true; data: T }
@@ -46,7 +47,7 @@ ${script}
 
     let stdout: string
     try {
-      const result = await this.execFileAsync('ssh', sshArgs, 10000)
+      const result = await this.execFileAsync(sshExecutable(), sshArgs, 10000)
       stdout = result.stdout.trim()
     } catch (error) {
       throw new Error(`Remote workspace operation failed: ${error instanceof Error ? error.message : String(error)}`)

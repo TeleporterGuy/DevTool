@@ -36,8 +36,8 @@ If “an AI CLI with the developer’s credentials, on company source” is alre
 | Attacker / situation | Why it matters here |
 | --- | --- |
 | Malicious or compromised **web page** in an in-app browser tab | Renderer has `webviewTag` and a large IPC surface (spawn, file I/O, git, SSH). |
-| **Local** process or another user on the same machine | Hook server is unauthenticated HTTP on `127.0.0.1`. Config/scrollback are plaintext. |
-| Process on an **SSH remote** (shared Linux box) | Hook port is reverse-forwarded (`ssh -R`). Pi extension is written under `/tmp`. |
+| **Local** process or another user on the same machine | Hook POSTs need a per-process token, but the server is still plaintext HTTP on `127.0.0.1`. Config/scrollback are plaintext. |
+| Process on an **SSH remote** (shared Linux box) | Hook port is reverse-forwarded (`ssh -R`). Inbox POSTs need the process token. Pi extension lives under `$HOME/.devtool-remote/`. |
 | **Network** MITM on first SSH connect | `StrictHostKeyChecking=accept-new` trusts the first host key it sees. |
 | **Supply chain / stale Chromium** | Keep Electron on a supported line (now **43.6.0**). Windows `DevTool.exe` is still **unsigned**. |
 | The **agent itself** | By design it can read `.env`, run commands, and `git push`. Policy problem, not a missing `if`. |
@@ -54,10 +54,10 @@ Keep these; do not regress them.
 - Main window sets `contextIsolation: true` and `nodeIntegration: false`. Guest `<webview>` pages cannot get Node or a preload (`will-attach-webview` plus `webpreferences` on the tag). New browser tabs default to `about:blank`, not Google.
 - File-tree create / rename / delete goes through `resolveSafeProjectPath` (`src/main/project-fs-path.ts`) and rejects `..` / other-drive escapes **relative to the given project cwd**.
 - Workspace delete refuses to recursively remove a path that is not a registered git worktree.
-- Hook HTTP server binds **`127.0.0.1`**, not all interfaces. SOCKS and SSH `-L` are localhost-style binds by default.
+- Hook HTTP server binds **`127.0.0.1`**, not all interfaces. POSTs require `X-Devtool-Token`; bodies over 64 KiB are rejected. SOCKS and SSH `-L` are localhost-style binds by default.
 - Markdown preview is sanitized with DOMPurify.
 - Chrome DevTools Protocol (`DEVTOOL_CDP_PORT`) is opt-in; packaged runs do not open it.
-- SSH remote commands are mostly `execFile` plus quoting (`shellQuote` in `ssh-connection-manager.ts`), not a local `sh -c` string built from untrusted pieces.
+- SSH remote commands are mostly `execFile` plus quoting (`shellQuote` in `ssh-connection-manager.ts`), not a local `sh -c` string built from untrusted pieces. Control-socket dir is `0700`. `UserKnownHostsFile` is `<config dir>/ssh/known_hosts`. `IdentitiesOnly=yes` when a key file is set.
 - Dev and packaged config dirs are split on purpose (`src/main/config-dir.ts`).
 - Spectre-mitigated `node-pty` builds stay on; do not strip that to make compile easier (see README).
 - Do not `chmod +s` `chrome-sandbox` (AGENTS.md).
@@ -76,9 +76,7 @@ Severity is “what a company security review usually does with it,” not CVSS.
 
 **Renderer / webview: remaining gaps.** Main window still has `sandbox: false` and `webviewTag: true`. There is no CSP in `src/renderer/index.html`, no `setWindowOpenHandler`. DevTools are always available (app menu and the browser-tab button). Local browser tabs use the default session. Remote tabs use `persist:browser-${projectId}` plus SOCKS through the SSH host — company browsing can egress via that box. Guest Node is locked off (Phase 1.3); that does not sandbox the rest of the IPC surface.
 
-**Hook server is unauthenticated localhost HTTP, then reverse-tunneled.** `src/main/hook-server.ts` accepts any POST to `/hook/{session-start,working,stopped,notification}` if `X-Tab-Id` is set. No shared secret, no body-size cap. SSH connect does `-R 0:localhost:<hookPort>`, so a process on the remote that can hit the allocated port can spoof inbox/status. Remote Pi extension path is `/tmp/devtool-<user>/pi-status-extension.mjs` — on a shared host, `/tmp` pre-create / symlink races can plant code Pi will load.
-
-**SSH trust is TOFU, not company PKI.** Master, SOCKS, and spawn args use `StrictHostKeyChecking=accept-new`. First connection to the wrong host is remembered. No SSH CA, no pinned `UserKnownHostsFile`, no `IdentitiesOnly`. `projects.json` stores host / user / port / **path** to a key file. Control sockets live under `~/.devtool/ssh/` created with default umask (often `0755`).
+**SSH first-connect is still TOFU, not company PKI.** Master, SOCKS, and spawn args keep `StrictHostKeyChecking=accept-new`. First connection to the wrong host is remembered in `<config dir>/ssh/known_hosts` (unhashed hostnames, not mixed with `~/.ssh/known_hosts`). A *changed* key fails with a message that names that file. No SSH CA. `projects.json` stores host / user / port / **path** to a key file.
 
 **Privileged IPC is a wide main-process API.** After XSS or a webview escape, the renderer can already do what the user can do. Extra problems even then:
 
@@ -125,7 +123,7 @@ Typical IT checklist items this repo does not provide:
 
 ## Decisions after the 0.3.0 audit
 
-Recorded so this file and [ROADMAP.md](./ROADMAP.md) stay aligned. Findings below the closeout paragraph are what is **still open** at `0.3.2`.
+Recorded so this file and [ROADMAP.md](./ROADMAP.md) stay aligned. Findings below the closeout paragraph are what is **still open** after Phase 2 (version stays `0.3.2`).
 
 | Audit item | Decision | Where it lives |
 | --- | --- | --- |
@@ -134,7 +132,7 @@ Recorded so this file and [ROADMAP.md](./ROADMAP.md) stay aligned. Findings belo
 | 2. Upgrade Electron | **Done** in `0.3.1` (43.6.0). Stay on a supported major. | **Phase 1.3** |
 | 3. Default browser page | **Done.** New tabs are `about:blank`, not Google. | **Phase 1.3** |
 | 3. Webview / Node | **Done.** Webview kept; guest pages do not get Node. | **Phase 1.3** |
-| 4. Hook secret, Pi off `/tmp`, SSH known_hosts | **Do in a new session.** | **Phase 2** (conda/Jupyter/LSP each +1) |
+| 4. Hook secret, Pi off `/tmp`, SSH known_hosts | **Done.** Token + body cap; `$HOME/.devtool-remote/`; DevTool `known_hosts` + `IdentitiesOnly` + socket dir `0700`. First-connect TOFU remains. | **Phase 2** |
 | 5. Config dir `0700`, scrollback id, IPC cwd allow-list | Deferred. | Phase 6 |
 | 6. Company pilot / DLP | Deferred. | Phase 6 / outside the repo |
 
@@ -146,14 +144,14 @@ Work in this order so each step is demoable. Roadmap numbering after the audit:
 
 1. **Policy accept** — done as “same as a terminal.”
 2. **Phase 1.3** — **done** (`0.3.1`): Electron 43.6.0; blank browser tab; guest Node off; signing still off.
-3. **Phase 1.4** — **done** (`0.3.2`): Windows shortcut labels. Labels only; no security change. Does not block Phase 2.
-4. **Phase 2** — hook authentication; Pi extension off `/tmp`; SSH `IdentitiesOnly` + DevTool `known_hosts` + socket dir `0700`.
+3. **Phase 1.4** — **done** (`0.3.2`): Windows shortcut labels. Labels only; no security change.
+4. **Phase 2** — **done** (`0.3.2`, no minor bump): hook authentication; Pi extension off `/tmp`; SSH `IdentitiesOnly` + DevTool `known_hosts` + socket dir `0700`.
 5. Then conda (Phase 3), Jupyter (Phase 4), LSP (Phase 5) as before.
 6. **Deferred:** config-dir ACLs, scrollback `tabId`, IPC cwd allow-list, Authenticode, a formal pilot.
 
-Do not start Phase 5 LSP work instead of Phase 2 if company deploy is still the goal.
+Do not start Phase 5 LSP work instead of Phases 3–4 if those are the next product slices.
 
-Highest-leverage remaining engineering pass: **Phase 2**.
+Highest-leverage remaining engineering pass: **conda (Phase 3)** for the Windows daily driver; **unsigned Windows folder** is still the company-deploy blocker.
 
 ---
 
@@ -163,7 +161,7 @@ Highest-leverage remaining engineering pass: **Phase 2**.
 | --- | --- |
 | Window / webPreferences | `src/main/index.ts` |
 | IPC surface | `src/main/app-runtime.ts`, `src/preload/index.ts` |
-| Hook HTTP | `src/main/hook-server.ts`, `src/main/hook-injector.ts` |
+| Hook HTTP | `src/main/hook-server.ts`, `src/main/hook-injector.ts`, `src/shared/hook-protocol.ts` |
 | Pi extension path | `src/main/pi-extension-injector.ts` |
 | SSH / SOCKS / tunnels | `src/main/ssh-connection-manager.ts` |
 | File tree bounds | `src/main/project-fs-path.ts`, `src/main/file-browser-fs.ts` |
@@ -180,4 +178,4 @@ Roadmap phases (conda, Jupyter, LSP) add more child processes and another browse
 
 Parking-lot ideas that would *increase* surface if pulled in: native notebook kernels, Windows OpenSSH as a second remote stack, extra LSPs talking stdio as the same user.
 
-This audit started as a snapshot at `0.3.0`. **Phase 1.3 (`0.3.1`):** Electron 43.6.0, `about:blank` new tabs, guest webview Node locked off. **Phase 1.4 (`0.3.2`):** Windows shortcut labels only. Still open: unsigned Windows folder, no CSP, unauthenticated hook server, SSH TOFU, wide IPC, plaintext `~/.devtool`. When Phase 2 lands, add another closeout paragraph here.
+This audit started as a snapshot at `0.3.0`. **Phase 1.3 (`0.3.1`):** Electron 43.6.0, `about:blank` new tabs, guest webview Node locked off. **Phase 1.4 (`0.3.2`):** Windows shortcut labels only. **Phase 2 (`0.3.2`, no minor bump):** hook shared secret + 64 KiB body cap; remote Pi extension under `$HOME/.devtool-remote/` (`0700`); SSH `UserKnownHostsFile` + `IdentitiesOnly` when a key is set + control-socket dir `0700`; changed host keys fail with a message that names the DevTool `known_hosts` file. Still open: unsigned Windows folder, no CSP, first-connect TOFU, wide IPC, plaintext `~/.devtool`.

@@ -67,6 +67,7 @@ export default function ContentArea(): React.ReactElement {
     zoomBrowser,
     getTaskViewState,
     updateProject,
+    connectSsh,
     config
   } = useApp()
   useMetaHeld()
@@ -514,7 +515,7 @@ export default function ContentArea(): React.ReactElement {
                         className="inline-flex items-center justify-center h-(--ctl-h) px-4 rounded-md border-0 cursor-pointer text-base font-medium text-accent-ink shadow-btn bg-gradient-to-b from-[color-mix(in_srgb,var(--color-accent)_86%,white)] to-accent hover:brightness-105 disabled:opacity-50"
                         onClick={() => {
                           if (project.ssh) {
-                            window.api.sshConnect(project.id, project.ssh).catch(() => {})
+                            connectSsh(project.id, project.ssh).catch(() => {})
                           }
                         }}
                       >

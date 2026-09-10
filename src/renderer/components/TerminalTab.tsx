@@ -10,6 +10,7 @@ import { Unicode11Addon } from '@xterm/addon-unicode11'
 import { ImageAddon } from '@xterm/addon-image'
 import TerminalSearchBar from './TerminalSearchBar'
 import { bindCopyOnSelect } from './copyOnSelect'
+import { handleTerminalPasteKey, readClipboardText, pasteIntoTerminal } from './terminalPaste'
 import { bindTransientScrollbar } from './transientScrollbar'
 import { useApp } from '../context/AppContext'
 import '@xterm/xterm/css/xterm.css'
@@ -250,6 +251,8 @@ export default function TerminalTab({ tabId, visible, projectId, taskId, pane, p
     })
 
     term.attachCustomKeyEventHandler((event) => {
+      const pasteHandled = handleTerminalPasteKey(event, term)
+      if (!pasteHandled) return false
       // Shift+Enter inserts a newline (ESC+CR, same as Option+Enter) instead of submitting.
       // Must swallow ALL event types: Enter also fires a keypress, and letting xterm
       // handle it would send a bare \r right after our \x1b\r — submitting anyway.
@@ -288,7 +291,15 @@ export default function TerminalTab({ tabId, visible, projectId, taskId, pane, p
     term.loadAddon(imageAddon)
     term.open(hostRef.current)
 
-    const linkContextMenuBinding = bindTerminalLinkContextMenu(term, setLinkMenu)
+    const linkContextMenuBinding = bindTerminalLinkContextMenu(
+      term,
+      setLinkMenu,
+      window.api.platform === 'win32'
+        ? () => {
+          void readClipboardText().then((text) => pasteIntoTerminal(term, text))
+        }
+        : undefined
+    )
 
     // Defer WebGL to visibility effect — don't eagerly consume a context for hidden tabs
     terminals.set(tabId, {

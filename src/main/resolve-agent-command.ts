@@ -26,6 +26,8 @@ export function extraWindowsSearchDirs(env: NodeJS.ProcessEnv, pathMod: PathApi 
   dirs.push('C:\\Program Files\\Git\\bin')
   dirs.push('C:\\Program Files (x86)\\Git\\usr\\bin')
   dirs.push('C:\\Program Files (x86)\\Git\\bin')
+  const systemRoot = env.SystemRoot || env.SYSTEMROOT || 'C:\\Windows'
+  dirs.push(pathMod.join(systemRoot, 'System32', 'OpenSSH'))
   return dirs
 }
 
@@ -71,6 +73,56 @@ export function missingCommandError(command: string): Error {
     `Cannot find "${command}". Set a command path in Settings → AI Tools, ` +
       `or add the folder that contains it to PATH (on Windows this is often %AppData%\\npm\\pi.cmd).`
   )
+}
+
+export function missingSshError(): Error {
+  return new Error(
+    'Cannot find ssh.exe. Install Git for Windows (Git\\usr\\bin\\ssh.exe) or Windows OpenSSH, then open the remote tab again.'
+  )
+}
+
+/**
+ * Absolute `ssh.exe` on Windows so ConPTY/CreateProcess can open it.
+ * A bare `ssh` yields `Error: File not found:` with an empty path.
+ * Non-Windows keeps the name `ssh` so the OS searches PATH.
+ *
+ * Prefer Git\\usr\\bin over System32 OpenSSH. Native Windows OpenSSH cannot
+ * own a ControlMaster socket (`getsockname failed: Not a socket`). Git's
+ * ssh can run the master and `-O` commands; PTY tabs on Windows still
+ * connect directly (no `-S`) because Git cannot mux a new TTY session.
+ */
+export function resolveSshCommand(deps: ResolveCommandDeps = {}): string {
+  const platform = deps.platform ?? process.platform
+  if (platform !== 'win32') return 'ssh'
+  const gitSsh = windowsGitSshExe(deps)
+  if (gitSsh) return gitSsh
+  try {
+    return resolveAgentCommand('ssh', deps)
+  } catch {
+    throw missingSshError()
+  }
+}
+
+/** Git\\usr\\bin\\ssh.exe when installed — the only Windows ssh that can host ControlMaster. */
+export function windowsGitSshExe(deps: ResolveCommandDeps = {}): string | null {
+  const env = deps.env ?? process.env
+  const existsSync = deps.existsSync ?? fs.existsSync
+  const pathMod = deps.path ?? path.win32
+  for (const dir of extraWindowsSearchDirs(env, pathMod)) {
+    if (!/git[/\\]usr[/\\]bin$/i.test(dir)) continue
+    const candidate = pathMod.join(dir, 'ssh.exe')
+    if (existsSync(candidate)) return candidate
+  }
+  return null
+}
+
+/** Same as {@link resolveSshCommand}, but `ssh` if nothing is installed (execFile PATH search). */
+export function sshExecutable(deps: ResolveCommandDeps = {}): string {
+  try {
+    return resolveSshCommand(deps)
+  } catch {
+    return 'ssh'
+  }
 }
 
 function pathLooksAbsolute(file: string, platform: NodeJS.Platform, pathMod: PathApi): boolean {

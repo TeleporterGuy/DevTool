@@ -203,6 +203,25 @@ export function useAppState() {
     setProjectsData(prev => wrapped(prev))
   }, [projectsSync])
 
+  const rememberSshRemoteDir = useCallback((projectId: string, remoteDir: string) => {
+    const trimmed = remoteDir.trim()
+    if (!trimmed) return
+    mutateProjects(prev => ({
+      ...prev,
+      projects: prev.projects.map(project => {
+        if (project.id !== projectId || !project.ssh) return project
+        if (project.ssh.remoteDir.trim()) return project
+        return { ...project, ssh: { ...project.ssh, remoteDir: trimmed } }
+      })
+    }))
+  }, [mutateProjects])
+
+  const connectSsh = useCallback((projectId: string, sshConfig: SshConfig) => {
+    return window.api.sshConnect(projectId, sshConfig).then((result) => {
+      if (result?.remoteDir) rememberSshRemoteDir(projectId, result.remoteDir)
+    })
+  }, [rememberSshRemoteDir])
+
   /**
    * The same wrapper for notes. `defer` is the debounced content edit: the mutation is
    * queued for replay immediately — a broadcast landing mid-keystroke must not wipe
@@ -546,11 +565,11 @@ export function useAppState() {
     if (project && isRemoteProject(project) && project.ssh) {
       window.api.sshStatus(selectedProjectId).then(status => {
         if (status !== 'connected' && status !== 'connecting') {
-          window.api.sshConnect(selectedProjectId, project.ssh!).catch(() => {})
+          connectSsh(selectedProjectId, project.ssh!).catch(() => {})
         }
       })
     }
-  }, [projects, windowViewState.selectedProjectId])
+  }, [connectSsh, projects, windowViewState.selectedProjectId])
 
   const lastSyncedSidebarTaskIdRef = useRef<string | null>(null)
   useEffect(() => {
@@ -771,11 +790,11 @@ export function useAppState() {
     if (id && project && isRemoteProject(project) && project.ssh) {
       window.api.sshStatus(id).then(status => {
         if (status !== 'connected' && status !== 'connecting') {
-          window.api.sshConnect(id, project.ssh!).catch(() => {})
+          connectSsh(id, project.ssh!).catch(() => {})
         }
       })
     }
-  }, [updateWindowViewState])
+  }, [connectSsh, updateWindowViewState])
 
   const selectProjectHome = useCallback((projectId: string) => {
     const project = projectsRef.current.find(p => p.id === projectId) ?? null
@@ -810,11 +829,11 @@ export function useAppState() {
     if (isRemoteProject(project) && project.ssh) {
       window.api.sshStatus(projectId).then(status => {
         if (status !== 'connected' && status !== 'connecting') {
-          window.api.sshConnect(projectId, project.ssh!).catch(() => {})
+          connectSsh(projectId, project.ssh!).catch(() => {})
         }
       })
     }
-  }, [selectProject, updateWindowViewState])
+  }, [connectSsh, selectProject, updateWindowViewState])
 
   const selectTask = useCallback((id: string | null) => {
     updateWindowViewState(prev => ({ ...prev, selectedTaskId: id }))
@@ -836,11 +855,11 @@ export function useAppState() {
     if (project && isRemoteProject(project) && project.ssh) {
       window.api.sshStatus(projectId).then(status => {
         if (status !== 'connected' && status !== 'connecting') {
-          window.api.sshConnect(projectId, project.ssh!).catch(() => {})
+          connectSsh(projectId, project.ssh!).catch(() => {})
         }
       })
     }
-  }, [updateWindowViewState, markTaskVisited])
+  }, [connectSsh, updateWindowViewState, markTaskVisited])
 
   const reorderTasks = useCallback((projectId: string, fromIndex: number, toIndex: number) => {
     mutateProjects(prev => ({
@@ -903,9 +922,9 @@ export function useAppState() {
       }
     })
     selectProject(project.id)
-    window.api.sshConnect(project.id, sshConfig).catch(() => {})
+    connectSsh(project.id, sshConfig).catch(() => {})
     return project
-  }, [includePendingTags, mutateProjects, selectProject])
+  }, [connectSsh, includePendingTags, mutateProjects, selectProject])
 
   const addShellCommandProject = useCallback((name: string, command: string, tagIds?: string[]) => {
     const id = uuid()
@@ -1406,13 +1425,13 @@ export function useAppState() {
     if (isRemoteProject(project) && project.ssh) {
       window.api.sshStatus(projectId).then(status => {
         if (status !== 'connected' && status !== 'connecting') {
-          window.api.sshConnect(projectId, project.ssh!).catch(() => {})
+          connectSsh(projectId, project.ssh!).catch(() => {})
         }
       })
     }
 
     return pane
-  }, [cleanupClosedTabHistory, mutateProjects, updateWindowViewState, getTaskViewStateForTask])
+  }, [cleanupClosedTabHistory, connectSsh, mutateProjects, updateWindowViewState, getTaskViewStateForTask])
 
   const updateTabUrl = useCallback((projectId: string, taskId: string, pane: 'left' | 'right', tabId: string, url: string) => {
     mutateProjects(prev => ({
@@ -1958,6 +1977,7 @@ export function useAppState() {
     unsnoozeTask,
     addProject,
     addRemoteProject,
+    connectSsh,
     addShellCommandProject,
     getProjectDir,
     removeProject,

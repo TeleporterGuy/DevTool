@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest'
+import path from 'path'
 import { buildReadRemoteFileArgs } from '../src/main/ssh-connection-manager'
 
 const SOCKET_DIR = '/tmp/devtool-sockets'
@@ -36,5 +37,23 @@ describe('buildReadRemoteFileArgs', () => {
   it('targets the configured user@host', () => {
     const args = buildReadRemoteFileArgs(SOCKET_DIR, 'proj-1', SSH_CONFIG, 'README.md')
     expect(args.some(a => a === 'user@host.example')).toBe(true)
+  })
+
+  it('uses the DevTool known_hosts file', () => {
+    const args = buildReadRemoteFileArgs(SOCKET_DIR, 'proj-1', SSH_CONFIG, 'README.md')
+    expect(args).toContain(`UserKnownHostsFile=${path.join(SOCKET_DIR, 'known_hosts')}`)
+    expect(args).not.toContain('IdentitiesOnly=yes')
+  })
+
+  it('sets IdentitiesOnly when a key file is configured', () => {
+    const args = buildReadRemoteFileArgs(
+      SOCKET_DIR,
+      'proj-1',
+      { ...SSH_CONFIG, keyFile: '/home/user/.ssh/id_ed25519' },
+      'README.md'
+    )
+    expect(args).toContain('-i')
+    expect(args).toContain('/home/user/.ssh/id_ed25519')
+    expect(args).toContain('IdentitiesOnly=yes')
   })
 })
