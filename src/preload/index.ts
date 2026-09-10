@@ -130,6 +130,7 @@ const api = {
   // Theme
   getNativeTheme: (): Promise<'dark' | 'light'> => ipcRenderer.invoke('get-native-theme'),
   clipboardWriteText: (text: string): Promise<void> => ipcRenderer.invoke('clipboard-write-text', text),
+  clipboardReadText: (): Promise<string> => ipcRenderer.invoke('clipboard-read-text'),
   openExternal: (url: string): Promise<void> => ipcRenderer.invoke('open-external', url),
   onThemeChanged: (callback: (theme: 'dark' | 'light') => void): void => {
     ipcRenderer.on('theme-changed', (_e, theme) => callback(theme))

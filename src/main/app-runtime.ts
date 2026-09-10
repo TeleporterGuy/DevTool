@@ -667,6 +667,7 @@ export class AppRuntime {
       clipboard.writeText(text)
       return undefined
     })
+    ipcMain.handle('clipboard-read-text', () => clipboard.readText())
     ipcMain.handle('open-external', async (_event, url: string) => {
       let parsed: URL
       try {
