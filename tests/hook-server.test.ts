@@ -1,19 +1,54 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import { HookServer } from '../src/main/hook-server'
+import { HookServer, hookTokensMatch } from '../src/main/hook-server'
+import { HOOK_TAB_ID_HEADER, HOOK_TOKEN_HEADER, MAX_HOOK_BODY_BYTES } from '../src/shared/hook-protocol'
 import http from 'http'
 
-function post(port: number, path: string, body: Record<string, unknown>, headers?: Record<string, string>): Promise<number> {
+function request(
+  port: number,
+  path: string,
+  body: string | Record<string, unknown>,
+  headers?: Record<string, string>,
+  method = 'POST'
+): Promise<number> {
   return new Promise((resolve, reject) => {
-    const data = JSON.stringify(body)
+    const data = typeof body === 'string' ? body : JSON.stringify(body)
     const req = http.request(
-      { hostname: '127.0.0.1', port, path, method: 'POST', headers: { 'Content-Type': 'application/json', ...headers } },
-      (res) => resolve(res.statusCode ?? 0)
+      {
+        hostname: '127.0.0.1',
+        port,
+        path,
+        method,
+        headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(data), ...headers }
+      },
+      (res) => {
+        res.resume()
+        res.on('end', () => resolve(res.statusCode ?? 0))
+      }
     )
     req.on('error', reject)
     req.write(data)
     req.end()
   })
 }
+
+function authedHeaders(server: HookServer, tabId = 'tab-1'): Record<string, string> {
+  return {
+    [HOOK_TAB_ID_HEADER]: tabId,
+    [HOOK_TOKEN_HEADER]: server.getToken()
+  }
+}
+
+describe('hookTokensMatch', () => {
+  it('accepts an exact match', () => {
+    expect(hookTokensMatch('abc', 'abc')).toBe(true)
+  })
+
+  it('rejects missing, wrong, or length-mismatched tokens', () => {
+    expect(hookTokensMatch(undefined, 'abc')).toBe(false)
+    expect(hookTokensMatch('ab', 'abc')).toBe(false)
+    expect(hookTokensMatch('abd', 'abc')).toBe(false)
+  })
+})
 
 describe('HookServer', () => {
   let server: HookServer
@@ -31,6 +66,10 @@ describe('HookServer', () => {
     expect(server.getPort()).toBeGreaterThan(0)
   })
 
+  it('mints a non-empty token', () => {
+    expect(server.getToken().length).toBeGreaterThan(20)
+  })
+
   it('reports ready after start', () => {
     expect(server.isReady()).toBe(true)
   })
@@ -39,7 +78,7 @@ describe('HookServer', () => {
     const events: { tabId: string; body: Record<string, unknown> }[] = []
     server.on('session-start', (tabId, body) => events.push({ tabId, body }))
 
-    const status = await post(server.getPort(), '/hook/session-start', { session_id: 'sess-123' }, { 'X-Tab-Id': 'tab-1' })
+    const status = await request(server.getPort(), '/hook/session-start', { session_id: 'sess-123' }, authedHeaders(server, 'tab-1'))
     expect(status).toBe(200)
 
     await new Promise((r) => setTimeout(r, 10))
@@ -52,7 +91,7 @@ describe('HookServer', () => {
     const events: string[] = []
     server.on('working', (tabId) => events.push(tabId))
 
-    await post(server.getPort(), '/hook/working', {}, { 'X-Tab-Id': 'tab-2' })
+    await request(server.getPort(), '/hook/working', {}, authedHeaders(server, 'tab-2'))
     await new Promise((r) => setTimeout(r, 10))
     expect(events).toEqual(['tab-2'])
   })
@@ -61,7 +100,7 @@ describe('HookServer', () => {
     const events: string[] = []
     server.on('stopped', (tabId) => events.push(tabId))
 
-    await post(server.getPort(), '/hook/stopped', {}, { 'X-Tab-Id': 'tab-3' })
+    await request(server.getPort(), '/hook/stopped', {}, authedHeaders(server, 'tab-3'))
     await new Promise((r) => setTimeout(r, 10))
     expect(events).toEqual(['tab-3'])
   })
@@ -70,20 +109,54 @@ describe('HookServer', () => {
     const events: { tabId: string; body: Record<string, unknown> }[] = []
     server.on('notification', (tabId, body) => events.push({ tabId, body }))
 
-    await post(server.getPort(), '/hook/notification', { type: 'permission_prompt' }, { 'X-Tab-Id': 'tab-4' })
+    await request(server.getPort(), '/hook/notification', { type: 'permission_prompt' }, authedHeaders(server, 'tab-4'))
     await new Promise((r) => setTimeout(r, 10))
     expect(events).toHaveLength(1)
     expect(events[0].tabId).toBe('tab-4')
   })
 
   it('returns 404 for unknown paths', async () => {
-    const status = await post(server.getPort(), '/hook/unknown', {})
+    const status = await request(server.getPort(), '/hook/unknown', {}, authedHeaders(server))
     expect(status).toBe(404)
   })
 
+  it('returns 405 for non-POST methods', async () => {
+    const status = await request(server.getPort(), '/hook/working', {}, authedHeaders(server), 'GET')
+    expect(status).toBe(405)
+  })
+
   it('returns 400 when X-Tab-Id header is missing', async () => {
-    const status = await post(server.getPort(), '/hook/working', {})
+    const status = await request(server.getPort(), '/hook/working', {}, { [HOOK_TOKEN_HEADER]: server.getToken() })
     expect(status).toBe(400)
+  })
+
+  it('returns 401 when the token is missing', async () => {
+    const events: string[] = []
+    server.on('working', (tabId) => events.push(tabId))
+    const status = await request(server.getPort(), '/hook/working', {}, { [HOOK_TAB_ID_HEADER]: 'tab-1' })
+    expect(status).toBe(401)
+    await new Promise((r) => setTimeout(r, 10))
+    expect(events).toEqual([])
+  })
+
+  it('returns 401 when the token is wrong', async () => {
+    const status = await request(
+      server.getPort(),
+      '/hook/working',
+      {},
+      { [HOOK_TAB_ID_HEADER]: 'tab-1', [HOOK_TOKEN_HEADER]: 'not-the-token' }
+    )
+    expect(status).toBe(401)
+  })
+
+  it('returns 413 when the body is too large', async () => {
+    const events: string[] = []
+    server.on('working', (tabId) => events.push(tabId))
+    const huge = 'x'.repeat(MAX_HOOK_BODY_BYTES + 1)
+    const status = await request(server.getPort(), '/hook/working', huge, authedHeaders(server, 'tab-1'))
+    expect(status).toBe(413)
+    await new Promise((r) => setTimeout(r, 10))
+    expect(events).toEqual([])
   })
 })
 
@@ -102,8 +175,8 @@ describe('HookServer logging', () => {
   })
 
   it('logs accepted hooks with endpoint, tab id and notification message', async () => {
-    await post(server.getPort(), '/hook/working', {}, { 'X-Tab-Id': 'tab-1' })
-    await post(server.getPort(), '/hook/notification', { message: 'needs your permission' }, { 'X-Tab-Id': 'tab-1' })
+    await request(server.getPort(), '/hook/working', {}, authedHeaders(server, 'tab-1'))
+    await request(server.getPort(), '/hook/notification', { message: 'needs your permission' }, authedHeaders(server, 'tab-1'))
     await new Promise((r) => setTimeout(r, 10))
 
     expect(logged).toContain('hook endpoint=working tabId=tab-1')
@@ -111,13 +184,19 @@ describe('HookServer logging', () => {
   })
 
   it('logs a hook that arrived without a tab id', async () => {
-    await post(server.getPort(), '/hook/stopped', {})
+    await request(server.getPort(), '/hook/stopped', {}, { [HOOK_TOKEN_HEADER]: server.getToken() })
     await new Promise((r) => setTimeout(r, 10))
     expect(logged).toContain('hook reject-no-tab-id endpoint=stopped')
   })
 
+  it('logs an unauthorized hook', async () => {
+    await request(server.getPort(), '/hook/working', {}, { [HOOK_TAB_ID_HEADER]: 'tab-1' })
+    await new Promise((r) => setTimeout(r, 10))
+    expect(logged).toContain('hook reject-unauthorized endpoint=working tabId=tab-1')
+  })
+
   it('logs an unknown endpoint', async () => {
-    await post(server.getPort(), '/hook/nope', {}, { 'X-Tab-Id': 'tab-1' })
+    await request(server.getPort(), '/hook/nope', {}, authedHeaders(server, 'tab-1'))
     await new Promise((r) => setTimeout(r, 10))
     expect(logged).toContain('hook reject-unknown url=/hook/nope')
   })

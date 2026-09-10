@@ -6,9 +6,22 @@ import path from 'path'
  *
  * Unlike Claude (which mutates the project's .claude/settings.local.json), pi loads
  * our status extension via a `-e <path>` CLI flag. Locally that path is the file the
- * build copies next to the main bundle; remotely we base64-write the same file to the
- * remote host (reusing the SSH command channel, exactly like Claude's remote hooks).
+ * build copies next to the main bundle; remotely we base64-write the same file under
+ * the remote home (reusing the SSH command channel, exactly like Claude's remote hooks).
  */
+
+/** Remote dir (under $HOME) for the copied extension. Mode 0700 on the remote. */
+export const PI_REMOTE_EXTENSION_DIR = '.devtool-remote'
+
+export const PI_REMOTE_EXTENSION_FILE = 'pi-status-extension.mjs'
+
+/**
+ * Path expression the remote bash login shell expands. Must not be single-quoted
+ * in `buildSpawnArgs` or `$HOME` stays literal.
+ */
+export function piExtensionRemotePath(): string {
+  return `$HOME/${PI_REMOTE_EXTENSION_DIR}/${PI_REMOTE_EXTENSION_FILE}`
+}
 
 /**
  * Absolute path to the bundled pi status extension (copied to out/main at build time).
@@ -24,26 +37,23 @@ export function piExtensionLocalPath(): string {
   return p.includes(packed) ? p.replace(packed, `app.asar.unpacked${path.sep}`) : p
 }
 
-/** Deterministic remote path for the extension, unique per remote user to avoid /tmp clashes. */
-export function piExtensionRemotePath(username: string): string {
-  return `/tmp/devtool-${username}/pi-status-extension.mjs`
-}
-
 /** Shell-quote a value for safe interpolation into a remote shell command. */
 function shellQuote(s: string): string {
   return "'" + s.replace(/'/g, "'\\''") + "'"
 }
 
 /**
- * Build a shell script that writes the pi status extension to `remoteExtPath` on the
- * remote host. Mirrors hook-injector's base64 + python3 approach so it rides the same
- * SSH command prefix as the launch, with no extra round trips and no shell-quoting hazard.
+ * Build a shell script that writes the pi status extension under the remote home.
+ * Uses $HOME (not /tmp) so a shared host cannot plant the file via a world-writable
+ * directory. `chmod 700` makes the dir owner-only.
  */
-export function buildRemotePiExtensionScript(remoteExtPath: string): string {
-  const b64 = fs.readFileSync(piExtensionLocalPath()).toString('base64')
-  const dir = path.posix.dirname(remoteExtPath)
-  return `mkdir -p ${shellQuote(dir)} && python3 -c "
-import base64
-open(${shellQuote(remoteExtPath)}, 'wb').write(base64.b64decode('${b64}'))
+export function buildRemotePiExtensionScript(sourcePath: string = piExtensionLocalPath()): string {
+  const b64 = fs.readFileSync(sourcePath).toString('base64')
+  const dirExpr = `"$HOME/${PI_REMOTE_EXTENSION_DIR}"`
+  const homeRel = `~/${PI_REMOTE_EXTENSION_DIR}/${PI_REMOTE_EXTENSION_FILE}`
+  return `mkdir -p ${dirExpr} && chmod 700 ${dirExpr} && python3 -c "
+import base64, os
+path = os.path.expanduser(${shellQuote(homeRel)})
+open(path, 'wb').write(base64.b64decode('${b64}'))
 "`
 }

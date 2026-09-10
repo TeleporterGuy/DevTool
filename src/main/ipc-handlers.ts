@@ -29,7 +29,7 @@ export async function registerIpcHandlers(mainWindow: BrowserWindow): Promise<{ 
   // Start hook server BEFORE registering IPC handlers — no race condition
   const hookServer = new HookServer()
   await hookServer.start()
-  const hookInjector = new HookInjector(hookServer.getPort())
+  const hookInjector = new HookInjector(hookServer.getPort(), hookServer.getToken())
   const codexSessionManager = new CodexSessionManager()
 
   // Hook server events → renderer
@@ -280,10 +280,14 @@ export async function registerIpcHandlers(mainWindow: BrowserWindow): Promise<{ 
       } else if (isPiRemote) {
         const remotePort = sshManager.getRemotePort(projectId)
         if (remotePort) {
-          const remoteExtPath = piExtensionRemotePath(sshConfig.username)
-          hookInjectPrefix = buildRemotePiExtensionScript(remoteExtPath) + ' && '
+          const remoteExtPath = piExtensionRemotePath()
+          hookInjectPrefix = buildRemotePiExtensionScript() + ' && '
           remoteArgs = [...(args ?? []), '-e', remoteExtPath]
-          remoteEnv = { ...extraEnv, DEVTOOL_HOOK_PORT: String(remotePort) }
+          remoteEnv = {
+            ...extraEnv,
+            DEVTOOL_HOOK_PORT: String(remotePort),
+            DEVTOOL_HOOK_TOKEN: hookServer.getToken()
+          }
         }
       }
 
@@ -295,7 +299,8 @@ export async function registerIpcHandlers(mainWindow: BrowserWindow): Promise<{ 
       if (isPiLocal) {
         ptyManager.spawn(id, shell, cwd, cols, rows, [...(args ?? []), '-e', piExtensionLocalPath()], {
           ...extraEnv,
-          DEVTOOL_HOOK_PORT: String(hookServer.getPort())
+          DEVTOOL_HOOK_PORT: String(hookServer.getPort()),
+          DEVTOOL_HOOK_TOKEN: hookServer.getToken()
         })
       } else {
         ptyManager.spawn(id, shell, cwd, cols, rows, args, extraEnv)

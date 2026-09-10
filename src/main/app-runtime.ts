@@ -238,7 +238,7 @@ export class AppRuntime {
 
     await this.hookServer.start()
     this.logDebug(`start hookPort=${this.hookServer.getPort()}`)
-    this.hookInjector = new HookInjector(this.hookServer.getPort())
+    this.hookInjector = new HookInjector(this.hookServer.getPort(), this.hookServer.getToken())
     this.sshManager = new SshConnectionManager(path.join(CONFIG_DIR, 'ssh'), this.hookServer.getPort())
     this.registerEventForwarders()
     this.registerIpcHandlers()
@@ -1330,10 +1330,14 @@ export class AppRuntime {
         // point its callback at the reverse-tunnel port (reaches the local hook-server).
         const remotePort = this.sshManager.getRemotePort(projectId)
         if (remotePort) {
-          const remoteExtPath = piExtensionRemotePath(sshConfig.username)
-          hookInjectPrefix = buildRemotePiExtensionScript(remoteExtPath) + ' && '
+          const remoteExtPath = piExtensionRemotePath()
+          hookInjectPrefix = buildRemotePiExtensionScript() + ' && '
           remoteArgs = [...(args ?? []), '-e', remoteExtPath]
-          remoteEnv = { ...extraEnv, DEVTOOL_HOOK_PORT: String(remotePort) }
+          remoteEnv = {
+            ...extraEnv,
+            DEVTOOL_HOOK_PORT: String(remotePort),
+            DEVTOOL_HOOK_TOKEN: this.hookServer.getToken()
+          }
         }
       }
 
@@ -1353,7 +1357,11 @@ export class AppRuntime {
       let localEnv = extraEnv
       if (isPiLocal) {
         localArgs = [...(args ?? []), '-e', piExtensionLocalPath()]
-        localEnv = { ...extraEnv, DEVTOOL_HOOK_PORT: String(this.hookServer.getPort()) }
+        localEnv = {
+          ...extraEnv,
+          DEVTOOL_HOOK_PORT: String(this.hookServer.getPort()),
+          DEVTOOL_HOOK_TOKEN: this.hookServer.getToken()
+        }
       }
       // Keep `shell` as `pi`/`claude`/`codex` for hook detection above. Resolve the
       // actual file CreateProcess can open (Windows needs pi.cmd, not a bare `pi`).

@@ -23,6 +23,65 @@ export function controlSocketPath(socketDir: string, projectId: string): string 
   return path.join(socketDir, `${projectId}.sock`)
 }
 
+/** DevTool-owned TOFU file — not mixed with ~/.ssh/known_hosts. */
+export function knownHostsPath(socketDir: string): string {
+  return path.join(socketDir, 'known_hosts')
+}
+
+/**
+ * Host-key + identity options shared by master, mux slaves, and SOCKS.
+ * First connect still TOFU (`accept-new`); a *changed* key still fails.
+ * `IdentitiesOnly` only when we were given a key file, so agent/default keys
+ * still work for password-less setups that do not pin a path.
+ */
+export function sshTrustArgs(socketDir: string, config: Pick<SshConfig, 'keyFile'>): string[] {
+  const args = [
+    '-o', `UserKnownHostsFile=${knownHostsPath(socketDir)}`,
+    '-o', 'StrictHostKeyChecking=accept-new',
+    // Dedicated file: keep hostnames readable so TOFU can be reviewed.
+    '-o', 'HashKnownHosts=no'
+  ]
+  if (config.keyFile) {
+    args.push('-o', 'IdentitiesOnly=yes')
+  }
+  return args
+}
+
+/** Create (or tighten) the ControlMaster / known_hosts directory to 0700. */
+export function ensureSshDir(dir: string): void {
+  fs.mkdirSync(dir, { recursive: true, mode: 0o700 })
+  try {
+    fs.chmodSync(dir, 0o700)
+  } catch {
+    // Windows cannot POSIX-chmod; the dir still exists.
+  }
+}
+
+/** Turn OpenSSH's host-key mismatch into a message that names our known_hosts file. */
+export function formatSshConnectError(err: unknown, knownHostsFile: string): Error {
+  const execErr = err as { message?: string; stderr?: string }
+  const detail = `${execErr.stderr ?? ''}\n${execErr.message ?? String(err)}`
+  if (/REMOTE HOST IDENTIFICATION HAS CHANGED|Host key verification failed/i.test(detail)) {
+    return new Error(
+      `SSH host key mismatch. The remote key does not match ${knownHostsFile}. ` +
+      `If you trust this host, remove its line from that file and reconnect. ` +
+      `${execErr.message ?? String(err)}`
+    )
+  }
+  return err instanceof Error ? err : new Error(String(err))
+}
+
+/**
+ * Quote a value for the remote `bash -c` command. `$HOME/...` stays double-quoted
+ * so the login shell expands it (the Pi status extension lives under $HOME).
+ */
+export function quoteSpawnArg(s: string): string {
+  if (s.startsWith('$HOME/') && !/['"\s]/.test(s)) {
+    return `"${s}"`
+  }
+  return shellQuote(s)
+}
+
 /** Pure argv builder: produce ssh args to read a remote file via cat */
 export function buildReadRemoteFileArgs(
   socketDir: string,
@@ -34,7 +93,7 @@ export function buildReadRemoteFileArgs(
   const port = String(config.port ?? 22)
   const sock = controlSocketPath(socketDir, projectId)
   const remotePath = joinRemotePath(config.remoteDir, relativePath)
-  const args = ['-S', sock, '-o', 'ControlMaster=no', '-p', port]
+  const args = ['-S', sock, '-o', 'ControlMaster=no', '-p', port, ...sshTrustArgs(socketDir, config)]
   if (config.keyFile) args.push('-i', config.keyFile)
   args.push(userHost, 'cat', '--', shellQuote(remotePath))
   return args
@@ -66,8 +125,14 @@ export class SshConnectionManager extends EventEmitter {
   private execFileAsync(cmd: string, args: string[], opts: { timeout: number }): Promise<{ stdout: string; stderr: string }> {
     return new Promise((resolve, reject) => {
       execFile(cmd, args, opts, (err, stdout, stderr) => {
-        if (err) reject(err)
-        else resolve({ stdout: stdout as string, stderr: stderr as string })
+        if (err) {
+          const wrapped = err as Error & { stderr?: string; stdout?: string }
+          if (typeof stderr === 'string') wrapped.stderr = stderr
+          if (typeof stdout === 'string') wrapped.stdout = stdout
+          reject(formatSshConnectError(wrapped, knownHostsPath(this.socketDir)))
+        } else {
+          resolve({ stdout: stdout as string, stderr: stderr as string })
+        }
       })
     })
   }
@@ -144,7 +209,7 @@ export class SshConnectionManager extends EventEmitter {
     const args = [
       '-fN', '-M',
       '-S', this.getSocketPath(projectId),
-      '-o', 'StrictHostKeyChecking=accept-new',
+      ...sshTrustArgs(this.socketDir, config),
       '-o', 'ServerAliveInterval=30',
       '-o', 'ServerAliveCountMax=3',
       '-o', 'TCPKeepAlive=yes',
@@ -194,7 +259,7 @@ export class SshConnectionManager extends EventEmitter {
   private buildBaseArgs(projectId: string, config: SshConfig): string[] {
     const args = [
       '-S', this.getSocketPath(projectId),
-      '-o', 'StrictHostKeyChecking=accept-new',
+      ...sshTrustArgs(this.socketDir, config),
       '-p', String(config.port)
     ]
     if (config.keyFile) {
@@ -220,7 +285,7 @@ export class SshConnectionManager extends EventEmitter {
     const envPrefix = envVars
       ? Object.entries(envVars).map(([k, v]) => `${k}=${shellQuote(v)}`).join(' ') + ' '
       : ''
-    const cmdSuffix = commandArgs?.length ? ' ' + commandArgs.map(a => shellQuote(a)).join(' ') : ''
+    const cmdSuffix = commandArgs?.length ? ' ' + commandArgs.map(a => quoteSpawnArg(a)).join(' ') : ''
     const prefix = commandPrefix || ''
     const cwd = cwdOverride || config.remoteDir
     // Wrap in an interactive login shell (-l -i). Login alone is not enough:
@@ -270,7 +335,7 @@ export class SshConnectionManager extends EventEmitter {
     // handles the forwarding setup and the slave has nothing to keep it alive.
     // We need a standalone SSH connection that stays alive to keep the SOCKS port bound.
     const args = [
-      '-o', 'StrictHostKeyChecking=accept-new',
+      ...sshTrustArgs(this.socketDir, config),
       '-p', String(config.port),
       '-D', String(localPort),
       '-N',
@@ -451,9 +516,7 @@ export class SshConnectionManager extends EventEmitter {
   }
 
   private async doConnect(projectId: string, config: SshConfig): Promise<void> {
-    if (!fs.existsSync(this.socketDir)) {
-      fs.mkdirSync(this.socketDir, { recursive: true })
-    }
+    ensureSshDir(this.socketDir)
 
     // Clean up stale ControlMaster socket from a previous (dead) connection.
     // Without this, ssh -M will refuse to create a new master or connect

@@ -66,7 +66,7 @@ Known gaps this fork must treat as work, not surprises:
 
 - Windows packaging is a portable folder (`npm run build:win` → `dist/win-unpacked`), not a Setup.exe. `electron-winstaller` stays unapproved until an installer is required. From-source `npm install` on Windows still needs admin + VS Build Tools + Spectre libs (see README).
 - Local Windows terminals are Git Bash (`Git\bin\bash.exe --login -i`, auto-detect; Settings can set a `bash.exe` path). PowerShell and Command Prompt are not product surfaces. Login-shell env **is** captured in `shell-env.ts`; do not copy that Unix PATH onto `process.env.PATH` (ConPTY `cmd.exe` lookup breaks — see AGENTS.md).
-- POSIX assumptions: worktree paths, hook inject (`curl` + `python3`), remote Pi extension under `/tmp/...` (Phase 2 moves that off `/tmp`).
+- POSIX assumptions: worktree paths, hook inject (`curl` + `python3`). Remote Pi extension lives under `$HOME/.devtool-remote/` (Phase 2 moved it off `/tmp`).
 
 **Go/no-go:** if Git Bash + ConPTY + Pi TUI is unusable after Phase 0, stop. Nothing else in this plan can paper over a broken terminal.
 
@@ -225,25 +225,27 @@ Stay out of: remapping, user-defined keys, PowerShell chords, teaching Git Bash 
 
 ---
 
-## Phase 2 — Hook authentication + SSH trust
+## Phase 2 — Hook authentication + SSH trust — done (`0.3.2`, no minor bump)
 
-Completely new session. Do not mix this with the Electron bump. Ships as **`0.4.0`**.
+Completely new session. Do not mix this with the Electron bump. Roadmap table still maps a later tagged closeout to **`0.4.0`**; this pass stays a patch on **`0.3.2`**.
 
-The inbox status dot is a local HTTP server (`src/main/hook-server.ts`) on `127.0.0.1` plus, for remotes, `ssh -R` to that port. Pi’s remote helper is written to `/tmp/devtool-<user>/…`. SSH uses `StrictHostKeyChecking=accept-new`. Details: [SECURITY.md](./SECURITY.md).
+The inbox status dot is a local HTTP server (`src/main/hook-server.ts`) on `127.0.0.1` plus, for remotes, `ssh -R` to that port. Pi’s remote helper is written under `$HOME/.devtool-remote/`. SSH uses a DevTool `known_hosts` file and `accept-new` for first connect. Details: [SECURITY.md](./SECURITY.md).
 
 **Outcome:** a random local process (or a process on the SSH host) cannot spoof inbox events without a secret DevTool minted. Remote Pi code is not planted via `/tmp`. New SSH sessions use a DevTool-managed `known_hosts`, `IdentitiesOnly`, and a `0700` control-socket directory.
 
 Work items:
 
-1. **Hook shared secret.** Mint a per-process (or per-session) token when the hook server starts. Pi extension and Claude `curl` hooks send it (header or body). Server rejects POSTs without it. Cap body size. Keep bind on `127.0.0.1`. The reverse forward can stay — the secret is what makes a shared remote less able to spoof the inbox.
+1. **Hook shared secret.** **Landed.** Per-process token when the hook server starts. Pi extension and Claude `curl` hooks send `X-Devtool-Token`. Server rejects POSTs without it (401). Body capped at 64 KiB (413). Bind stays `127.0.0.1`. The reverse forward stays — the secret is what makes a shared remote less able to spoof the inbox.
 
-2. **Pi extension off `/tmp`.** Write `pi-status-extension.mjs` under the remote home (e.g. `~/.devtool-remote/` or `~/.devtool/`) with a directory mode that is not world-writable. Same for any Claude remote inject helper. Local `-e` path is already asar-unpacked; leave it.
+2. **Pi extension off `/tmp`.** **Landed.** Write `pi-status-extension.mjs` under `$HOME/.devtool-remote/` with directory mode `0700`. Claude remote inject stays in `remoteDir/.claude/` (never `/tmp`). Local `-e` path is already asar-unpacked; left as-is.
 
-3. **SSH hardening (practical, not a company CA).** `IdentitiesOnly=yes` when a `keyFile` is set. Create `~/.devtool/ssh` as `0700`. Point `UserKnownHostsFile` at `~/.devtool/ssh/known_hosts` so the TOFU file is visible and not mixed with the user’s other SSH. Prefer failing a *changed* host key loudly over silent `accept-new` forever. A full SSH CA / `StrictHostKeyChecking=yes` with preloaded keys can wait for a company install; this phase makes first-connect TOFU reviewable.
+3. **SSH hardening (practical, not a company CA).** **Landed.** `IdentitiesOnly=yes` when a `keyFile` is set. Create `<config dir>/ssh` as `0700`. `UserKnownHostsFile` points at `<config dir>/ssh/known_hosts` with `HashKnownHosts=no` so the TOFU file is readable. `accept-new` still TOFU-accepts the first key; a *changed* key fails with a message that names that file. A full SSH CA / `StrictHostKeyChecking=yes` with preloaded keys can wait for a company install.
 
 Stay out of: config-dir `0700` for all of `~/.devtool`, scrollback `tabId` sanitizing, IPC cwd allow-list (deferred). Stay out of conda.
 
-**Verify:** local Pi/Claude status dots still work; a POST without the secret is 401/403; remote Pi still loads the extension from the new path; a second connect to the same host reuses the stored key.
+**Verify:** unit tests cover 401/413, remote Pi path, IdentitiesOnly, known_hosts, and 0700. Local Pi/Claude status dots and a Windows Git Bash pass still need a machine check. A Linux SSH box can confirm known_hosts reuse + `$HOME/.devtool-remote`.
+
+**Closeout:** landed. `package.json` stays **0.3.2** (no numbered bump this pass). Next is Phase 3 (conda spawn picker).
 
 **Effort:** about a week. Windows + Git Bash local hooks, then one Linux SSH box.
 
@@ -337,7 +339,7 @@ Keep upstream `master` as a remote (`upstream`) and rebase or merge periodically
 5. Open workspace in external IDE (Phase 1.2: toolbar split button + Settings list). **Done** in `0.3.0`.
 6. Supported Electron line + blank browser tab (Phase 1.3). **Done** in `0.3.1`.
 7. Windows shortcut map + labels (Phase 1.4). **Done** in `0.3.2`.
-8. Hook authentication + SSH trust (Phase 2).
+8. Hook authentication + SSH trust (Phase 2). **Done** in `0.3.2` (no minor bump).
 9. Conda env picker on spawn (Phase 3).
 10. JupyterLab browser-tab launcher (Phase 4).
 11. Python and Markdown LSP spike, then harden (Phase 5).
@@ -378,7 +380,7 @@ Work machine constraints to re-test every phase: Git Bash, portable Node zip, Pi
 | 1 | `0.3.0` (shipped) | File tree CRUD + 1.2 external IDE handover | 1–2 weeks |
 | 1.3 | `0.3.1` (shipped) | Supported Electron + blank browser tab (webview stays) | a few evenings to a week |
 | 1.4 | `0.3.2` (shipped) | Existing shortcuts listed and shown as Windows keys | a short pass |
-| 2 | `0.4.0` | Hook secret + Pi extension off `/tmp` + SSH known_hosts | ~1 week |
+| 2 | `0.4.0` (code landed; version stays `0.3.2` this pass) | Hook secret + Pi extension off `/tmp` + SSH known_hosts | ~1 week |
 | 3 | `0.5.0` | Conda picker on spawn | 1–2 weeks |
 | 4 | `0.6.0` | JupyterLab in a browser tab | days |
 | 5 | `0.7.0` | Usable Python and Markdown LSPs | 1–2 months |
