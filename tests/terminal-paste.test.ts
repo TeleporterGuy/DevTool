@@ -43,12 +43,22 @@ describe('terminalPaste', () => {
     expect(clipboardReadText).toHaveBeenCalled()
   })
 
-  it('swallows paste keys and feeds clipboard text into xterm.paste', async () => {
+  it('swallows Ctrl+V without calling term.paste (Electron Edit menu already pastes)', () => {
     const clipboardReadText = vi.fn().mockResolvedValue('hello')
     vi.stubGlobal('window', { api: { clipboardReadText } })
     const term = { paste: vi.fn() }
 
     expect(handleTerminalPasteKey(key({ key: 'v', ctrlKey: true }), term)).toBe(false)
+    expect(term.paste).not.toHaveBeenCalled()
+    expect(clipboardReadText).not.toHaveBeenCalled()
+  })
+
+  it('pastes on Shift+Insert, which has no Edit menu accelerator', async () => {
+    const clipboardReadText = vi.fn().mockResolvedValue('hello')
+    vi.stubGlobal('window', { api: { clipboardReadText } })
+    const term = { paste: vi.fn() }
+
+    expect(handleTerminalPasteKey(key({ key: 'Insert', shiftKey: true }), term)).toBe(false)
     await vi.waitFor(() => expect(term.paste).toHaveBeenCalledWith('hello'))
   })
 
