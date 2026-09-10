@@ -12,7 +12,6 @@ import { CodexSessionManager } from './codex-session-manager'
 import type { SshConfig, ProjectNote, GitPostureResult, GitPostureLastCommit, CommitHistoryResult } from '../shared/types'
 import { AppConfig, ProjectsData, AI_TAB_META } from '../shared/types'
 import { piExtensionLocalPath, piExtensionRemotePath, buildRemotePiExtensionScript } from './pi-extension-injector'
-import { resolveSshCommand } from './resolve-agent-command'
 import { NotesStorage } from './notes-storage'
 import { PaletteFrecencyStorage, type FrecencyFile } from './palette-frecency-storage'
 import os from 'os'
@@ -225,7 +224,7 @@ export async function registerIpcHandlers(mainWindow: BrowserWindow): Promise<{ 
     try {
       const { execFile } = await import('child_process')
       const { promisify } = await import('util')
-      await promisify(execFile)('ssh', cleanupArgs, { timeout: 5000 })
+      await promisify(execFile)(sshManager.getSshCommand(), cleanupArgs, { timeout: 5000 })
     } catch {
       // Best-effort cleanup
     }
@@ -251,7 +250,7 @@ export async function registerIpcHandlers(mainWindow: BrowserWindow): Promise<{ 
     try {
       const { execFile: execFileCb } = await import('child_process')
       const { promisify } = await import('util')
-      const { stdout } = await promisify(execFileCb)('ssh', sshArgs, { timeout: 5000 })
+      const { stdout } = await promisify(execFileCb)(sshManager.getSshCommand(), sshArgs, { timeout: 5000 })
       return JSON.parse(stdout.trim()) as { sessionId: string | null }
     } catch (error) {
       throw new Error(`Failed to read Codex session: ${error instanceof Error ? error.message : String(error)}`)
@@ -294,7 +293,7 @@ export async function registerIpcHandlers(mainWindow: BrowserWindow): Promise<{ 
       }
 
       const sshArgs = sshManager.buildSpawnArgs(projectId, sshConfig, shell, remoteArgs, remoteEnv, hookInjectPrefix, remoteCwd)
-      ptyManager.spawn(id, resolveSshCommand(), os.tmpdir(), cols, rows, sshArgs)
+      ptyManager.spawn(id, sshManager.getSshCommand(), os.tmpdir(), cols, rows, sshArgs)
     } else {
       // Local spawn (existing behavior)
       const isPiLocal = shell === AI_TAB_META.pi.command && extraEnv?.DEVTOOL_TAB_ID

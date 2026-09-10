@@ -21,7 +21,7 @@ import { PaletteFrecencyStorage, type FrecencyFile } from './palette-frecency-st
 import { parseNumstat } from './git-diff-summary'
 import { GIT_STATUS_ARGS, parseGitStatusZ } from './git-status-parse'
 import { AI_TAB_META } from '../shared/types'
-import { agentCommandOverride, conptySpawnArgv, isAiAgentCommand, resolveAgentCommand, resolveSshCommand } from './resolve-agent-command'
+import { agentCommandOverride, conptySpawnArgv, isAiAgentCommand, resolveAgentCommand } from './resolve-agent-command'
 import { detectExternalEditors, openFolderInEditor } from './external-ide'
 import { isLocalInteractiveTerminal, resolveLocalTerminalSpawn } from './resolve-local-terminal'
 import { findGitBashExe, setPortableNodeDir } from './shell-env'
@@ -836,7 +836,7 @@ export class AppRuntime {
       try {
         const { execFile: execFileCb } = await import('child_process')
         const { promisify } = await import('util')
-        const { stdout } = await promisify(execFileCb)('ssh', sshArgs, { timeout: 5000 })
+        const { stdout } = await promisify(execFileCb)(this.sshManager.getSshCommand(), sshArgs, { timeout: 5000 })
         return JSON.parse(stdout.trim()) as { sessionId: string | null }
       } catch (error) {
         throw new Error(`Failed to read Codex session: ${error instanceof Error ? error.message : String(error)}`)
@@ -873,7 +873,7 @@ export class AppRuntime {
         `${sshConfig.username}@${sshConfig.host}`,
         `ls "$HOME"/.claude/projects/*/${sessionId}.jsonl >/dev/null 2>&1 && echo yes || echo no`
       ]
-      const { stdout } = await execFileAsync('ssh', sshArgs, { timeout: 5000 })
+      const { stdout } = await execFileAsync(this.sshManager.getSshCommand(), sshArgs, { timeout: 5000 })
       return stdout.trim() === 'yes'
     })
 
@@ -1201,7 +1201,7 @@ export class AppRuntime {
       cleanupScript
     ]
     try {
-      await execFileAsync('ssh', cleanupArgs, { timeout: 5000 })
+      await execFileAsync(this.sshManager.getSshCommand(), cleanupArgs, { timeout: 5000 })
     } catch {
       // Best-effort cleanup
     }
@@ -1344,9 +1344,9 @@ export class AppRuntime {
       }
 
       const sshArgs = this.sshManager.buildSpawnArgs(projectId, sshConfig, shell, remoteArgs, remoteEnv, hookInjectPrefix, remoteCwd)
-      // ConPTY needs an absolute ssh.exe on Windows; `execFile('ssh')` for
-      // Test Connection can PATH-search, but node-pty cannot.
-      const sshFile = resolveSshCommand()
+      // Same binary as the ControlMaster. Git's MSYS ssh cannot mux a PTY
+      // session; Windows OpenSSH can. ConPTY also needs an absolute path.
+      const sshFile = this.sshManager.getSshCommand()
       this.logDebug(`ptySpawn ssh id=${id} file=${sshFile}`)
       this.ptyManager.spawn(id, sshFile, os.tmpdir(), cols, rows, sshArgs, undefined, callbacks)
     } else {

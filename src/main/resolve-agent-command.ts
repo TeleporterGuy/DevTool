@@ -77,7 +77,7 @@ export function missingCommandError(command: string): Error {
 
 export function missingSshError(): Error {
   return new Error(
-    'Cannot find ssh.exe. Install Git for Windows (Git\\usr\\bin\\ssh.exe) or Windows OpenSSH, then open the remote tab again.'
+    'Cannot find ssh.exe. Install Windows OpenSSH (Settings → Optional features) or Git for Windows, then open the remote tab again.'
   )
 }
 
@@ -85,14 +85,34 @@ export function missingSshError(): Error {
  * Absolute `ssh.exe` on Windows so ConPTY/CreateProcess can open it.
  * A bare `ssh` yields `Error: File not found:` with an empty path.
  * Non-Windows keeps the name `ssh` so the OS searches PATH.
+ *
+ * Prefer System32 OpenSSH over Git\\usr\\bin. Git's ssh is MSYS/Cygwin and
+ * cannot pass file descriptors over a ControlMaster socket, so every new
+ * tab prints `mux_client_request_session: read from master failed` and
+ * falls back to a fresh TCP connection.
  */
 export function resolveSshCommand(deps: ResolveCommandDeps = {}): string {
   const platform = deps.platform ?? process.platform
   if (platform !== 'win32') return 'ssh'
+  const env = deps.env ?? process.env
+  const existsSync = deps.existsSync ?? fs.existsSync
+  const pathMod = deps.path ?? path.win32
+  const systemRoot = env.SystemRoot || env.SYSTEMROOT || 'C:\\Windows'
+  const nativeOpenSsh = pathMod.join(systemRoot, 'System32', 'OpenSSH', 'ssh.exe')
+  if (existsSync(nativeOpenSsh)) return nativeOpenSsh
   try {
     return resolveAgentCommand('ssh', deps)
   } catch {
     throw missingSshError()
+  }
+}
+
+/** Same as {@link resolveSshCommand}, but `ssh` if nothing is installed (execFile PATH search). */
+export function sshExecutable(deps: ResolveCommandDeps = {}): string {
+  try {
+    return resolveSshCommand(deps)
+  } catch {
+    return 'ssh'
   }
 }
 

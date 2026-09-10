@@ -4,6 +4,7 @@ import fs from 'fs'
 import net from 'net'
 import path from 'path'
 import type { SshConfig, TunnelConfig, TunnelState, TunnelStatus } from '../shared/types'
+import { sshExecutable } from './resolve-agent-command'
 
 export type SshStatus = 'disconnected' | 'connecting' | 'connected'
 
@@ -117,6 +118,8 @@ export function buildReadRemoteFileArgs(
 export class SshConnectionManager extends EventEmitter {
   private socketDir: string
   private hookPort: number
+  /** Master, mux slaves, and PTY spawn must share this binary. */
+  private sshBin: string
   private statuses = new Map<string, SshStatus>()
   private remotePorts = new Map<string, number>()
   private configs = new Map<string, SshConfig>()
@@ -138,8 +141,9 @@ export class SshConnectionManager extends EventEmitter {
 
   /** Promisified execFile that always returns { stdout, stderr } */
   private execFileAsync(cmd: string, args: string[], opts: { timeout: number }): Promise<{ stdout: string; stderr: string }> {
+    const file = cmd === 'ssh' ? this.sshBin : cmd
     return new Promise((resolve, reject) => {
-      execFile(cmd, args, opts, (err, stdout, stderr) => {
+      execFile(file, args, opts, (err, stdout, stderr) => {
         if (err) {
           const wrapped = err as Error & { stderr?: string; stdout?: string }
           if (typeof stderr === 'string') wrapped.stderr = stderr
@@ -156,6 +160,12 @@ export class SshConnectionManager extends EventEmitter {
     super()
     this.socketDir = socketDir
     this.hookPort = hookPort
+    this.sshBin = sshExecutable()
+  }
+
+  /** Absolute ssh.exe on Windows (OpenSSH, not Git/MSYS) so mux slaves match the master. */
+  getSshCommand(): string {
+    return this.sshBin
   }
 
   getSocketPath(projectId: string): string {
@@ -455,7 +465,7 @@ export class SshConnectionManager extends EventEmitter {
   private async doStartSocksProxy(projectId: string, config: SshConfig, attempt: number): Promise<number> {
     const port = await this.findFreePort()
     const args = this.buildSocksProxyArgs(projectId, config, port)
-    const child = spawn('ssh', args, { stdio: ['ignore', 'ignore', 'pipe'] })
+    const child = spawn(this.sshBin, args, { stdio: ['ignore', 'ignore', 'pipe'] })
 
     let stderr = ''
     child.stderr?.on('data', (chunk: Buffer) => { stderr += chunk.toString() })
