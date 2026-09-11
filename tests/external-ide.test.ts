@@ -42,6 +42,17 @@ describe('detectExternalEditors', () => {
     expect(found.find((item) => item.name === 'Visual Studio Code')?.command.toLowerCase()).toBe(code.toLowerCase())
   })
 
+  it('finds code and cursor on PATH on macOS and Linux', () => {
+    for (const platform of ['darwin', 'linux'] as const) {
+      const found = detectExternalEditors({
+        platform,
+        env: { PATH: '/usr/bin:/usr/local/bin' },
+        existsSync: (candidate) => candidate === '/usr/local/bin/code' || candidate === '/usr/local/bin/cursor'
+      })
+      expect(found.map((item) => item.command).sort()).toEqual(['/usr/local/bin/code', '/usr/local/bin/cursor'])
+    }
+  })
+
   it('finds code.cmd on PATH when no Code.exe is installed', () => {
     const found = detectExternalEditors({
       ...win,

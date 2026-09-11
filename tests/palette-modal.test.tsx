@@ -51,7 +51,11 @@ describe('Palette', () => {
   })
 
   it('Open Settings has no shortcut glyph or Ctrl+, on Windows', async () => {
-    render(<Palette />)
+    // The command list reads the platform at module load, so import a fresh copy.
+    ;(window as any).api.platform = 'win32'
+    vi.resetModules()
+    const { Palette: WinPalette } = await import('../src/renderer/palette/Palette')
+    render(<WinPalette />)
     await act(async () => { pressCmdK() })
     const input = screen.getByPlaceholderText('type to search…') as HTMLInputElement
     await act(async () => { fireEvent.change(input, { target: { value: 'Open Settings' } }) })

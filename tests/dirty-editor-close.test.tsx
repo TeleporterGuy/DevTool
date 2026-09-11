@@ -227,6 +227,7 @@ afterEach(() => {
 
 describe('closing an editor with unsaved changes', () => {
   it('shows Windows Ctrl labels on tab chrome (not ⌘)', async () => {
+    ;(window as any).api.platform = 'win32'
     await mountApp()
     const close = `Close tab (${formatShortcutForApp('CmdOrCtrl+W')})`
     const terminal = `New terminal (${formatShortcutForApp('CmdOrCtrl+T')})`
