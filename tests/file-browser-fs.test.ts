@@ -62,6 +62,15 @@ describe('file-browser-fs', () => {
     expect(listed.map((e) => e.name).sort()).toEqual(['.env', '__pycache__', 'hello.py'])
   })
 
+  it('renames a file when only the letter case changes', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'fb-'))
+    fs.writeFileSync(path.join(root, 'Readme.md'), 'x')
+    const renamed = await renameProjectEntry(root, 'Readme.md', 'README.md')
+    expect(renamed.relativePath).toBe('README.md')
+    expect(fs.readdirSync(root)).toEqual(['README.md'])
+    expect(fs.readFileSync(path.join(root, 'README.md'), 'utf8')).toBe('x')
+  })
+
   it('rejects overwrite on create and rename, and path escape', async () => {
     const root = makeProject()
     await createProjectFile(root, '', 'a.txt')

@@ -81,6 +81,21 @@ function sameResolvedPath(a: string, b: string): boolean {
   return ra === rb
 }
 
+/**
+ * True when both paths name the same directory entry on disk. Catches
+ * case-only renames (`Readme.md` → `README.md`) on case-insensitive
+ * filesystems such as APFS and NTFS, where the string compare above says
+ * "different" but `stat` of the target already succeeds.
+ */
+async function sameFileOnDisk(a: string, b: string): Promise<boolean> {
+  try {
+    const [sa, sb] = await Promise.all([fsPromises.lstat(a), fsPromises.lstat(b)])
+    return sa.dev === sb.dev && sa.ino === sb.ino
+  } catch {
+    return false
+  }
+}
+
 export async function renameProjectEntry(
   projectCwd: string,
   fromRelativePath: string,
@@ -94,11 +109,11 @@ export async function renameProjectEntry(
   const fromFull = resolveSafeProjectPath(projectCwd, fromRelativePath)
   const toFull = resolveSafeProjectPath(projectCwd, toRelativePath)
 
-  if (sameResolvedPath(fromFull, toFull)) {
+  if (sameResolvedPath(fromFull, toFull) || await sameFileOnDisk(fromFull, toFull)) {
     const fromBase = path.basename(fromFull)
     const toBase = path.basename(toFull)
     if (fromBase !== toBase) {
-      // Windows: Foo → foo is the same path, so hop through a temp name.
+      // Case-insensitive filesystem: Foo → foo is the same path, so hop through a temp name.
       const tmp = fromFull + '.devtool-rename-tmp'
       await fsPromises.rename(fromFull, tmp)
       await fsPromises.rename(tmp, toFull)
