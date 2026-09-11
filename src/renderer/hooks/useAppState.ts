@@ -203,24 +203,9 @@ export function useAppState() {
     setProjectsData(prev => wrapped(prev))
   }, [projectsSync])
 
-  const rememberSshRemoteDir = useCallback((projectId: string, remoteDir: string) => {
-    const trimmed = remoteDir.trim()
-    if (!trimmed) return
-    mutateProjects(prev => ({
-      ...prev,
-      projects: prev.projects.map(project => {
-        if (project.id !== projectId || !project.ssh) return project
-        if (project.ssh.remoteDir.trim()) return project
-        return { ...project, ssh: { ...project.ssh, remoteDir: trimmed } }
-      })
-    }))
-  }, [mutateProjects])
-
   const connectSsh = useCallback((projectId: string, sshConfig: SshConfig) => {
-    return window.api.sshConnect(projectId, sshConfig).then((result) => {
-      if (result?.remoteDir) rememberSshRemoteDir(projectId, result.remoteDir)
-    })
-  }, [rememberSshRemoteDir])
+    return window.api.sshConnect(projectId, sshConfig)
+  }, [])
 
   /**
    * The same wrapper for notes. `defer` is the debounced content edit: the mutation is

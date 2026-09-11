@@ -5,6 +5,7 @@ import net from 'net'
 import path from 'path'
 import type { SshConfig, TunnelConfig, TunnelState, TunnelStatus } from '../shared/types'
 import { sshExecutable } from './resolve-agent-command'
+import { piExtensionRemotePath } from './pi-extension-injector'
 
 export type SshStatus = 'disconnected' | 'connecting' | 'connected'
 
@@ -39,28 +40,13 @@ export function controlSocketPath(socketDir: string, projectId: string): string 
   return path.join(socketDir, `${projectId}.sock`)
 }
 
-/** DevTool-owned TOFU file — not mixed with ~/.ssh/known_hosts. */
-export function knownHostsPath(socketDir: string): string {
-  return path.join(socketDir, 'known_hosts')
-}
-
 /**
- * Host-key + identity options shared by master, mux slaves, and SOCKS.
- * First connect still TOFU (`accept-new`); a *changed* key still fails.
- * `IdentitiesOnly` only when we were given a key file, so agent/default keys
- * still work for password-less setups that do not pin a path.
+ * Host-key options shared by master, mux slaves, and SOCKS. The user's own
+ * ~/.ssh/known_hosts is used: first connect is TOFU (`accept-new`), a
+ * *changed* key fails. Identity selection is left to ssh (agent, ~/.ssh/config).
  */
-export function sshTrustArgs(socketDir: string, config: Pick<SshConfig, 'keyFile'>): string[] {
-  const args = [
-    '-o', `UserKnownHostsFile=${knownHostsPath(socketDir)}`,
-    '-o', 'StrictHostKeyChecking=accept-new',
-    // Dedicated file: keep hostnames readable so TOFU can be reviewed.
-    '-o', 'HashKnownHosts=no'
-  ]
-  if (config.keyFile) {
-    args.push('-o', 'IdentitiesOnly=yes')
-  }
-  return args
+export function sshTrustArgs(): string[] {
+  return ['-o', 'StrictHostKeyChecking=accept-new']
 }
 
 /** Create (or tighten) the ControlMaster / known_hosts directory to 0700. */
@@ -73,13 +59,13 @@ export function ensureSshDir(dir: string): void {
   }
 }
 
-/** Turn OpenSSH's host-key mismatch into a message that names our known_hosts file. */
-export function formatSshConnectError(err: unknown, knownHostsFile: string): Error {
+/** Turn OpenSSH's host-key mismatch into a message that names known_hosts. */
+export function formatSshConnectError(err: unknown): Error {
   const execErr = err as { message?: string; stderr?: string }
   const detail = `${execErr.stderr ?? ''}\n${execErr.message ?? String(err)}`
   if (/REMOTE HOST IDENTIFICATION HAS CHANGED|Host key verification failed/i.test(detail)) {
     return new Error(
-      `SSH host key mismatch. The remote key does not match ${knownHostsFile}. ` +
+      `SSH host key mismatch. The remote key does not match ~/.ssh/known_hosts. ` +
       `If you trust this host, remove its line from that file and reconnect. ` +
       `${execErr.message ?? String(err)}`
     )
@@ -94,11 +80,12 @@ export function formatSshConnectError(err: unknown, knownHostsFile: string): Err
 }
 
 /**
- * Quote a value for the remote `bash -c` command. `$HOME/...` stays double-quoted
- * so the login shell expands it (the Pi status extension lives under $HOME).
+ * Quote a value for the remote `bash -c` command. Only the Pi status extension
+ * path (a fixed `$HOME/...` expression) is double-quoted so the login shell
+ * expands `$HOME`; everything else is single-quoted verbatim.
  */
 export function quoteSpawnArg(s: string): string {
-  if (s.startsWith('$HOME/') && !/['"\s]/.test(s)) {
+  if (s === piExtensionRemotePath()) {
     return `"${s}"`
   }
   return shellQuote(s)
@@ -115,7 +102,7 @@ export function buildReadRemoteFileArgs(
   const port = String(config.port ?? 22)
   const sock = controlSocketPath(socketDir, projectId)
   const remotePath = joinRemotePath(config.remoteDir, relativePath)
-  const args = ['-S', sock, '-o', 'ControlMaster=no', '-p', port, ...sshTrustArgs(socketDir, config)]
+  const args = ['-S', sock, '-o', 'ControlMaster=no', '-p', port, ...sshTrustArgs()]
   if (config.keyFile) args.push('-i', config.keyFile)
   args.push(userHost, 'cat', '--', shellQuote(remotePath))
   return args
@@ -155,7 +142,7 @@ export class SshConnectionManager extends EventEmitter {
           const wrapped = err as Error & { stderr?: string; stdout?: string }
           if (typeof stderr === 'string') wrapped.stderr = stderr
           if (typeof stdout === 'string') wrapped.stdout = stdout
-          reject(formatSshConnectError(wrapped, knownHostsPath(this.socketDir)))
+          reject(formatSshConnectError(wrapped))
         } else {
           resolve({ stdout: stdout as string, stderr: stderr as string })
         }
@@ -242,7 +229,7 @@ export class SshConnectionManager extends EventEmitter {
     const args = [
       '-fN', '-M',
       '-S', this.getSocketPath(projectId),
-      ...sshTrustArgs(this.socketDir, config),
+      ...sshTrustArgs(),
       '-o', 'ServerAliveInterval=30',
       '-o', 'ServerAliveCountMax=3',
       '-o', 'TCPKeepAlive=yes',
@@ -292,7 +279,7 @@ export class SshConnectionManager extends EventEmitter {
   private buildBaseArgs(projectId: string, config: SshConfig): string[] {
     const args = [
       '-S', this.getSocketPath(projectId),
-      ...sshTrustArgs(this.socketDir, config),
+      ...sshTrustArgs(),
       '-p', String(config.port)
     ]
     if (config.keyFile) {
@@ -309,7 +296,7 @@ export class SshConnectionManager extends EventEmitter {
   private buildSessionArgs(projectId: string, config: SshConfig, multiplex: boolean): string[] {
     if (multiplex) return this.buildBaseArgs(projectId, config)
     const args = [
-      ...sshTrustArgs(this.socketDir, config),
+      ...sshTrustArgs(),
       '-p', String(config.port)
     ]
     if (config.keyFile) {
@@ -363,17 +350,6 @@ export class SshConnectionManager extends EventEmitter {
     ]
   }
 
-  /** Ask the remote login environment for $HOME (passwd/LDAP home, not /home/<user> guessed locally). */
-  buildReadHomeArgs(projectId: string, config: SshConfig): string[] {
-    return [
-      ...this.buildBaseArgs(projectId, config),
-      '-o', 'ControlMaster=no',
-      '-o', 'BatchMode=yes',
-      `${config.username}@${config.host}`,
-      'printf %s "$HOME"'
-    ]
-  }
-
   buildCheckArgs(projectId: string, config: SshConfig): string[] {
     return [
       ...this.buildBaseArgs(projectId, config),
@@ -396,7 +372,7 @@ export class SshConnectionManager extends EventEmitter {
     // handles the forwarding setup and the slave has nothing to keep it alive.
     // We need a standalone SSH connection that stays alive to keep the SOCKS port bound.
     const args = [
-      ...sshTrustArgs(this.socketDir, config),
+      ...sshTrustArgs(),
       '-p', String(config.port),
       '-D', String(localPort),
       '-N',
@@ -411,21 +387,6 @@ export class SshConnectionManager extends EventEmitter {
 
   getConfig(projectId: string): SshConfig | undefined {
     return this.configs.get(projectId)
-  }
-
-  /** remoteDir after connect: user value, or $HOME probed on the remote. */
-  effectiveRemoteDir(projectId: string, fallback: SshConfig): string {
-    const stored = this.configs.get(projectId)?.remoteDir
-    if (stored && stored.trim()) return stored.trim()
-    return (fallback.remoteDir || '').trim()
-  }
-
-  private async fillRemoteHomeIfNeeded(projectId: string, config: SshConfig): Promise<void> {
-    if (!isBlankRemoteDir(config.remoteDir)) return
-    const { stdout } = await this.execFileAsync('ssh', this.buildReadHomeArgs(projectId, config), { timeout: 10000 })
-    const home = stdout.trim()
-    if (!home) return
-    this.configs.set(projectId, { ...config, remoteDir: home })
   }
 
   getSocksProxy(projectId: string): { port: number } | undefined {
@@ -564,7 +525,7 @@ export class SshConnectionManager extends EventEmitter {
    *  forward (null clears it); omit `options` to reuse whatever was recorded
    *  last — which is what the internal auto-reconnect path does, so it restores
    *  the same tunnel the renderer-triggered connect established. */
-  async connect(projectId: string, config: SshConfig, options?: { tunnel?: TunnelConfig | null }): Promise<{ remoteDir: string }> {
+  async connect(projectId: string, config: SshConfig, options?: { tunnel?: TunnelConfig | null }): Promise<void> {
     if (options && 'tunnel' in options) {
       if (options.tunnel) this.desiredTunnels.set(projectId, options.tunnel)
       else this.desiredTunnels.delete(projectId)
@@ -577,16 +538,13 @@ export class SshConnectionManager extends EventEmitter {
     const existing = this.connectLocks.get(projectId)
     if (existing) {
       await existing.catch(() => {})
-      if (this.getStatus(projectId) === 'connected') {
-        return { remoteDir: this.effectiveRemoteDir(projectId, config) }
-      }
+      if (this.getStatus(projectId) === 'connected') return
     }
 
     const promise = this.doConnect(projectId, config)
     this.connectLocks.set(projectId, promise)
     try {
       await promise
-      return { remoteDir: this.effectiveRemoteDir(projectId, config) }
     } finally {
       if (this.connectLocks.get(projectId) === promise) {
         this.connectLocks.delete(projectId)
@@ -638,13 +596,6 @@ export class SshConnectionManager extends EventEmitter {
       this.setRemotePort(projectId, parseInt(portMatch[1], 10))
       this.autoReconnectEnabled.add(projectId)
       this.autoReconnectAttempts.delete(projectId)
-
-      // Empty Remote directory → ask the host for $HOME before tabs spawn.
-      try {
-        await this.fillRemoteHomeIfNeeded(projectId, config)
-      } catch {
-        // Spawn still uses `cd` (home). File tree fills in on a later successful probe.
-      }
 
       // Step 3: restore the configured local forward *before* announcing
       // 'connected'. Anyone who sees 'connected' must be able to rely on the
