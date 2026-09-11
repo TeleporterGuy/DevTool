@@ -271,7 +271,7 @@ export async function registerIpcHandlers(mainWindow: BrowserWindow): Promise<{ 
       let hookInjectPrefix = ''
       let remoteArgs = args
       let remoteEnv = extraEnv
-      const remoteCwd = (cwd && cwd.trim()) || sshManager.effectiveRemoteDir(projectId, sshConfig)
+      const remoteCwd = cwd || sshConfig.remoteDir
       if (isClaudeRemote) {
         const remotePort = sshManager.getRemotePort(projectId)
         if (remotePort) {
