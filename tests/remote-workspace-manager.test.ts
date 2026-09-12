@@ -10,6 +10,7 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import { RemoteWorkspaceManager } from '../src/main/remote-workspace-manager'
+import { sshExecutable } from '../src/main/resolve-agent-command'
 
 const mockExecFile = execFile as unknown as ReturnType<typeof vi.fn>
 
@@ -35,7 +36,7 @@ describe('RemoteWorkspaceManager', () => {
 
     expect(branches).toEqual(['main', 'feature-a'])
     const [cmd, args] = mockExecFile.mock.calls[0]
-    expect(cmd).toBe('ssh')
+    expect(cmd).toBe(sshExecutable())
     expect(args).toContain('-S')
     expect(args).toContain('/tmp/proj.sock')
     expect(args).toContain('deploy@dev.example.com')
@@ -188,6 +189,9 @@ describe.skipIf(!hasPython3)('RemoteWorkspaceManager remote script', () => {
     runScriptLocally()
     repoDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'remote-ws-test-')))
     execFileSync('git', ['init', '-b', 'master', repoDir])
+    execFileSync('git', ['-C', repoDir, 'config', 'user.email', 'test@example.com'])
+    execFileSync('git', ['-C', repoDir, 'config', 'user.name', 'Test'])
+    execFileSync('git', ['-C', repoDir, 'config', 'commit.gpgsign', 'false'])
     execFileSync('git', ['-C', repoDir, 'commit', '--allow-empty', '-m', 'init'])
   })
 

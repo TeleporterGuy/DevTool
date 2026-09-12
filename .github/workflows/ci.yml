@@ -1,0 +1,26 @@
+# Unit tests + typecheck. Does not launch Electron or talk to a real SSH host.
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      # Full install so esbuild's platform binary is present. Tests do not
+      # import electron or node-pty; DEMO_SSH is unset so live SSH stays skipped.
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test

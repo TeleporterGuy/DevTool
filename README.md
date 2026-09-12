@@ -136,7 +136,10 @@ Builds and installs the app system-wide. Supports macOS (arm64) and Linux (x86_6
 ```bash
 npm test               # Run tests
 npm run test:watch     # Run tests in watch mode
+npm run typecheck      # TypeScript (`tsc --noEmit`)
 ```
+
+Pull requests and pushes to `master` run those two commands on GitHub Actions (`ubuntu-latest`). That is unit/component coverage (Vitest), not a live Electron window or ConPTY. Live SSH (`DEMO_SSH=1`) is not enabled in CI. Windows-native rebuild of `node-pty` is not part of this job.
 
 ## License
 
