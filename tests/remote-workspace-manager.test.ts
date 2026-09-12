@@ -189,6 +189,9 @@ describe.skipIf(!hasPython3)('RemoteWorkspaceManager remote script', () => {
     runScriptLocally()
     repoDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'remote-ws-test-')))
     execFileSync('git', ['init', '-b', 'master', repoDir])
+    execFileSync('git', ['-C', repoDir, 'config', 'user.email', 'test@example.com'])
+    execFileSync('git', ['-C', repoDir, 'config', 'user.name', 'Test'])
+    execFileSync('git', ['-C', repoDir, 'config', 'commit.gpgsign', 'false'])
     execFileSync('git', ['-C', repoDir, 'commit', '--allow-empty', '-m', 'init'])
   })
 
