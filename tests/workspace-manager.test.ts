@@ -223,7 +223,9 @@ describe('WorkspaceManager', () => {
       fs.rmSync(strayDir, { recursive: true, force: true })
     })
 
-    it('refuses to delete when a check times out', async () => {
+    // PATH-front POSIX `git` shim: execFile('git') on Windows only launches git.exe,
+    // so this timeout path is covered on Linux/macOS (and in CI), not here.
+    it.skipIf(process.platform === 'win32')('refuses to delete when a check times out', async () => {
       const result = await manager.create(repoDir, 'timeout-ws', 'master')
       // Shadow `git status` with a command that never answers; everything else passes through.
       const shimDir = fs.mkdtempSync(path.join(os.tmpdir(), 'git-shim-'))
