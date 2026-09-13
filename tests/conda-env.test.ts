@@ -2,6 +2,8 @@ import path from 'path'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
   condaPathDirs,
+  condaRootFromEnvPrefix,
+  condaSpawnPathDirs,
   envNameFromPrefix,
   extraCondaCandidateFiles,
   findCondaExecutable,
@@ -14,8 +16,7 @@ import {
   resetCondaEnvForTests,
   resolveCondaEnvPrefix,
   setCachedCondaEnvsForTests,
-  wrapInteractiveShellWithCondaActivate,
-  condaRootFromEnvPrefix
+  wrapInteractiveShellWithCondaActivate
 } from '../src/main/conda-env'
 
 const win = {
@@ -82,6 +83,29 @@ describe('condaPathDirs', () => {
     expect(condaPathDirs('/home/me/miniconda3/envs/ml', posix)).toEqual([
       '/home/me/miniconda3/envs/ml/bin'
     ])
+  })
+})
+
+describe('condaSpawnPathDirs', () => {
+  it('puts Windows env dirs before install condabin so python wins and conda.exe remains', () => {
+    const dirs = condaSpawnPathDirs(
+      { name: 'ml', prefix: 'C:\\Users\\me\\miniforge3\\envs\\ml' },
+      win
+    )
+    expect(dirs[0]).toBe('C:\\Users\\me\\miniforge3\\envs\\ml')
+    expect(dirs).toContain('C:\\Users\\me\\miniforge3\\envs\\ml\\Scripts')
+    const condabin = dirs.indexOf('C:\\Users\\me\\miniforge3\\condabin')
+    const envScripts = dirs.indexOf('C:\\Users\\me\\miniforge3\\envs\\ml\\Scripts')
+    const rootScripts = dirs.indexOf('C:\\Users\\me\\miniforge3\\Scripts')
+    expect(condabin).toBeGreaterThan(envScripts)
+    expect(rootScripts).toBeGreaterThan(condabin)
+  })
+
+  it('does not duplicate Scripts when the env is base', () => {
+    const dirs = condaSpawnPathDirs({ name: 'base', prefix: 'C:\\Users\\me\\miniforge3' }, win)
+    const scripts = dirs.filter((dir) => dir.toLowerCase() === 'c:\\users\\me\\miniforge3\\scripts')
+    expect(scripts).toHaveLength(1)
+    expect(dirs).toContain('C:\\Users\\me\\miniforge3\\condabin')
   })
 })
 
@@ -328,6 +352,7 @@ describe('wrapInteractiveShellWithCondaActivate', () => {
     expect(script).toContain("export CONDA_AUTO_ACTIVATE_BASE=false")
     expect(script).toContain("conda activate 'pec_simulator_env'")
     expect(script).toContain("exec '/bin/zsh' -i")
+    expect(script).not.toContain('--rcfile')
     expect(script).toContain('/Users/me/miniconda3/etc/profile.d/conda.sh')
     expect(wrapped.args.indexOf('-l')).toBeLessThan(wrapped.args.indexOf('-c'))
     expect(wrapped.args.indexOf('-i')).toBeLessThan(wrapped.args.indexOf('-c'))
@@ -336,12 +361,19 @@ describe('wrapInteractiveShellWithCondaActivate', () => {
   it('uses Git Bash login flags on Windows', () => {
     const wrapped = wrapInteractiveShellWithCondaActivate(
       { file: 'C:\\Program Files\\Git\\bin\\bash.exe', args: ['--login', '-i'] },
-      { name: 'ml', prefix: 'C:\\Users\\me\\miniconda3\\envs\\ml' },
+      { name: 'ml', prefix: 'C:\\Users\\me\\miniforge3\\envs\\ml' },
       win
     )
     expect(wrapped.args.slice(0, 3)).toEqual(['--login', '-i', '-c'])
-    expect(wrapped.args[3]).toContain("conda activate 'ml'")
-    expect(wrapped.args[3]).toContain("exec 'C:/Program Files/Git/bin/bash.exe' -i")
+    const script = wrapped.args[3]
+    expect(script).toContain("conda activate 'ml'")
+    expect(script).toContain("C:/Users/me/miniforge3/etc/profile.d/conda.sh")
+    expect(script).toContain('--rcfile')
+    expect(script).toContain('.bashrc')
+    expect(script).toContain("exec 'C:/Program Files/Git/bin/bash.exe' --rcfile")
+    // Non-login `exec bash -i` would drop the conda function from .bash_profile.
+    expect(script).not.toMatch(/exec 'C:\/Program Files\/Git\/bin\/bash\.exe' -i/)
+    expect(script).toContain('2>/dev/null || micromamba activate')
   })
 
   it('quotes env names that contain spaces and quotes', () => {

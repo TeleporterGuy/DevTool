@@ -203,6 +203,26 @@ describe('applyCondaEnv', () => {
     expect(next.PYTHONHOME).toBeUndefined()
   })
 
+  it('prepends install condabin after env dirs when those folders exist', () => {
+    const next = applyCondaEnv(
+      { PATH: 'C:\\Windows\\System32' },
+      ml,
+      {
+        ...win,
+        existsSync: (candidate) => {
+          const n = candidate.toLowerCase()
+          return existsWin(candidate) || n === 'c:\\users\\me\\miniconda3\\condabin'
+        }
+      }
+    )
+    const parts = next.PATH.split(';')
+    expect(parts[0]).toBe(ml.prefix)
+    expect(parts.indexOf('C:\\Users\\me\\miniconda3\\condabin')).toBeGreaterThan(
+      parts.indexOf('C:\\Users\\me\\miniconda3\\envs\\ml\\Scripts')
+    )
+    expect(parts.at(-1)).toBe('C:\\Windows\\System32')
+  })
+
   it('mirrors Path on Windows', () => {
     const next = applyCondaEnv(
       { PATH: 'C:\\Windows', Path: 'C:\\Windows' },
@@ -230,6 +250,10 @@ describe('getShellEnv with conda', () => {
     expect(parts[0]).toBe('C:\\Tools\\node-v22')
     expect(parts[1]).toBe('C:\\Users\\me\\miniconda3\\envs\\ml')
     expect(parts).toContain('C:\\Users\\me\\miniconda3\\envs\\ml\\Scripts')
+    expect(parts).toContain('C:\\Users\\me\\miniconda3\\condabin')
+    expect(parts.indexOf('C:\\Users\\me\\miniconda3\\condabin')).toBeGreaterThan(
+      parts.indexOf('C:\\Users\\me\\miniconda3\\envs\\ml')
+    )
     expect(env.CONDA_DEFAULT_ENV).toBe('ml')
     expect(env.CONDA_AUTO_ACTIVATE_BASE).toBe('false')
   })
@@ -245,7 +269,9 @@ describe('getShellEnv with conda', () => {
       },
       { condaEnv: { name: 'ml', prefix: '/home/me/miniconda3/envs/ml' } }
     )
-    expect(env.PATH).toBe('/opt/node/bin:/home/me/miniconda3/envs/ml/bin:/usr/bin')
+    expect(env.PATH).toBe(
+      '/opt/node/bin:/home/me/miniconda3/envs/ml/bin:/home/me/miniconda3/condabin:/home/me/miniconda3/bin:/usr/bin'
+    )
   })
 })
 

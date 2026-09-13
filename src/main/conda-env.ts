@@ -84,7 +84,7 @@ export function envNameFromPrefix(prefix: string, rootPrefix: string | undefined
   return pathMod.basename(trimmed) || 'base'
 }
 
-/** Folders conda activate prepends. Missing ones are dropped later with existsSync. */
+/** Folders conda activate prepends for the env prefix. Missing ones are dropped later. */
 export function condaPathDirs(prefix: string, deps: CondaEnvDeps = {}): string[] {
   const pathMod = pathOf(deps)
   if (platformOf(deps) === 'win32') {
@@ -98,6 +98,36 @@ export function condaPathDirs(prefix: string, deps: CondaEnvDeps = {}): string[]
     ]
   }
   return [pathMod.join(prefix, 'bin')]
+}
+
+/** Install-root folders that contain `conda.exe` / the conda entry-point (not the env's python). */
+export function condaInstallToolDirs(root: string, deps: CondaEnvDeps = {}): string[] {
+  const pathMod = pathOf(deps)
+  if (platformOf(deps) === 'win32') {
+    return [pathMod.join(root, 'condabin'), pathMod.join(root, 'Scripts')]
+  }
+  return [pathMod.join(root, 'condabin'), pathMod.join(root, 'bin')]
+}
+
+/**
+ * PATH dirs for a spawn: env prefix first (python), then install condabin/Scripts
+ * so `conda` still resolves when the shell function is missing.
+ */
+export function condaSpawnPathDirs(condaEnv: CondaEnvInfo, deps: CondaEnvDeps = {}): string[] {
+  const prefix = condaEnv.prefix.trim()
+  const root = condaRootFromEnvPrefix(condaEnv, deps)
+  const envDirs = condaPathDirs(prefix, deps)
+  const seen = new Set(
+    envDirs.map((dir) => (platformOf(deps) === 'win32' ? dir.toLowerCase() : dir))
+  )
+  const extra: string[] = []
+  for (const dir of condaInstallToolDirs(root, deps)) {
+    const key = platformOf(deps) === 'win32' ? dir.toLowerCase() : dir
+    if (seen.has(key)) continue
+    seen.add(key)
+    extra.push(dir)
+  }
+  return [...envDirs, ...extra]
 }
 
 export function isCondaEnvPrefix(prefix: string, deps: CondaEnvDeps = {}): boolean {
@@ -486,30 +516,58 @@ export interface InteractiveShellSpawn {
   args: string[]
 }
 
+function condaShPath(condaEnv: CondaEnvInfo, deps: CondaEnvDeps = {}): string {
+  return pathOf(deps)
+    .join(condaRootFromEnvPrefix(condaEnv, deps), 'etc', 'profile.d', 'conda.sh')
+    .replace(/\\/g, '/')
+}
+
+function condaActivateCommands(condaEnv: CondaEnvInfo, deps: CondaEnvDeps = {}): string[] {
+  const name = posixSingleQuote(condaEnv.name.trim())
+  const condaSh = posixSingleQuote(condaShPath(condaEnv, deps))
+  return [
+    'export CONDA_AUTO_ACTIVATE_BASE=false',
+    `if [ -f ${condaSh} ]; then . ${condaSh}; fi`,
+    // Fail soft: condabin prepend still leaves conda.exe on PATH if activate cannot run.
+    `conda activate ${name} 2>/dev/null || micromamba activate ${name} 2>/dev/null || true`
+  ]
+}
+
 /**
  * Script run with `shell -l -i -c …` so login rc (conda initialize) runs first.
- * That hook often `conda activate base`; this then activates the project env and
- * execs a non-login interactive shell. `CONDA_AUTO_ACTIVATE_BASE=false` stops
- * the inner rc from flipping back to base.
+ * That hook often `conda activate base`; this then activates the project env.
+ *
+ * On macOS, `exec zsh -i` re-reads `.zshrc` (where conda init usually lives).
+ * On Windows Git Bash, conda init is in the **login** profile (`.bash_profile`),
+ * so `exec bash -i` would drop the conda function. Inner Git Bash uses `--rcfile`
+ * that re-sources conda.sh, activates again, then `.bashrc`.
  */
 export function condaActivateLoginScript(
   shellFile: string,
   condaEnv: CondaEnvInfo,
   deps: CondaEnvDeps = {}
 ): string {
-  const name = posixSingleQuote(condaEnv.name.trim())
   const execFile = posixSingleQuote(shellFile.replace(/\\/g, '/'))
-  const condaShPath = pathOf(deps)
-    .join(condaRootFromEnvPrefix(condaEnv, deps), 'etc', 'profile.d', 'conda.sh')
-    .replace(/\\/g, '/')
-  const condaSh = posixSingleQuote(condaShPath)
-  return [
+  const setup = condaActivateCommands(condaEnv, deps)
+  if (platformOf(deps) !== 'win32') {
+    return [...setup, `exec ${execFile} -i`].join('; ')
+  }
+
+  const name = posixSingleQuote(condaEnv.name.trim())
+  const condaSh = posixSingleQuote(condaShPath(condaEnv, deps))
+  const rcLines = [
     'export CONDA_AUTO_ACTIVATE_BASE=false',
     `if [ -f ${condaSh} ]; then . ${condaSh}; fi`,
-    `if command -v conda >/dev/null 2>&1; then conda activate ${name}`,
-    `elif command -v micromamba >/dev/null 2>&1; then micromamba activate ${name}`,
-    'fi',
-    `exec ${execFile} -i`
+    `conda activate ${name} 2>/dev/null || micromamba activate ${name} 2>/dev/null || true`,
+    'if [ -f "$HOME/.bashrc" ]; then . "$HOME/.bashrc"; fi'
+  ]
+  const printfArgs = rcLines.map((line) => posixSingleQuote(line)).join(' ')
+  return [
+    ...setup,
+    '_dt_rc=$(mktemp "${TMPDIR:-/tmp}/devtool-condaXXXXXX" 2>/dev/null || echo "${TMPDIR:-/tmp}/devtool-conda-$$")',
+    `printf '%s\\n' ${printfArgs} > "$_dt_rc"`,
+    'echo "rm -f $_dt_rc" >> "$_dt_rc"',
+    `exec ${execFile} --rcfile "$_dt_rc" -i`
   ].join('; ')
 }
 
