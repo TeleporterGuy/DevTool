@@ -25,6 +25,8 @@ import { agentCommandOverride, conptySpawnArgv, isAiAgentCommand, resolveAgentCo
 import { detectExternalEditors, openFolderInEditor } from './external-ide'
 import { isLocalInteractiveTerminal, resolveLocalTerminalSpawn } from './resolve-local-terminal'
 import { findGitBashExe, setPortableNodeDir } from './shell-env'
+import { listCondaEnvs, resolveCondaEnvPrefix } from './conda-env'
+import type { CondaEnvInfo } from '../shared/conda'
 import { resolveSafeProjectPath } from './project-fs-path'
 import {
   createProjectDirectory,
@@ -605,6 +607,7 @@ export class AppRuntime {
       return undefined
     })
 
+    ipcMain.handle('conda-list-envs', () => listCondaEnvs({}, { force: true }))
     ipcMain.handle('external-ide-detect', () => detectExternalEditors())
     ipcMain.handle('open-in-ide', async (_event, editorId: string, folder: string) => {
       const editors = this.config.externalEditors?.editors ?? []
@@ -1349,6 +1352,7 @@ export class AppRuntime {
       this.logDebug(`ptySpawn ssh id=${id} file=${sshFile}`)
       this.ptyManager.spawn(id, sshFile, os.tmpdir(), cols, rows, sshArgs, undefined, callbacks)
     } else {
+      const condaEnv = this.condaEnvForLocalProject(projectId)
       const isClaudeLocal = shell === 'claude' && extraEnv?.DEVTOOL_TAB_ID
       const isPiLocal = shell === AI_TAB_META.pi.command && extraEnv?.DEVTOOL_TAB_ID
       if (isClaudeLocal) {
@@ -1386,8 +1390,22 @@ export class AppRuntime {
         spawnArgs = resolved.args
         this.logDebug(`ptySpawn resolve id=${id} shell=${shell} file=${spawnFile} args=${spawnArgs.join(' ')}`)
       }
-      this.ptyManager.spawn(id, spawnFile, cwd, cols, rows, spawnArgs, localEnv, callbacks)
+      this.ptyManager.spawn(id, spawnFile, cwd, cols, rows, spawnArgs, localEnv, callbacks, condaEnv)
     }
+  }
+
+  /** Local PTYs only. Remote tabs run on the SSH host, which has its own python. */
+  private condaEnvForLocalProject(projectId?: string): CondaEnvInfo | undefined {
+    if (!projectId) return undefined
+    const name = this.projectsStore.peek().projects.find((project) => project.id === projectId)?.condaEnvName?.trim()
+    if (!name) return undefined
+    const prefix = resolveCondaEnvPrefix(name)
+    if (!prefix) {
+      this.logDebug(`condaEnv missing name=${name} projectId=${projectId}`)
+      return undefined
+    }
+    this.logDebug(`condaEnv name=${name} prefix=${prefix} projectId=${projectId}`)
+    return { name, prefix }
   }
 
   private killPty(id: string): void {

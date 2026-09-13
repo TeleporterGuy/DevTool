@@ -1,4 +1,5 @@
 import * as pty from 'node-pty'
+import type { CondaEnvInfo } from '../shared/conda'
 import { getShellEnv } from './shell-env'
 
 interface PtyInstance {
@@ -22,7 +23,8 @@ export class PtyManager {
     rows: number,
     args?: string[],
     extraEnv?: Record<string, string>,
-    callbacks?: PtySpawnCallbacks
+    callbacks?: PtySpawnCallbacks,
+    condaEnv?: CondaEnvInfo | null
   ): void {
     if (this.instances.has(id)) {
       this.kill(id)
@@ -32,7 +34,7 @@ export class PtyManager {
       cols,
       rows,
       cwd,
-      env: { ...getShellEnv(), COLORTERM: 'truecolor', ...extraEnv }
+      env: { ...getShellEnv({}, { condaEnv }), COLORTERM: 'truecolor', ...extraEnv }
     })
     if (callbacks?.onData) {
       proc.onData(callbacks.onData)

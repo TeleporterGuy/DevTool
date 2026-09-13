@@ -26,7 +26,7 @@ Company-deploy security snapshot (what this app actually is on a workstation): [
 
 Stay on **0.x** until the app is something you would tell a friend to unzip. **1.0.0** is that call, not “Phase 6 finished.”
 
-`package.json` is **0.3.2** (Phase 1 done; Phase 1.4 tagged). Shape:
+`package.json` is **0.5.0** (Phase 3 done). Phase 2 landed without tagging `0.4.0` and stayed **0.3.2**. Shape:
 
 | Part | Meaning |
 | --- | --- |
@@ -42,7 +42,7 @@ Work inside a phase is `0.x.y`; shipping the phase is the next `0.(x+1).0`.
 | Phase 1 done | `0.3.0` |
 | Phase 1.3 (Electron line) | `0.3.1` (tagged; not a numbered bump) |
 | Phase 1.4 (Windows shortcut labels) | `0.3.2` (tagged; not a numbered bump) |
-| Phase 2 done | `0.4.0` |
+| Phase 2 done | `0.4.0` (not tagged this fork; Phase 2 closeout stayed `0.3.2`) |
 | Phase 3 done | `0.5.0` |
 | Phase 4 done | `0.6.0` |
 | Phase 5 done | `0.7.0` |
@@ -251,15 +251,19 @@ Stay out of: config-dir `0700` for all of `~/.devtool`, scrollback `tabId` sanit
 
 ---
 
-## Phase 3 — Conda as a spawn picker
+## Phase 3 — Conda as a spawn picker — done (`0.5.0`)
 
-Was Phase 2. **Outcome:** pick an env per project (or task). Every PTY and later LSP/Jupyter child inherits it. No env-create/delete UI.
+Was Phase 2. **Outcome:** pick an env per project. Every local PTY inherits it. No env-create/delete UI.
 
 Work items:
 
-- Detect `conda` (Anaconda / Miniconda / micromamba if easy).
-- List envs, persist name on the project.
-- Activate the Git Bash way: `eval "$(conda shell.bash hook)"` + `conda activate <name>`, or prepend env paths. Prefer one method and test with `which python` / `python -c "import sys; print(sys.prefix)"`.
+1. **Detect conda** — done. Anaconda / Miniconda / Miniforge / micromamba via `CONDA_EXE` / PATH / well-known install dirs (including when Electron's PATH is thin).
+2. **List + persist** — done. Project Settings dropdown on local projects; `condaEnvName` on the project. Remote and shell-command projects stay out (those PTYs are not a local conda).
+3. **Activate** — done as **PATH prepend**, same pattern as Settings → Node directory. Not `eval "$(conda shell.bash hook)"` + `conda activate`: Pi/Claude/Codex spawn as binaries (CreateProcess), so a Git Bash hook would miss them. Windows prepends the conda-activate layout (`prefix`, `Library\\…\\bin`, `Scripts`, `bin`); Unix prepends `prefix/bin`. Sets `CONDA_PREFIX` / `CONDA_DEFAULT_ENV`. Portable Node stays **first** on PATH. Apply to terminal **and** agent tabs (project id is passed on local spawn). Later LSP/Jupyter children can reuse `getShellEnv(..., { condaEnv })`.
+
+**Verify:** unit tests cover detection, `conda env list --json` / filesystem listing, Windows PATH order, Node-dir remaining first, and that `process.env.PATH` is not overwritten. `which python` / `python -c "import sys; print(sys.prefix)"` in a Windows Git Bash tab is a **human check still required**.
+
+**Closeout:** done. `package.json` is **0.5.0**. Next is Phase 4 (Jupyter via the browser tab). Spyder as an external IDE can follow this, still out of 1.2.
 
 **Effort:** 1–2 weeks. Windows + Git Bash activation is the only tricky part. Ships as **`0.5.0`**.
 
@@ -340,7 +344,7 @@ Keep upstream `master` as a remote (`upstream`) and rebase or merge periodically
 6. Supported Electron line + blank browser tab (Phase 1.3). **Done** in `0.3.1`.
 7. Windows shortcut map + labels (Phase 1.4). **Done** in `0.3.2`.
 8. Hook authentication + SSH trust (Phase 2). **Done** in `0.3.2` (no minor bump).
-9. Conda env picker on spawn (Phase 3).
+9. Conda env picker on spawn (Phase 3). **Done** in `0.5.0`.
 10. JupyterLab browser-tab launcher (Phase 4).
 11. Python and Markdown LSP spike, then harden (Phase 5).
 
@@ -380,8 +384,8 @@ Work machine constraints to re-test every phase: Git Bash, portable Node zip, Pi
 | 1 | `0.3.0` (shipped) | File tree CRUD + 1.2 external IDE handover | 1–2 weeks |
 | 1.3 | `0.3.1` (shipped) | Supported Electron + blank browser tab (webview stays) | a few evenings to a week |
 | 1.4 | `0.3.2` (shipped) | Existing shortcuts listed and shown as Windows keys | a short pass |
-| 2 | `0.4.0` (code landed; version stays `0.3.2` this pass) | Hook secret + Pi extension off `/tmp`; SSH uses `~/.ssh/known_hosts` | ~1 week |
-| 3 | `0.5.0` | Conda picker on spawn | 1–2 weeks |
+| 2 | `0.4.0` (code landed; version stayed `0.3.2` this pass) | Hook secret + Pi extension off `/tmp`; SSH uses `~/.ssh/known_hosts` | ~1 week |
+| 3 | `0.5.0` (shipped) | Conda picker on spawn | 1–2 weeks |
 | 4 | `0.6.0` | JupyterLab in a browser tab | days |
 | 5 | `0.7.0` | Usable Python and Markdown LSPs | 1–2 months |
 | 6 | `0.8.0`+ | Native notebooks / extra LSPs / deferred hardening | open-ended |

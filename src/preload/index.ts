@@ -23,6 +23,7 @@ import type {
   WorkspaceListBranchesRequest,
   WindowViewState
 } from '../shared/types'
+import type { CondaListResult } from '../shared/conda'
 
 const api = {
   // Projects
@@ -87,6 +88,9 @@ const api = {
   // File picker
   pickFile: (title?: string): Promise<string | null> =>
     ipcRenderer.invoke('pick-file', title),
+
+  condaListEnvs: (): Promise<CondaListResult> =>
+    ipcRenderer.invoke('conda-list-envs'),
 
   externalIdeDetect: (): Promise<Array<{ name: string; command: string }>> =>
     ipcRenderer.invoke('external-ide-detect'),

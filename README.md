@@ -24,6 +24,8 @@ Built with Electron, React, and TypeScript.
 
 **AI Tool Integration** -- Dedicated tabs for Pi (primary), Claude Code, and Codex. Hook server enables bidirectional communication with AI tools running in terminals.
 
+**Conda environments** -- Pick a conda or micromamba env per local project (Project Settings). New terminal and Pi tabs prepend that env onto PATH, the same way Settings → Node directory prepends a portable Node zip. DevTool does not create or delete envs.
+
 **Remote SSH Projects** -- Connect to remote machines via SSH with port forwarding, SOCKS proxy tunneling, key authentication, health checks, and auto-reconnection.
 
 **Git Worktree Management** -- Create and delete isolated git worktrees for branch work directly from the UI.
@@ -98,7 +100,7 @@ On the build machine (Windows x64, after a successful `npm install` as above):
 npm run build:win
 ```
 
-That writes a portable directory (typically `dist/win-unpacked`). Zip that folder and give it to the locked-down PC. Run `DevTool.exe` from inside it. Keep a portable Node zip next to it if you want `node` on PATH for terminals later (Settings → Node directory).
+That writes a portable directory (typically `dist/win-unpacked`). Zip that folder and give it to the locked-down PC. Run `DevTool.exe` from inside it. Keep a portable Node zip next to it if you want `node` on PATH for terminals later (Settings → Node directory). Pick a conda env per project in Project Settings when you want that project's `python`.
 
 Limits of this path:
 

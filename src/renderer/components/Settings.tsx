@@ -268,6 +268,7 @@ export default function Settings({ onClose }: Props): React.ReactElement {
                 <HelperText>
                   Unzipped Node zip. The folder must contain node.exe. It is prepended to PATH
                   for new terminal and Pi tabs (already-open tabs keep their original PATH).
+                  A conda env is a separate per-project picker in Project Settings.
                 </HelperText>
               </SetBlock>
             </FormGroup>

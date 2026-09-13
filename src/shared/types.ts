@@ -203,6 +203,8 @@ export interface Project {
   tunnel?: TunnelConfig
   shellCommand?: ShellCommandConfig
   aiToolArgs?: Partial<Record<AiTabType, string>>
+  /** Conda / micromamba env name prepended onto PATH for local PTYs. Empty = no project env. */
+  condaEnvName?: string
   lifetimeStats?: { tasksCreated: number; notesCreated: number }
   tagIds?: string[]
 }

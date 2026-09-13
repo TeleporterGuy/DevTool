@@ -1,6 +1,7 @@
 import path from 'path'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
+  applyCondaEnv,
   findGitBashExe,
   getShellEnv,
   gitInstallRoot,
@@ -12,6 +13,7 @@ import {
   resolveShellEnv,
   setPortableNodeDir
 } from '../src/main/shell-env'
+import { resetCondaEnvForTests } from '../src/main/conda-env'
 
 const win = {
   platform: 'win32' as const,
@@ -20,6 +22,7 @@ const win = {
 
 afterEach(() => {
   resetShellEnvForTests()
+  resetCondaEnvForTests()
 })
 
 describe('normalizePortableNodeDir', () => {
@@ -160,6 +163,87 @@ describe('getShellEnv', () => {
       env: { PATH: 'C:\\Windows\\System32' } as NodeJS.ProcessEnv
     })
     expect(env.PATH.startsWith('C:\\Tools\\node-v22;')).toBe(true)
+  })
+})
+
+describe('applyCondaEnv', () => {
+  const ml = {
+    name: 'ml',
+    prefix: 'C:\\Users\\me\\miniconda3\\envs\\ml'
+  }
+  const existsWin = (candidate: string) => {
+    const n = candidate.toLowerCase()
+    return (
+      n === 'c:\\users\\me\\miniconda3\\envs\\ml' ||
+      n === 'c:\\users\\me\\miniconda3\\envs\\ml\\scripts' ||
+      n === 'c:\\users\\me\\miniconda3\\envs\\ml\\library\\bin'
+    )
+  }
+
+  it('does nothing when no env is selected', () => {
+    const env = { PATH: 'C:\\Windows\\System32', PYTHONHOME: 'C:\\Python' }
+    expect(applyCondaEnv(env, null, { ...win, existsSync: () => true })).toEqual(env)
+    expect(applyCondaEnv(env, { name: '', prefix: ml.prefix }, { ...win, existsSync: () => true })).toEqual(env)
+  })
+
+  it('prepends conda activate dirs that exist and sets CONDA_*', () => {
+    const next = applyCondaEnv(
+      { PATH: 'C:\\Windows\\System32', PYTHONHOME: 'C:\\Python' },
+      ml,
+      { ...win, existsSync: existsWin }
+    )
+    expect(next.PATH).toBe(
+      'C:\\Users\\me\\miniconda3\\envs\\ml;C:\\Users\\me\\miniconda3\\envs\\ml\\Library\\bin;C:\\Users\\me\\miniconda3\\envs\\ml\\Scripts;C:\\Windows\\System32'
+    )
+    expect(next.CONDA_PREFIX).toBe(ml.prefix)
+    expect(next.CONDA_DEFAULT_ENV).toBe('ml')
+    expect(next.CONDA_SHLVL).toBe('1')
+    expect(next.CONDA_PROMPT_MODIFIER).toBe('(ml) ')
+    expect(next.PYTHONHOME).toBeUndefined()
+  })
+
+  it('mirrors Path on Windows', () => {
+    const next = applyCondaEnv(
+      { PATH: 'C:\\Windows', Path: 'C:\\Windows' },
+      ml,
+      { ...win, existsSync: existsWin }
+    )
+    expect(next.Path).toBe(next.PATH)
+  })
+})
+
+describe('getShellEnv with conda', () => {
+  it('keeps portable Node first, then the conda env, and does not write process.env.PATH', () => {
+    const live: NodeJS.ProcessEnv = { PATH: 'C:\\Windows\\System32' }
+    setPortableNodeDir('C:\\Tools\\node-v22')
+    const env = getShellEnv(
+      {
+        ...win,
+        env: live,
+        existsSync: () => true
+      },
+      { condaEnv: { name: 'ml', prefix: 'C:\\Users\\me\\miniconda3\\envs\\ml' } }
+    )
+    expect(live.PATH).toBe('C:\\Windows\\System32')
+    const parts = env.PATH.split(';')
+    expect(parts[0]).toBe('C:\\Tools\\node-v22')
+    expect(parts[1]).toBe('C:\\Users\\me\\miniconda3\\envs\\ml')
+    expect(parts).toContain('C:\\Users\\me\\miniconda3\\envs\\ml\\Scripts')
+    expect(env.CONDA_DEFAULT_ENV).toBe('ml')
+  })
+
+  it('prepends Unix conda bin under portable Node', () => {
+    setPortableNodeDir('/opt/node/bin')
+    const env = getShellEnv(
+      {
+        platform: 'linux',
+        path: path.posix,
+        env: { PATH: '/usr/bin' } as NodeJS.ProcessEnv,
+        existsSync: () => true
+      },
+      { condaEnv: { name: 'ml', prefix: '/home/me/miniconda3/envs/ml' } }
+    )
+    expect(env.PATH).toBe('/opt/node/bin:/home/me/miniconda3/envs/ml/bin:/usr/bin')
   })
 })
 
