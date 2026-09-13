@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect, useCallback } from 'react'
 import { useApp } from '../context/AppContext'
 import type { SshConfig } from '../../shared/types'
 import { BLANK_BROWSER_URL, normalizeBrowserUrl } from '../browserUrl'
+import { takePendingBrowserNavigate } from '../browserNavigate'
 import { formatShortcutForApp } from '../../shared/shortcut-label'
 import LinkContextMenu, { type LinkMenuState } from './LinkContextMenu'
 
@@ -17,7 +18,10 @@ interface Props {
 
 export default function BrowserTab({ tabId, visible, initialUrl, projectId, taskId, pane, sshConfig }: Props): React.ReactElement {
   const { updateTabUrl, browserZoomFactor, markTaskInteracted, addTab } = useApp()
-  const [url, setUrl] = useState(initialUrl || BLANK_BROWSER_URL)
+  // Pending wins over the persisted tab.url (which never stores a Jupyter token).
+  const [url, setUrl] = useState(
+    () => takePendingBrowserNavigate(tabId) || initialUrl || BLANK_BROWSER_URL
+  )
   const [inputUrl, setInputUrl] = useState(url)
   const [devToolsOpen, setDevToolsOpen] = useState(false)
   const [proxyEnabled, setProxyEnabled] = useState(!!sshConfig)
@@ -79,6 +83,7 @@ export default function BrowserTab({ tabId, visible, initialUrl, projectId, task
     const handleNavigate = (e: Event) => {
       const detail = (e as CustomEvent<{ tabId?: string; url?: string }>).detail
       if (detail?.tabId !== tabId || !detail.url) return
+      takePendingBrowserNavigate(tabId)
       const normalized = normalizeBrowserUrl(detail.url)
       setUrl(normalized)
       setInputUrl(normalized)

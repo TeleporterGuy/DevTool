@@ -11,7 +11,6 @@ import {
   canReuseJupyterServer,
   condaPythonExecutable,
   jupyterLabUrl,
-  parseJupyterLabUrl,
   redactJupyterTokens,
   type JupyterOpenResult,
   type JupyterServerKey
@@ -41,12 +40,13 @@ export interface JupyterLabDeps {
   execFile?: ExecFileFn
   pickFreePort?: () => Promise<number>
   randomToken?: () => string
-  isPidAlive?: (pid: number) => boolean
   httpReady?: (url: string) => Promise<boolean>
   killTree?: (pid: number) => Promise<void>
   log?: (message: string) => void
   /** How long to wait for the server to accept HTTP after spawn. */
   startTimeoutMs?: number
+  /** How long to wait for ChildProcess exit before a confirmed tree-kill. */
+  killWaitMs?: number
 }
 
 export interface JupyterOpenRequest {
@@ -61,6 +61,8 @@ interface JupyterServerRecord extends JupyterServerKey {
   url: string
   token: string
   child: ChildProcess
+  /** Set when our ChildProcess has exited — never tree-kill that pid afterward. */
+  exited: boolean
 }
 
 function platformOf(deps: JupyterLabDeps): NodeJS.Platform {
@@ -74,15 +76,6 @@ function pathOf(deps: JupyterLabDeps): PathApi {
 
 function existsOf(deps: JupyterLabDeps): (filePath: string) => boolean {
   return deps.existsSync ?? fs.existsSync
-}
-
-function isPidAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0)
-    return true
-  } catch {
-    return false
-  }
 }
 
 /** Bind 127.0.0.1:0, read the OS-assigned port, then close so Jupyter can take it. */
@@ -199,6 +192,8 @@ function lastLogLines(text: string, maxChars = 800): string {
  */
 export class JupyterLabManager {
   private readonly servers = new Map<string, JupyterServerRecord>()
+  /** One in-flight open per project so two palette clicks do not spawn two servers. */
+  private readonly inflight = new Map<string, Promise<JupyterOpenResult>>()
   private readonly deps: JupyterLabDeps
 
   constructor(deps: JupyterLabDeps = {}) {
@@ -206,6 +201,19 @@ export class JupyterLabManager {
   }
 
   async open(request: JupyterOpenRequest): Promise<JupyterOpenResult> {
+    const existing = this.inflight.get(request.projectId)
+    if (existing) return existing
+    let pending: Promise<JupyterOpenResult>
+    pending = this.openSerialized(request).finally(() => {
+      if (this.inflight.get(request.projectId) === pending) {
+        this.inflight.delete(request.projectId)
+      }
+    })
+    this.inflight.set(request.projectId, pending)
+    return pending
+  }
+
+  private async openSerialized(request: JupyterOpenRequest): Promise<JupyterOpenResult> {
     const platform = platformOf(this.deps)
     const cwd = request.cwd.trim()
     if (!cwd) return { ok: false, error: JUPYTER_ERRORS.noFolder }
@@ -220,10 +228,12 @@ export class JupyterLabManager {
     }
 
     const existing = this.servers.get(request.projectId) ?? null
-    const alive = this.deps.isPidAlive ?? isPidAlive
-    if (existing && canReuseJupyterServer(existing, wanted, platform, alive)) {
+    const owned = existing ? this.childStillOurs(existing) : false
+    if (existing && canReuseJupyterServer(existing, wanted, platform, owned)) {
       const readyFn = this.deps.httpReady ?? httpReady
-      const stillUp = await readyFn(existing.url)
+      const stillUp = await readyFn(existing.url) || await readyFn(
+        `http://127.0.0.1:${existing.port}/api/status?token=${existing.token}`
+      )
       if (stillUp) {
         this.deps.log?.(`jupyter reuse projectId=${request.projectId} port=${existing.port}`)
         return { ok: true, url: existing.url, reused: true, port: existing.port }
@@ -335,40 +345,44 @@ export class JupyterLabManager {
     child.stderr?.on('data', append)
 
     let exitCode: number | null | undefined
-    const onExit = (code: number | null) => {
+    const markExited = (code: number | null) => {
       exitCode = code
       const current = this.servers.get(request.projectId)
-      if (current && current.pid === pid) this.servers.delete(request.projectId)
+      if (current && current.pid === pid) current.exited = true
     }
-    child.once('exit', onExit)
+    child.once('exit', markExited)
     child.once('error', (err) => {
       append(err.message)
-      onExit(1)
+      markExited(1)
     })
 
     const timeoutMs = this.deps.startTimeoutMs ?? 30_000
     const readyFn = this.deps.httpReady ?? httpReady
     const deadline = Date.now() + timeoutMs
-    let readyUrl: string | null = null
+    const apiStatusUrl = `http://127.0.0.1:${port}/api/status?token=${token}`
+    let httpOk = false
 
     while (Date.now() < deadline) {
       if (exitCode !== undefined) {
         const detail = lastLogLines(output) || `exit code ${exitCode ?? '?'}`
         return { ok: false, error: JUPYTER_ERRORS.startFailed(detail) }
       }
-      const parsed = parseJupyterLabUrl(output)
-      if (parsed) readyUrl = parsed
-      if (await readyFn(expectedUrl) || await readyFn(`http://127.0.0.1:${port}/api/status?token=${token}`)) {
-        readyUrl = readyUrl ?? expectedUrl
+      // A log line with a URL is not enough — wait until HTTP answers.
+      if (await readyFn(expectedUrl) || await readyFn(apiStatusUrl)) {
+        httpOk = true
         break
       }
-      if (readyUrl) break
       await new Promise((r) => setTimeout(r, 150))
     }
 
-    if (!readyUrl) {
-      await this.killChild(child, pid)
-      if (exitCode !== undefined) {
+    if (!httpOk) {
+      const diedWhileWaiting = exitCode !== undefined
+      await this.killChild({
+        pid,
+        child,
+        exited: exitCode !== undefined
+      })
+      if (diedWhileWaiting) {
         return { ok: false, error: JUPYTER_ERRORS.startFailed(lastLogLines(output)) }
       }
       return { ok: false, error: JUPYTER_ERRORS.startTimeout }
@@ -380,28 +394,64 @@ export class JupyterLabManager {
       condaPrefix: request.condaEnv.prefix,
       pid,
       port,
-      url: readyUrl,
+      url: expectedUrl,
       token,
-      child
+      child,
+      exited: false
     }
     this.servers.set(request.projectId, record)
     this.deps.log?.(`jupyter start projectId=${request.projectId} port=${port}`)
-    return { ok: true, url: readyUrl, reused: false, port }
+    return { ok: true, url: expectedUrl, reused: false, port }
+  }
+
+  private childStillOurs(record: JupyterServerRecord): boolean {
+    if (record.exited) return false
+    const child = record.child
+    if (child.exitCode != null || child.signalCode) return false
+    if (!child.pid || child.pid !== record.pid) return false
+    return true
   }
 
   private async killRecord(record: JupyterServerRecord): Promise<void> {
     this.deps.log?.(`jupyter stop projectId=${record.projectId} port=${record.port}`)
-    await this.killChild(record.child, record.pid)
+    await this.killChild(record)
   }
 
-  private async killChild(child: ChildProcess, pid: number): Promise<void> {
+  /**
+   * Kill through the ChildProcess we spawned. Only tree-kill (taskkill /T,
+   * kill(-pid)) when that handle still says the process is ours — a raw pid
+   * after exit can already belong to someone else.
+   */
+  private async killChild(record: Pick<JupyterServerRecord, 'pid' | 'child'> & { exited?: boolean }): Promise<void> {
+    const gone = (): boolean =>
+      !!(record.exited || record.child.exitCode != null || record.child.signalCode)
+    if (gone()) return
+
+    await new Promise<void>((resolve) => {
+      let settled = false
+      const finish = (): void => {
+        if (settled) return
+        settled = true
+        resolve()
+      }
+      record.child.once('exit', finish)
+      try {
+        record.child.kill('SIGTERM')
+      } catch {
+        finish()
+        return
+      }
+      if (gone()) {
+        finish()
+        return
+      }
+      setTimeout(finish, this.deps.killWaitMs ?? 1000)
+    })
+
+    if (gone()) return
+    if (!record.child.pid || record.child.pid !== record.pid) return
     const platform = platformOf(this.deps)
-    try {
-      child.kill('SIGTERM')
-    } catch {
-      /* ignore */
-    }
     const killTree = this.deps.killTree ?? ((id: number) => killProcessTree(id, platform))
-    await killTree(pid)
+    await killTree(record.pid)
   }
 }

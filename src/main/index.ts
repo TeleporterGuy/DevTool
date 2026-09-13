@@ -3,6 +3,7 @@ import { join } from 'path'
 import { resolveShellEnv } from './shell-env'
 import { listCondaEnvs } from './conda-env'
 import { AppRuntime } from './app-runtime'
+import { createQuitGate } from './quit-gate'
 import type { WindowGeometry, WindowViewState } from '../shared/types'
 
 if (process.env.DEVTOOL_CDP_PORT) {
@@ -273,7 +274,12 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit()
 })
 
-app.on('before-quit', () => {
-  appRuntime?.prepareForQuit()
-  void appRuntime?.shutdown()
+const runQuit = createQuitGate({
+  prepare: () => appRuntime?.prepareForQuit(),
+  shutdown: () => appRuntime?.shutdown() ?? Promise.resolve(),
+  exit: () => app.exit()
+})
+
+app.on('before-quit', (event) => {
+  runQuit(event)
 })

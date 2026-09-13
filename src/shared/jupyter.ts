@@ -3,6 +3,9 @@
  * Main owns the process; the renderer only opens a browser tab at the URL.
  */
 
+import path from 'path'
+import { joinWorkspaceDir } from './workspace-path'
+
 export const JUPYTER_LAB_TITLE = 'JupyterLab'
 
 export type JupyterOpenOk = {
@@ -44,7 +47,9 @@ export const JUPYTER_ERRORS = {
     detail
       ? `JupyterLab failed to start.\n${detail}`
       : 'JupyterLab failed to start.',
-  startTimeout: 'JupyterLab started but did not become ready in time.'
+  startTimeout: 'JupyterLab started but did not become ready in time.',
+  cwdNotAllowed:
+    'JupyterLab can only start in this project folder or one of its worktrees.'
 }
 
 /** Folders compared for reuse: strip a trailing slash; Windows is case-insensitive. */
@@ -70,18 +75,18 @@ export function sameJupyterKey(
 
 /**
  * Reuse a live server for the same project + folder + conda env.
- * Dead pid / different cwd or env → start a new one.
+ * `stillOwned` is the ChildProcess we spawned (not a raw pid lookup — PIDs get reused).
  */
 export function canReuseJupyterServer(
   running: (JupyterServerKey & { pid: number }) | null | undefined,
   wanted: JupyterServerKey,
   platform: NodeJS.Platform,
-  isPidAlive: (pid: number) => boolean
+  stillOwned: boolean
 ): boolean {
   if (!running) return false
   if (!sameJupyterKey(running, wanted, platform)) return false
   if (!Number.isInteger(running.pid) || running.pid <= 0) return false
-  return isPidAlive(running.pid)
+  return stillOwned
 }
 
 /** Build the in-app URL. Always loopback — never bind Jupyter to 0.0.0.0. */
@@ -143,6 +148,27 @@ export function redactJupyterTokens(text: string): string {
   return text.replace(/([?&]token=)[^&\s"'<>]+/gi, '$1***')
 }
 
+/**
+ * Drop the Jupyter token before writing a URL to projects.json.
+ * The in-app webview can still load the token URL in memory.
+ */
+export function persistableBrowserUrl(url: string): string {
+  const trimmed = url.trim()
+  if (!trimmed) return trimmed
+  try {
+    const parsed = new URL(trimmed)
+    const host = parsed.hostname
+    const loopback = host === '127.0.0.1' || host === 'localhost' || host === '::1'
+    if (!loopback || !parsed.searchParams.has('token')) return trimmed
+    parsed.searchParams.delete('token')
+    let next = parsed.toString()
+    if (next.endsWith('?')) next = next.slice(0, -1)
+    return next
+  } catch {
+    return trimmed
+  }
+}
+
 export function buildJupyterlabArgs(port: number, token: string, cwd: string): string[] {
   return [
     '-m',
@@ -153,18 +179,85 @@ export function buildJupyterlabArgs(port: number, token: string, cwd: string): s
     '--port-retries=0',
     `--ServerApp.token=${token}`,
     '--ServerApp.password=',
-    `--notebook-dir=${cwd}`
+    `--ServerApp.root_dir=${cwd}`
   ]
 }
 
-type PathApi = { join: (...parts: string[]) => string }
+type PathApi = {
+  join: (...parts: string[]) => string
+  resolve: (...parts: string[]) => string
+  relative: (from: string, to: string) => string
+  isAbsolute: (p: string) => boolean
+  sep: string
+}
+
+function pathApiFor(platform: NodeJS.Platform): PathApi {
+  return platform === 'win32' ? path.win32 : path.posix
+}
+
+/** True when `candidate` is `root` or a folder inside it (after resolve). */
+export function isPathInsideRoot(
+  root: string,
+  candidate: string,
+  platform: NodeJS.Platform,
+  pathApi: PathApi = pathApiFor(platform)
+): boolean {
+  const resolvedRoot = pathApi.resolve(root)
+  const resolved = pathApi.resolve(candidate)
+  const rel = pathApi.relative(resolvedRoot, resolved)
+  if (rel === '') return true
+  if (pathApi.isAbsolute(rel)) return false
+  return rel.split(pathApi.sep)[0] !== '..'
+}
+
+/**
+ * Pick a Jupyter working directory: omitted cwd → project folder.
+ * A provided cwd must sit under the project folder or a worktree root.
+ */
+export function resolveContainedJupyterCwd(
+  requested: string | undefined,
+  roots: string[],
+  fallback: string,
+  platform: NodeJS.Platform,
+  pathApi: PathApi = pathApiFor(platform)
+): { ok: true; cwd: string } | { ok: false; error: string } {
+  const projectDir = fallback.trim()
+  if (!projectDir) return { ok: false, error: JUPYTER_ERRORS.noFolder }
+  const cwd = (requested ?? '').trim() || projectDir
+  const allowed = roots.map((root) => root.trim()).filter(Boolean)
+  if (allowed.length === 0) allowed.push(projectDir)
+  for (const root of allowed) {
+    if (isPathInsideRoot(root, cwd, platform, pathApi)) {
+      return { ok: true, cwd: pathApi.resolve(cwd) }
+    }
+  }
+  return { ok: false, error: JUPYTER_ERRORS.cwdNotAllowed }
+}
+
+/** Project folder plus each task worktree (and nested project path inside it). */
+export function jupyterCwdRoots(project: {
+  directory?: string
+  tasks?: Array<{ workspace?: { worktreePath: string; relativeProjectPath?: string } }>
+}): string[] {
+  const roots: string[] = []
+  const dir = project.directory?.trim()
+  if (dir) roots.push(dir)
+  for (const task of project.tasks ?? []) {
+    const worktree = task.workspace?.worktreePath?.trim()
+    if (!worktree) continue
+    roots.push(worktree)
+    const nested = joinWorkspaceDir(worktree, task.workspace?.relativeProjectPath)
+    if (nested !== worktree) roots.push(nested)
+  }
+  return roots
+}
 
 /** python.exe at the env prefix (Windows) or prefix/bin/python (Unix). */
 export function condaPythonExecutable(
   prefix: string,
   deps: {
     platform: NodeJS.Platform
-    path: PathApi
+    path: { join: (...parts: string[]) => string }
     existsSync: (filePath: string) => boolean
   }
 ): string | null {

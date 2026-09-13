@@ -7,12 +7,16 @@ import {
   buildJupyterlabArgs,
   canReuseJupyterServer,
   condaPythonExecutable,
+  isPathInsideRoot,
   isSameJupyterOrigin,
+  jupyterCwdRoots,
   jupyterLabUrl,
   jupyterOrigin,
   normalizeJupyterCwd,
   parseJupyterLabUrl,
+  persistableBrowserUrl,
   redactJupyterTokens,
+  resolveContainedJupyterCwd,
   sameJupyterKey
 } from '../src/shared/jupyter'
 import { JupyterLabManager, buildJupyterSpawnEnv } from '../src/main/jupyter-lab'
@@ -32,14 +36,19 @@ function fakeChild(pid: number) {
     stdout: EventEmitter
     stderr: EventEmitter
     killed: boolean
+    exitCode: number | null
+    signalCode: string | null
     kill: (signal?: string) => boolean
   }
   child.pid = pid
   child.stdout = new EventEmitter()
   child.stderr = new EventEmitter()
   child.killed = false
+  child.exitCode = null
+  child.signalCode = null
   child.kill = () => {
     child.killed = true
+    child.exitCode = 0
     child.emit('exit', 0, null)
     return true
   }
@@ -78,6 +87,15 @@ describe('jupyter URL helpers', () => {
       'http://127.0.0.1:8/lab?token=***&foo=1'
     )
   })
+
+  it('strips the token so projects.json never stores the secret', () => {
+    expect(persistableBrowserUrl('http://127.0.0.1:8888/lab?token=secret')).toBe(
+      'http://127.0.0.1:8888/lab'
+    )
+    expect(persistableBrowserUrl('https://example.com/path?token=keep')).toBe(
+      'https://example.com/path?token=keep'
+    )
+  })
 })
 
 describe('jupyter reuse', () => {
@@ -94,22 +112,22 @@ describe('jupyter reuse', () => {
     ).toBe(true)
   })
 
-  it('reuses only when pid is still alive and key matches', () => {
+  it('reuses only when the ChildProcess is still ours and the key matches', () => {
     const running = { ...wanted, pid: 4242 }
-    expect(canReuseJupyterServer(running, wanted, 'win32', () => true)).toBe(true)
-    expect(canReuseJupyterServer(running, wanted, 'win32', () => false)).toBe(false)
+    expect(canReuseJupyterServer(running, wanted, 'win32', true)).toBe(true)
+    expect(canReuseJupyterServer(running, wanted, 'win32', false)).toBe(false)
     expect(
       canReuseJupyterServer(
         running,
         { ...wanted, condaPrefix: 'D:\\other\\envs\\ml' },
         'win32',
-        () => true
+        true
       )
     ).toBe(false)
     expect(
-      canReuseJupyterServer(running, { ...wanted, cwd: 'C:\\Repos\\other' }, 'win32', () => true)
+      canReuseJupyterServer(running, { ...wanted, cwd: 'C:\\Repos\\other' }, 'win32', true)
     ).toBe(false)
-    expect(canReuseJupyterServer(null, wanted, 'win32', () => true)).toBe(false)
+    expect(canReuseJupyterServer(null, wanted, 'win32', true)).toBe(false)
   })
 })
 
@@ -152,8 +170,55 @@ describe('buildJupyterlabArgs', () => {
       '--port-retries=0',
       '--ServerApp.token=tok',
       '--ServerApp.password=',
-      '--notebook-dir=C:\\Repos\\demo'
+      '--ServerApp.root_dir=C:\\Repos\\demo'
     ])
+  })
+})
+
+describe('jupyter cwd containment', () => {
+  it('treats the project folder and nested paths as inside', () => {
+    expect(isPathInsideRoot('C:\\Repos\\demo', 'C:\\Repos\\demo', 'win32', path.win32)).toBe(true)
+    expect(isPathInsideRoot('C:\\Repos\\demo', 'C:\\Repos\\demo\\src', 'win32', path.win32)).toBe(true)
+    expect(isPathInsideRoot('C:\\Repos\\demo', 'C:\\Repos\\other', 'win32', path.win32)).toBe(false)
+    expect(isPathInsideRoot('C:\\Repos\\demo', 'C:\\Repos\\demo\\..\\secret', 'win32', path.win32)).toBe(false)
+  })
+
+  it('defaults to the project directory when cwd is omitted', () => {
+    const result = resolveContainedJupyterCwd(
+      undefined,
+      ['C:\\Repos\\demo'],
+      'C:\\Repos\\demo',
+      'win32',
+      path.win32
+    )
+    expect(result.ok).toBe(true)
+    if (result.ok) expect(result.cwd.toLowerCase()).toBe('c:\\repos\\demo')
+  })
+
+  it('accepts a worktree root outside the project folder', () => {
+    const result = resolveContainedJupyterCwd(
+      'D:\\wt\\task-a',
+      jupyterCwdRoots({
+        directory: 'C:\\Repos\\demo',
+        tasks: [{ workspace: { worktreePath: 'D:\\wt\\task-a', relativeProjectPath: '' } }]
+      }),
+      'C:\\Repos\\demo',
+      'win32',
+      path.win32
+    )
+    expect(result.ok).toBe(true)
+    if (result.ok) expect(result.cwd.toLowerCase()).toBe('d:\\wt\\task-a')
+  })
+
+  it('rejects a folder that is not the project or a worktree', () => {
+    const result = resolveContainedJupyterCwd(
+      'C:\\Windows\\Temp',
+      ['C:\\Repos\\demo'],
+      'C:\\Repos\\demo',
+      'win32',
+      path.win32
+    )
+    expect(result).toEqual({ ok: false, error: JUPYTER_ERRORS.cwdNotAllowed })
   })
 })
 
@@ -199,7 +264,7 @@ describe('JupyterLabManager', () => {
       pickFreePort: async () => 8888,
       randomToken: () => 'test-token',
       httpReady: async () => true,
-      isPidAlive: (pid) => children.some((child) => child.pid === pid && !child.killed),
+      killWaitMs: 20,
       killTree: async (pid) => {
         const child = children.find((item) => item.pid === pid)
         child?.kill()
@@ -305,6 +370,67 @@ describe('JupyterLabManager', () => {
     })
     const result = await manager.open({ projectId: 'p1', cwd, condaEnv })
     expect(result.ok).toBe(false)
-    if (!result.ok) expect(result.error).toMatch(/failed to start/i)
+    if (!result.ok)     expect(result.error).toMatch(/failed to start/i)
+  })
+
+  it('serializes concurrent opens so only one child is spawned', async () => {
+    let releaseProbe: () => void = () => {}
+    const probeGate = new Promise<void>((resolve) => {
+      releaseProbe = resolve
+    })
+    const { manager, spawned, children } = managerWith({
+      execFile: (_file, args, _opts, cb) => {
+        if (args.includes('import jupyterlab')) {
+          void probeGate.then(() => cb(null, '', ''))
+          return
+        }
+        cb(new Error('unexpected'), '', '')
+      }
+    })
+    const first = manager.open({ projectId: 'p1', cwd, condaEnv })
+    const second = manager.open({ projectId: 'p1', cwd, condaEnv })
+    releaseProbe()
+    const [a, b] = await Promise.all([first, second])
+    expect(a.ok && b.ok).toBe(true)
+    expect(spawned).toHaveLength(1)
+    expect(manager.snapshot()).toHaveLength(1)
+    expect(manager.snapshot()[0].pid).toBe(children[0].pid)
+    await manager.stopAll()
+  })
+
+  it('does not succeed until HTTP is ready, even if the log printed a URL', async () => {
+    const { manager } = managerWith({
+      httpReady: async () => false,
+      startTimeoutMs: 400,
+      spawn: () => {
+        const child = fakeChild(11)
+        queueMicrotask(() => {
+          child.stderr.emit('data', Buffer.from('http://127.0.0.1:8888/lab?token=test-token\n'))
+        })
+        return child as unknown as ChildProcess
+      }
+    })
+    const result = await manager.open({ projectId: 'p1', cwd, condaEnv })
+    expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.error).toBe(JUPYTER_ERRORS.startTimeout)
+  })
+
+  it('does not tree-kill a pid after the ChildProcess has already exited', async () => {
+    const treeKills: number[] = []
+    const { manager, children, spawned } = managerWith({
+      killTree: async (pid) => {
+        treeKills.push(pid)
+      }
+    })
+    await manager.open({ projectId: 'p1', cwd, condaEnv })
+    const oldPid = children[0].pid
+    // Missed the exit event, but Node already recorded exitCode. The OS may
+    // have reused that pid number — do not taskkill it.
+    children[0].exitCode = 0
+    const next = await manager.open({ projectId: 'p1', cwd, condaEnv })
+    expect(next.ok).toBe(true)
+    expect(spawned).toHaveLength(2)
+    expect(treeKills).not.toContain(oldPid)
+    await manager.stopAll()
   })
 })

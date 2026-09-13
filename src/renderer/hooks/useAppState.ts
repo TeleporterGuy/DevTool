@@ -15,6 +15,7 @@ import {
   reconcileTaskViewState,
   reconcileWindowViewState
 } from '../../shared/types'
+import { persistableBrowserUrl } from '../../shared/jupyter'
 import type {
   NotesRecord,
   PinnedItem,
@@ -1424,6 +1425,7 @@ export function useAppState() {
   }, [cleanupClosedTabHistory, connectSsh, mutateProjects, updateWindowViewState, getTaskViewStateForTask])
 
   const updateTabUrl = useCallback((projectId: string, taskId: string, pane: 'left' | 'right', tabId: string, url: string) => {
+    const persistUrl = persistableBrowserUrl(url)
     mutateProjects(prev => ({
       ...prev,
       projects: prev.projects.map(project =>
@@ -1436,7 +1438,7 @@ export function useAppState() {
                       ...task,
                       tabs: {
                         ...task.tabs,
-                        [pane]: task.tabs[pane].map(tab => (tab.id === tabId ? { ...tab, url } : tab))
+                        [pane]: task.tabs[pane].map(tab => (tab.id === tabId ? { ...tab, url: persistUrl } : tab))
                       }
                     }
                   : task

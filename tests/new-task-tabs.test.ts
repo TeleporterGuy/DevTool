@@ -49,6 +49,12 @@ describe('createTab', () => {
       'JupyterLab'
     )
   })
+
+  it('does not persist a Jupyter token on the tab url', () => {
+    expect(createTab('browser', { url: 'http://127.0.0.1:8888/lab?token=secret' }).url).toBe(
+      'http://127.0.0.1:8888/lab'
+    )
+  })
 })
 
 describe('newTaskInitialTabs', () => {

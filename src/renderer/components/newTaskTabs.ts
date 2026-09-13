@@ -9,6 +9,7 @@
 import { v4 as uuid } from 'uuid'
 import { AI_TAB_META, AI_TAB_TYPES } from '../../shared/types'
 import type { AiTabType, NewTaskAutoOpen, Tab, TabType } from '../../shared/types'
+import { persistableBrowserUrl } from '../../shared/jupyter'
 
 export type CreateTabOptions = {
   filePath?: string
@@ -45,7 +46,7 @@ export function createTab(type: TabType, options: CreateTabOptions = {}): Tab {
     // the same session is reloaded across app restarts (pi creates it if missing).
     ...(type === 'pi' ? { sessionId: uuid() } : {}),
     ...(filePath ? { filePath } : {}),
-    ...(url ? { url } : {}),
+    ...(url ? { url: persistableBrowserUrl(url) } : {}),
     ...(noteId ? { noteId } : {}),
     ...(cwd ? { cwd } : {})
   }

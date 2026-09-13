@@ -28,7 +28,7 @@ import { findGitBashExe, setPortableNodeDir } from './shell-env'
 import { listCondaEnvs, resolveProjectCondaEnv, wrapInteractiveShellWithCondaActivate } from './conda-env'
 import type { CondaEnvInfo } from '../shared/conda'
 import { JupyterLabManager } from './jupyter-lab'
-import { JUPYTER_ERRORS } from '../shared/jupyter'
+import { JUPYTER_ERRORS, jupyterCwdRoots, resolveContainedJupyterCwd } from '../shared/jupyter'
 import { resolveSafeProjectPath } from './project-fs-path'
 import {
   createProjectDirectory,
@@ -201,6 +201,7 @@ export class AppRuntime {
   private idleCleanupTimer: NodeJS.Timeout | null = null
   private idleCleanupScheduled = false
   private idleCleanupRunning = false
+  private shutdownPromise: Promise<void> | null = null
 
   constructor(private readonly createWindow: (viewState?: WindowViewState | null, geometry?: WindowGeometry | null) => BrowserWindow) {
     this.storage.backupProjectsOnStartup()
@@ -460,6 +461,12 @@ export class AppRuntime {
   }
 
   async shutdown(): Promise<void> {
+    if (this.shutdownPromise) return this.shutdownPromise
+    this.shutdownPromise = this.runShutdown()
+    return this.shutdownPromise
+  }
+
+  private async runShutdown(): Promise<void> {
     if (this.idleCleanupTimer) {
       clearInterval(this.idleCleanupTimer)
       this.idleCleanupTimer = null
@@ -470,7 +477,11 @@ export class AppRuntime {
     }
     this.ptyManager.killAll()
     this.hookInjector.cleanupAll()
-    await this.jupyterManager.stopAll().catch(() => {})
+    try {
+      await this.jupyterManager.stopAll()
+    } catch {
+      /* still continue — quit must not hang forever, but we did wait for stopAll */
+    }
     await this.hookServer.stop()
     await this.sshManager.disconnectAll().catch(() => {})
   }
@@ -1432,14 +1443,19 @@ export class AppRuntime {
     if (isRemoteProject(project) || isShellCommandProject(project)) {
       return { ok: false as const, error: JUPYTER_ERRORS.notLocal }
     }
-    const folder = (cwd ?? project.directory ?? '').trim()
-    if (!folder) return { ok: false as const, error: JUPYTER_ERRORS.noFolder }
+    const contained = resolveContainedJupyterCwd(
+      cwd,
+      jupyterCwdRoots(project),
+      project.directory ?? '',
+      process.platform
+    )
+    if (!contained.ok) return { ok: false as const, error: contained.error }
     const condaEnv = this.condaEnvForLocalProject(projectId)
     if (!condaEnv) {
       const saved = !!(project.condaEnvName?.trim() || project.condaEnvPrefix?.trim())
       return { ok: false as const, error: saved ? JUPYTER_ERRORS.condaMissing : JUPYTER_ERRORS.noConda }
     }
-    return this.jupyterManager.open({ projectId, cwd: folder, condaEnv })
+    return this.jupyterManager.open({ projectId, cwd: contained.cwd, condaEnv })
   }
 
   private killPty(id: string): void {

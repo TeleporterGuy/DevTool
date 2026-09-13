@@ -1,5 +1,6 @@
 import { isHomeTask, isRemoteProject, isShellCommandProject, type Project, type Tab, type Task } from '../shared/types'
-import { JUPYTER_ERRORS, JUPYTER_LAB_TITLE, isSameJupyterOrigin } from '../shared/jupyter'
+import { JUPYTER_ERRORS, JUPYTER_LAB_TITLE, isSameJupyterOrigin, persistableBrowserUrl } from '../shared/jupyter'
+import { requestBrowserTabNavigate } from './browserNavigate'
 import { localProjectFolder } from '../shared/external-editors'
 import type { AppActions } from './hooks/useAppState'
 
@@ -55,18 +56,16 @@ export async function openJupyterLabForProject(
 
   actions.switchToTask(id, task.id)
 
+  const persistUrl = persistableBrowserUrl(result.url)
   const found = findJupyterBrowserTab(task, result.url)
   if (found) {
     actions.setActiveTab(id, task.id, found.pane, found.tab.id)
-    if (found.tab.url !== result.url) {
-      actions.updateTabUrl(id, task.id, found.pane, found.tab.id, result.url)
-      window.dispatchEvent(
-        new CustomEvent('navigate-browser-tab', { detail: { tabId: found.tab.id, url: result.url } })
-      )
-    }
+    actions.updateTabUrl(id, task.id, found.pane, found.tab.id, persistUrl)
+    requestBrowserTabNavigate(found.tab.id, result.url)
     return null
   }
 
-  actions.addTab(id, task.id, 'left', 'browser', { url: result.url, title: JUPYTER_LAB_TITLE })
+  const tab = actions.addTab(id, task.id, 'left', 'browser', { url: persistUrl, title: JUPYTER_LAB_TITLE })
+  requestBrowserTabNavigate(tab.id, result.url)
   return null
 }

@@ -1,11 +1,16 @@
 // @vitest-environment jsdom
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { commandRegistry } from '../src/renderer/palette/CommandRegistry'
 import '../src/renderer/palette/sources/commands'
 import { findJupyterBrowserTab, pickJupyterTask, openJupyterLabForProject } from '../src/renderer/openJupyterLab'
+import { clearPendingBrowserNavigates, takePendingBrowserNavigate } from '../src/renderer/browserNavigate'
 import { JUPYTER_ERRORS, JUPYTER_LAB_TITLE } from '../src/shared/jupyter'
 import { createHomeTask, DEFAULT_CONFIG, type Project, type Task } from '../src/shared/types'
 import type { AppActions } from '../src/renderer/hooks/useAppState'
+
+afterEach(() => {
+  clearPendingBrowserNavigates()
+})
 
 function task(patch: Partial<Task> = {}): Task {
   return {
@@ -76,9 +81,10 @@ describe('findJupyterBrowserTab', () => {
 })
 
 describe('openJupyterLabForProject', () => {
-  it('opens a titled browser tab at the server URL', async () => {
-    const addTab = vi.fn()
+  it('opens a titled browser tab at the server URL without persisting the token', async () => {
+    const addTab = vi.fn().mockReturnValue({ id: 'new-tab' })
     const switchToTask = vi.fn()
+    const dispatch = vi.spyOn(window, 'dispatchEvent')
     const demo = project()
     const actions = {
       projects: [demo],
@@ -102,9 +108,17 @@ describe('openJupyterLabForProject', () => {
     expect(jupyterOpen).toHaveBeenCalledWith('p1', 'C:\\Repos\\demo')
     expect(switchToTask).toHaveBeenCalledWith('p1', 't1')
     expect(addTab).toHaveBeenCalledWith('p1', 't1', 'left', 'browser', {
-      url: 'http://127.0.0.1:8888/lab?token=abc',
+      url: 'http://127.0.0.1:8888/lab',
       title: JUPYTER_LAB_TITLE
     })
+    expect(dispatch).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'navigate-browser-tab',
+        detail: { tabId: 'new-tab', url: 'http://127.0.0.1:8888/lab?token=abc' }
+      })
+    )
+    expect(takePendingBrowserNavigate('new-tab')).toBe('http://127.0.0.1:8888/lab?token=abc')
+    dispatch.mockRestore()
   })
 
   it('reuses a browser tab already on that server', async () => {
@@ -146,6 +160,8 @@ describe('openJupyterLabForProject', () => {
     expect(await openJupyterLabForProject(actions)).toBeNull()
     expect(addTab).not.toHaveBeenCalled()
     expect(setActiveTab).toHaveBeenCalledWith('p1', 't1', 'left', 'b1')
+    expect(actions.updateTabUrl).toHaveBeenCalledWith('p1', 't1', 'left', 'b1', 'http://127.0.0.1:8888/lab')
+    expect(takePendingBrowserNavigate('b1')).toBe('http://127.0.0.1:8888/lab?token=new')
   })
 
   it('returns a clear error for remote projects', async () => {
