@@ -307,13 +307,14 @@ Stack hint: `monaco-languageclient` + JSON-RPC stdio. Kill the server when the p
 
 ## Phase 6 — Later, maybe
 
-Was Phase 5. Only after the above is boring and stable. Ships as **`0.7.0`+** (notebooks, hardening, and Windows packaging below).
+Was Phase 5. Only after the above is boring and stable. Ships as **`0.7.0`+** (notebooks, hardening, Windows packaging, and app icon below).
 
 - Native `.ipynb` cells in a tab (kernel via `jupyter_client` in the conda env).
 - TypeScript/JavaScript LSP if the Node zip is the runtime.
 - Windows OpenSSH for the existing remote-project flow (separate from Git Bash local).
 - Search-in-files, extra pane layouts.
 - Config-dir `0700`, scrollback `tabId` allow-list, file/git IPC bound to known project cwds (security audit items 5–6; deferred).
+- App icon: replace the Electron/default icon with a proper DevTool icon (exe, Start Menu, installer). No assets until this phase.
 
 **Windows packaging (VS Code / Cursor-like installer).** Do not start this until Phase 6. Until then the no-admin path stays the portable zip: `npm run build:win` → `dist/win-unpacked`. Sequence:
 
@@ -343,6 +344,7 @@ Parking lot. Do not start these instead of the numbered phases. Several items al
 | Spyder as an external IDE | after Phase 3 |
 | Config-dir `0700`, scrollback id, IPC cwd allow-list | Phase 6 (deferred) |
 | Authenticode / NSIS per-user installer / auto-update | Phase 6 (portable zip until then) |
+| App icon (replace Electron/default) | Phase 6 |
 
 **Git tree.** A branch/commit graph in the UI (log, parents, maybe checkout). Useful for “where am I” without leaving DevTool. Phase 1 explicitly stays out of a git graph so the file explorer does not grow into an IDE. If it happens, it is Phase 6-or-later: read-only first, no rebase UI.
 
@@ -408,6 +410,6 @@ Work machine constraints to re-test every phase: Git Bash, portable Node zip, Pi
 | 3 | `0.4.0` (shipped) | Conda picker on spawn | 1–2 weeks |
 | 4 | `0.5.0` | JupyterLab in a browser tab | days |
 | 5 | `0.6.0` | Usable Python and Markdown LSPs | 1–2 months |
-| 6 | `0.7.0`+ | Native notebooks / extra LSPs / deferred hardening / NSIS+Authenticode+updates | open-ended |
+| 6 | `0.7.0`+ | Native notebooks / extra LSPs / deferred hardening / NSIS+Authenticode+updates / app icon | open-ended |
 
 A year of evenings can yield a personal orchestrator. It will not become Cursor. That is success.
