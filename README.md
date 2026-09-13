@@ -4,7 +4,7 @@ A desktop application for managing development workspaces. Organize projects, ta
 
 Built with Electron, React, and TypeScript.
 
-Windows support (Git Bash terminals, portable Node, `.cmd` agent shims) was contributed from the [TeleporterGuy/DevTool](https://github.com/TeleporterGuy/DevTool) fork. Their Windows/Pi direction is in [ROADMAP.md](./ROADMAP.md); a company-deploy security snapshot is in [SECURITY.md](./SECURITY.md).
+**This repository** is a fork of [join3r/claude-project](https://github.com/join3r/claude-project). join3r has said it may be forked and modified freely. All work stays on **this** repo ([TeleporterGuy/DevTool](https://github.com/TeleporterGuy/DevTool)); do not open PRs against upstream. Direction: Pi as the primary agent, primarily on Windows (Git Bash, portable Node, conda, Jupyter, Python and Markdown language servers). How to progress is in [ROADMAP.md](./ROADMAP.md). Company-deploy security snapshot: [SECURITY.md](./SECURITY.md).
 
 ## Features
 
@@ -49,7 +49,7 @@ This installs dependencies and rebuilds native modules (`node-pty`) for Electron
 Compiling `node-pty` for Electron uses MSBuild. That needs **Visual Studio 2022 Build Tools** (or full VS) with the Desktop C++ workload, **Python** (for node-gyp), and **administrator rights** to install or modify those tools. Git Bash / MinGW cannot replace MSVC here. There is no portable Spectre CRT zip.
 
 1. Install [Build Tools for Visual Studio 2022](https://aka.ms/vs/17/release/vs_BuildTools.exe) if the Visual Studio Installer is missing. The installer itself requires admin.
-2. Modify the **same** VS instance node-gyp will use (often **Build Tools 2022**, not Community, if both are installed).
+2. Modify the **same** VS instance node-gyp will use (on this fork that is often **Build Tools 2022**, not Community, if both are installed).
 3. Workload: **Desktop development with C++**.
 4. Individual components → search **Spectre** → install **MSVC v143 - VS 2022 C++ x64/x86 Spectre-mitigated libs (Latest)** (`Microsoft.VisualStudio.Component.VC.Runtimes.x86.x64.Spectre`).
 
@@ -84,7 +84,7 @@ npx @electron/rebuild -m .
 
 Opening a Pi (or Claude/Codex) tab can fail with **Cannot create process, error code: 2** if Windows cannot find the CLI, or **error code: 193** if DevTool tries to CreateProcess a `.cmd` shim directly. Electron does not see Git Bash’s PATH, and npm’s `pi` is usually `pi.cmd`. Set **Settings → AI Tools → Command path** after enabling the tool, or put npm’s global bin on PATH (`%AppData%\npm`). DevTool wraps `.cmd` through `cmd.exe`.
 
-New **Terminal** tabs on Windows are **Git Bash** (`Git\bin\bash.exe --login -i`), including when you start `DevTool.exe` or `npm run dev` from Explorer or cmd — the app does not rely on an inherited `SHELL`. Leave the Git Bash path empty in **Settings → Terminal** to auto-detect, or Browse to a `bash.exe`. PowerShell and Command Prompt are not offered. SSH tabs still use the remote `$SHELL`.
+New **Terminal** tabs on Windows are **Git Bash** (`Git\bin\bash.exe --login -i`), including when you start `DevTool.exe` or `npm run dev` from Explorer or cmd — the app does not rely on an inherited `SHELL`. Leave the Git Bash path empty in **Settings → Terminal** to auto-detect, or Browse to a `bash.exe`. PowerShell and Command Prompt are out of scope on this fork. SSH tabs still use the remote `$SHELL`.
 
 Without admin, without the Visual Studio Installer, or without those Spectre libs, **from-source `npm install` cannot succeed** on Windows. Use a pre-built folder instead.
 
