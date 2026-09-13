@@ -128,13 +128,13 @@ Recorded so this file and [ROADMAP.md](./ROADMAP.md) stay aligned. Findings belo
 | Audit item | Decision | Where it lives |
 | --- | --- | --- |
 | 1. Policy (agent = user) | Accept. Same as running Pi in Git Bash. | Not a phase. |
-| 2. Sign Windows build | Considered, not required yet. Stay unsigned portable folder. | Phase 6 unless IT blocks |
+| 2. Sign Windows build | Considered, not required yet. Stay unsigned portable folder until Phase 5. | Phase 5 (after NSIS) |
 | 2. Upgrade Electron | **Done** in `0.3.1` (43.6.0). Stay on a supported major. | **Phase 1.3** |
 | 3. Default browser page | **Done.** New tabs are `about:blank`, not Google. | **Phase 1.3** |
 | 3. Webview / Node | **Done.** Webview kept; guest pages do not get Node. | **Phase 1.3** |
 | 4. Hook secret, Pi off `/tmp`, SSH trust | **Done.** Token + body cap; `$HOME/.devtool-remote/`; `~/.ssh/known_hosts` (no `IdentitiesOnly`); socket dir `0700`; remote dir required. First-connect TOFU remains. | **Phase 2** |
-| 5. Config dir `0700`, scrollback id, IPC cwd allow-list | Deferred. | Phase 6 |
-| 6. Company pilot / DLP | Deferred. | Phase 6 / outside the repo |
+| 5. Config dir `0700`, scrollback id, IPC cwd allow-list | Deferred. | Parking lot (not packaging) |
+| 6. Company pilot / DLP | Deferred. | Parking lot / outside the repo |
 
 ---
 
@@ -146,12 +146,12 @@ Work in this order so each step is demoable. Roadmap numbering after the audit:
 2. **Phase 1.3** — **done** (`0.3.1`): Electron 43.6.0; blank browser tab; guest Node off; signing still off.
 3. **Phase 1.4** — **done** (`0.3.2`): Windows shortcut labels. Labels only; no security change.
 4. **Phase 2** — **done** (`0.3.2`, no minor bump): hook authentication; Pi extension off `/tmp`; SSH via `~/.ssh/known_hosts` (no `IdentitiesOnly`); required remote dir; socket dir `0700`.
-5. Then conda (Phase 3), Jupyter (Phase 4), LSP (Phase 5) as before.
-6. **Deferred:** config-dir ACLs, scrollback `tabId`, IPC cwd allow-list, Authenticode, a formal pilot.
+5. Conda (Phase 3) is **done** (`0.4.0`). Next: Jupyter in a browser tab (Phase 4, `0.5.0`), then packaging (Phase 5, `0.6.0`+). LSP is parked, not a numbered phase.
+6. **Deferred:** config-dir ACLs, scrollback `tabId`, IPC cwd allow-list, a formal pilot. Authenticode is Phase 5 after NSIS, not a separate “later maybe” bucket.
 
-Do not start Phase 5 LSP work instead of Phases 3–4 if those are the next product slices.
+Do not start parked LSP work, or a native `.ipynb` editor, instead of Phases 3–5.
 
-Highest-leverage remaining engineering pass: **conda (Phase 3)** for the Windows daily driver; **unsigned Windows folder** is still the company-deploy blocker.
+Highest-leverage remaining engineering pass: **Jupyter (Phase 4)** for the daily driver, then **unsigned Windows folder** / Phase 5 packaging as the company-deploy blocker.
 
 ---
 
@@ -174,8 +174,8 @@ Highest-leverage remaining engineering pass: **conda (Phase 3)** for the Windows
 
 ## How this file relates to the roadmap
 
-Roadmap phases (conda, Jupyter, LSP) add more child processes and another browser use. They do not remove anything above. Do not declare Phase 3–5 “company ready” without revisiting this file.
+Roadmap phases (conda, Jupyter, then packaging) add more child processes, another browser use, and an installer/updater. They do not remove anything above. Do not declare Phase 3–5 “company ready” without revisiting this file.
 
-Parking-lot ideas that would *increase* surface if pulled in: native notebook kernels, Windows OpenSSH as a second remote stack, extra LSPs talking stdio as the same user.
+Parking-lot ideas that would *increase* surface if pulled in: native notebook kernels, Windows OpenSSH as a second remote stack, language servers talking stdio as the same user.
 
 This audit started as a snapshot at `0.3.0`. **Phase 1.3 (`0.3.1`):** Electron 43.6.0, `about:blank` new tabs, guest webview Node locked off. **Phase 1.4 (`0.3.2`):** Windows shortcut labels only. **Phase 2 (`0.3.2`, no minor bump):** hook shared secret + 64 KiB body cap; remote Pi extension under `$HOME/.devtool-remote/` (`0700`); SSH uses `~/.ssh/known_hosts` and `accept-new` (no DevTool `UserKnownHostsFile` / `IdentitiesOnly`); remote directory required; control-socket dir `0700`. Still open: unsigned Windows folder, no CSP, first-connect TOFU, wide IPC, plaintext `~/.devtool`.
