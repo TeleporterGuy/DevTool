@@ -2,7 +2,7 @@
 
 This repository is a fork of [join3r/claude-project](https://github.com/join3r/claude-project) (DevTool). join3r has said this fork may be modified freely. Upstream is a macOS/Linux **task multiplexer** for CLI coding agents (Claude Code, Codex, Pi), with SSH, git worktrees, and an inbox. It is not an IDE and not an agent runtime.
 
-This fork keeps that orchestrator model, with **Pi** as the primary agent and Pi’s own settings preserved and first-class in the app. The aim is to make it **primarily for Windows**: Git Bash, a portable Node zip, conda environments, Jupyter, and a small set of language servers (Python and Markdown). Linting and similar agent tools stay in **Pi extensions**.
+This fork keeps that orchestrator model, with **Pi** as the primary agent and Pi’s own settings preserved and first-class in the app. The aim is to make it **primarily for Windows**: Git Bash, a portable Node zip, conda environments, and Jupyter (in-app browser tab). Linting and similar agent tools stay in **Pi extensions**. Language servers are parked, not a numbered phase.
 
 Do not try to become VS Code or Cursor. If a feature belongs in Pi, put it in Pi.
 
@@ -17,14 +17,14 @@ Company-deploy security snapshot (what this app actually is on a workstation): [
 - **Git Bash** is the only Windows shell for interactive tabs. No PowerShell. No Command Prompt. (`cmd.exe` may still wrap `pi.cmd` for ConPTY; that is not a product terminal.)
 - **Environments are spawn-time PATH/env**, not a conda GUI and not a Node version manager UI. Settings **Node directory** is a folder prepend, not a requirement for `DevTool.exe` to launch.
 - **Pi owns inference.** Models, API, and base URL stay in Pi’s config. Do not add those fields to DevTool.
-- **LSP is optional sugar** (hover, go-to, complete) for a small set: Python and Markdown. Diagnostics can stay in Pi.
-- **Jupyter starts as a browser tab** against a local JupyterLab. Native `.ipynb` is a later phase, not a gate.
+- **Monaco is enough for edit/view.** Deeper analysis belongs in Pi (and similar agent tools). Language servers are parked — optional sugar (hover, go-to, complete) only if Monaco-without-Pi becomes painful. Not a numbered phase; no minor reserved for them.
+- **Jupyter starts as a browser tab** against a local JupyterLab in the project conda env. Native `.ipynb` is later-maybe, only if that is still not enough after Phase 4 — not a gate and not a numbered phase.
 
 ---
 
 ## Versioning (`0.x.y`)
 
-Stay on **0.x** until the app is something you would tell a friend to unzip. **1.0.0** is that call, not “Phase 6 finished.”
+Stay on **0.x** until the app is something you would tell a friend to unzip. **1.0.0** is that call, not “Phase 5 finished.”
 
 `package.json` is **0.4.0** (Phase 3 done). Phase 2 landed without tagging `0.4.0` and stayed **0.3.2**, so Phase 3 uses that skipped minor instead of jumping to `0.5.0`. Shape:
 
@@ -45,10 +45,9 @@ Work inside a phase is `0.x.y`; shipping the phase is the next `0.(x+1).0`.
 | Phase 2 done | stayed `0.3.2` (no `0.4.0` tag on this fork) |
 | Phase 3 done | `0.4.0` |
 | Phase 4 done | `0.5.0` |
-| Phase 5 done | `0.6.0` |
-| Phase 6 slices | keep bumping `0.6.y` / `0.7.0` as you tag them |
+| Phase 5 (packaging) | `0.6.0`+ (NSIS / signing / updater as you tag them) |
 
-Phase 0.5 does not get a version. Ideas in the parking lot do not get a version until they are pulled into a phase.
+LSP is parked (see Ideas); it does not get a numbered phase or a minor. There is no Phase 6 until something else earns one. Phase 0.5 does not get a version. Ideas in the parking lot do not get a version until they are pulled into a phase.
 
 ---
 
@@ -64,7 +63,7 @@ Already useful, keep it:
 
 Known gaps this fork must treat as work, not surprises:
 
-- Windows packaging is a portable folder (`npm run build:win` → `dist/win-unpacked`), not a Setup.exe. `electron-winstaller` stays unapproved until an installer is required. From-source `npm install` on Windows still needs admin + VS Build Tools + Spectre libs (see README).
+- Windows packaging is a portable folder (`npm run build:win` → `dist/win-unpacked`), not a Setup.exe. That folder stays the no-admin escape hatch. An installer is **Phase 5** (electron-builder NSIS, not `electron-winstaller`). From-source `npm install` on Windows still needs admin + VS Build Tools + Spectre libs (see README).
 - Local Windows terminals are Git Bash (`Git\bin\bash.exe --login -i`, auto-detect; Settings can set a `bash.exe` path). PowerShell and Command Prompt are not product surfaces. Login-shell env **is** captured in `shell-env.ts`; do not copy that Unix PATH onto `process.env.PATH` (ConPTY `cmd.exe` lookup breaks — see AGENTS.md).
 - POSIX assumptions: worktree paths, hook inject (`curl` + `python3`). Remote Pi extension lives under `$HOME/.devtool-remote/` (Phase 2 moved it off `/tmp`).
 
@@ -96,8 +95,8 @@ Work items:
 5. **Hooks on Windows** — done for local.  
    Claude inject uses `curl`. Git Bash usually has it; fail clearly if not. Pi extension is local `-e` (no `/tmp` required for local). SSH remotes can wait until after Phase 0.
 
-6. **Packaging** — done.  
-   `npm run build:win` runs `electron-builder --win --dir` (portable folder). The exe is left unsigned so the build does not need winCodeSign / symlink privileges. Approve `electron-winstaller` only if an installer is required. Prefer “folder next to a Node zip” for locked-down PCs. This is **run-only**; git checkout + `npm run dev` still needs the VS machine.
+6. **Packaging** — done for the portable folder.  
+   `npm run build:win` runs `electron-builder --win --dir`. The exe is left unsigned so the build does not need winCodeSign / symlink privileges. Prefer “folder next to a Node zip” for locked-down PCs. This is **run-only**; git checkout + `npm run dev` still needs the VS machine. A per-user NSIS Setup.exe, signing, auto-update, and app icon are **Phase 5** (electron-builder NSIS, not `electron-winstaller`).
 
 **Verify:** done on Windows (`npm run dev` → Git Bash tab → portable Node → Pi TUI + inbox status).
 
@@ -227,7 +226,7 @@ Stay out of: remapping, user-defined keys, PowerShell chords, teaching Git Bash 
 
 ## Phase 2 — Hook authentication + SSH trust — done (`0.3.2`, no minor bump)
 
-Completely new session. Do not mix this with the Electron bump. Roadmap table still maps a later tagged closeout to **`0.4.0`**; this pass stays a patch on **`0.3.2`**.
+Completely new session. Do not mix this with the Electron bump. Landed as a patch on **`0.3.2`** (no numbered bump). **`0.4.0`** is Phase 3 (conda).
 
 The inbox status dot is a local HTTP server (`src/main/hook-server.ts`) on `127.0.0.1` plus, for remotes, `ssh -R` to that port. Pi’s remote helper is written under `$HOME/.devtool-remote/`. SSH uses the user’s `~/.ssh/known_hosts` and `accept-new` for first connect; Remote directory is required. Details: [SECURITY.md](./SECURITY.md).
 
@@ -253,7 +252,7 @@ Stay out of: config-dir `0700` for all of `~/.devtool`, scrollback `tabId` sanit
 
 ## Phase 3 — Conda as a spawn picker — done (`0.4.0`)
 
-Was Phase 2. **Outcome:** pick an env per project. Every local PTY inherits it. No env-create/delete UI.
+Was Phase 2. **Outcome:** pick an env per project. Every local PTY inherits it (later Jupyter children too). No env-create/delete UI.
 
 Work items:
 
@@ -264,7 +263,7 @@ Work items:
    - **Pi / Claude / Codex** (spawned as binaries, not through Git Bash): PATH prepend + `CONDA_*`, same pattern as Settings → Node directory. Do **not** `eval "$(conda shell.bash hook)"` — that hook would miss CreateProcess agent tabs. Prepend env dirs first (`prefix`, Windows `Library\\…\\bin` / `Scripts` / `bin`, Unix `prefix/bin`), then install `condabin`/`Scripts` so `conda.exe` still resolves when the shell function is missing. Sets `CONDA_PREFIX` / `CONDA_DEFAULT_ENV` only when the prefix still looks like a conda env and at least one PATH dir exists. Portable Node stays **first**.
    - **Interactive terminals**: login shell still runs (conda init often `conda activate base`), then wrap with `conda activate` for the project env (`CONDA_AUTO_ACTIVATE_BASE=false`). macOS: `zsh -l -i -c '…; exec zsh -i'`. Windows Git Bash: `bash --login -i -c` then `exec bash --rcfile <Node mkdtemp file> -i` so conda init in `.bash_profile` is not dropped by a non-login inner shell. The rcfile is created from Node; if temp creation fails the wrap is skipped (fail closed — no guessable `$$` path).
 
-   Spawn prefers a still-valid saved prefix; name lookup is a fallback and is unique-only (Windows case-insensitive only when a single env matches). Apply to terminal **and** agent tabs (project id is passed on local spawn). Later LSP/Jupyter children can reuse `getShellEnv(..., { condaEnv })`.
+   Spawn prefers a still-valid saved prefix; name lookup is a fallback and is unique-only (Windows case-insensitive only when a single env matches). Apply to terminal **and** agent tabs (project id is passed on local spawn). Later Jupyter children can reuse `getShellEnv(..., { condaEnv })`.
 
 **Verify:** unit tests cover detection, `conda env list --json` / filesystem listing, dead cache vs live prefix, Windows PATH order, Node-dir remaining first, `process.env.PATH` not overwritten, Windows wrap script never embedding a `$$` temp name, and Project Settings saving prefix+name. `which python` / `python -c "import sys; print(sys.prefix)"` in a Windows Git Bash tab is a **human check still required**.
 
@@ -287,43 +286,31 @@ Work items:
 
 Was Phase 3. **Outcome:** command “Open JupyterLab for this project” starts (or reuses) a server in the conda env and opens an existing **browser tab**. SOCKS/SSH later if needed.
 
-Do **not** build a native notebook editor here. The browser tab is still the Phase 1.3 webview (blank default, no Node in the guest).
+Do **not** build a native notebook editor here. The browser tab is still the Phase 1.3 webview (blank default, no Node in the guest). There is no Phase 4.5. Native `.ipynb` stays in the parking lot until JupyterLab-in-browser has been tried and is still not enough.
 
 **Effort:** days to a week if conda spawn works. Ships as **`0.5.0`**.
 
 ---
 
-## Phase 5 — Language servers (Python and Markdown)
+## Phase 5 — Packaging / distribution
 
-Was Phase 4. **Outcome:** Monaco talks to a small set of servers — Python (`pylsp` or `pyright` in the **same conda env** as the terminals) and Markdown. Hover, go-to-definition, completion. Windows paths must round-trip.
+Was going to sit behind language servers as a later phase. LSP is parked, so packaging is the next numbered phase. **Packaging only.** Native `.ipynb` is not a gate and is not scheduled here.
 
-Out of scope: every language, debugger, refactor-rename-across-repo, Pi-quality diagnostics duplication.
+**Outcome:** Windows users who cannot `npm install` get a real install path, without dropping the portable folder. App no longer looks like stock Electron.
 
-Stack hint: `monaco-languageclient` + JSON-RPC stdio. Kill the server when the project/env changes.
+Work items, in this order:
 
-**Effort:** 1–3 months for “actually usable,” not “hello world.” Only start after Phases 0–3 are daily-driver quality (terminal, hooks, conda). Ships as **`0.6.0`**.
+1. **Keep the portable folder.** `npm run build:win` → `dist/win-unpacked` stays the no-admin escape hatch. Do not delete it when an installer lands. Recipients who cannot run Setup.exe still copy a folder and run `DevTool.exe`.
+2. **NSIS Setup.exe** via electron-builder (`--win nsis`, not `electron-winstaller`). Default **per-user** (no admin), Start Menu shortcut. Machine-wide / Program Files is optional later, not the default.
+3. **Authenticode signing** after the installer exists. Unsigned Setup.exe is a worse first impression than an unsigned folder; do not ship NSIS as the recommended path until signing is in reach, unless IT already accepts unsigned.
+4. **Auto-update** (GitHub Releases + electron-updater, or equivalent) after signing. Unsigned auto-update is not worth it.
+5. **App icon** — replace the Electron/default icon on the exe, installer, and Start Menu.
 
----
+Software Center / MSI may be a **separate IT artifact**, not this phase’s default output.
 
-## Phase 6 — Later, maybe
+Stay out of: native notebook editor, language servers, conda GUI, a second Windows shell.
 
-Was Phase 5. Only after the above is boring and stable. Ships as **`0.7.0`+** (notebooks, hardening, Windows packaging, and app icon below).
-
-- Native `.ipynb` cells in a tab (kernel via `jupyter_client` in the conda env).
-- TypeScript/JavaScript LSP if the Node zip is the runtime.
-- Windows OpenSSH for the existing remote-project flow (separate from Git Bash local).
-- Search-in-files, extra pane layouts.
-- Config-dir `0700`, scrollback `tabId` allow-list, file/git IPC bound to known project cwds (security audit items 5–6; deferred).
-- App icon: replace the Electron/default icon with a proper DevTool icon (exe, Start Menu, installer). No assets until this phase.
-
-**Windows packaging (VS Code / Cursor-like installer).** Do not start this until Phase 6. Until then the no-admin path stays the portable zip: `npm run build:win` → `dist/win-unpacked`. Sequence:
-
-1. Keep the portable folder as the locked-down / no-admin escape hatch.
-2. Add electron-builder **NSIS Setup.exe**, default **per-user** install (no admin), Start Menu shortcuts — similar feel to VS Code/Cursor user installers. Machine-wide / Program Files stays optional and needs admin; not the default. Company Software Center / MSI may be a separate artifact if IT requires it.
-3. Then **Authenticode** code signing (SmartScreen / IT trust). Signing is currently off on purpose for portable builds.
-4. Then **auto-update** (e.g. GitHub Releases + electron-updater or equivalent), not only manual re-download.
-
-Explicit non-goals unless the product bet changes: cloud VMs, embedding Pi’s UI, replacing Pi extensions with Electron linters, PowerShell, full Windows “IDE.”
+**Effort:** installer first is days to a couple of weeks; signing + updater depend on the certificate. Ships as **`0.6.0`+** (tag slices as you actually copy them).
 
 ---
 
@@ -338,19 +325,32 @@ Parking lot. Do not start these instead of the numbered phases. Several items al
 | Hook auth + Pi off `/tmp` + SSH via `~/.ssh/known_hosts` (required remote dir) | Phase 2 |
 | Conda env on spawn | Phase 3 |
 | JupyterLab in a browser tab | Phase 4 |
-| Language servers (Python, Markdown) | Phase 5 |
-| Native notebook cells + kernel | Phase 6 |
+| Language servers (Python, Markdown) | Parked. Monaco covers edit/view; analysis belongs in Pi. Optional sugar only if Monaco-without-Pi is painful. No minor reserved. |
+| Native notebook cells + kernel | Parked. After Phase 4, only if JupyterLab-in-browser is still not enough. Not a gate. Not Phase 4.5. Not packaging. |
+| Windows installer + Authenticode + auto-update + app icon | Phase 5 |
 | Open workspace in VS Code / Cursor | Phase 1.2 |
 | Spyder as an external IDE | after Phase 3 |
-| Config-dir `0700`, scrollback id, IPC cwd allow-list | Phase 6 (deferred) |
-| Authenticode / NSIS per-user installer / auto-update | Phase 6 (portable zip until then) |
-| App icon (replace Electron/default) | Phase 6 |
+| Config-dir `0700`, scrollback id, IPC cwd allow-list | Parking lot (deferred; not packaging) |
+| Machine-wide / Program Files install | Optional later; Phase 5 default is per-user NSIS |
+| Software Center / MSI | Separate IT artifact, not the Phase 5 default |
 
-**Git tree.** A branch/commit graph in the UI (log, parents, maybe checkout). Useful for “where am I” without leaving DevTool. Phase 1 explicitly stays out of a git graph so the file explorer does not grow into an IDE. If it happens, it is Phase 6-or-later: read-only first, no rebase UI.
+**Language servers (Python and Markdown).** Parked, not a numbered phase. Monaco already highlights and saves. Hover / go-to / complete would be sugar; diagnostics and deeper analysis belong in Pi extensions. A spike (`monaco-languageclient` + JSON-RPC stdio, `pylsp` or `pyright` in the same conda env, Windows paths that round-trip) is only worth it if people are living in Monaco without a Pi tab. Out of scope even then: every language, debugger, refactor-rename-across-repo, duplicating Pi-quality diagnostics. No minor is reserved for this. Phase 5 is packaging, not LSP.
+
+**Native `.ipynb` cells in a tab** (kernel via `jupyter_client` in the conda env). Parked. The product bet is Jupyter as a browser tab (Phase 4). Revisit only after that is daily-driver and still not enough. Do not schedule a Phase 4.5 to sneak it in before packaging.
+
+**TypeScript/JavaScript LSP** if the Node zip is the runtime. Same parking lot as Python/Markdown LSP, not a follow-on phase.
+
+**Windows OpenSSH** for the existing remote-project flow (separate from Git Bash local). Parking lot.
+
+**Search-in-files, extra pane layouts.** Parking lot.
+
+**Git tree.** A branch/commit graph in the UI (log, parents, maybe checkout). Useful for “where am I” without leaving DevTool. Phase 1 explicitly stays out of a git graph so the file explorer does not grow into an IDE. If it happens, it is later-maybe: read-only first, no rebase UI. Not packaging. No Phase 6 until something earns it.
 
 **Generate commit message with a specified agent.** Pre-fill the existing git commit box from Pi (or Claude/Codex) given the staged diff. Low confidence this needs a DevTool feature: you can already ask Pi in a tab to write the message and paste it. Only worth it if the commit UI is used a lot and the round-trip is annoying. Prefer “use the project’s default agent” over a per-commit picker.
 
 **Open this workspace in an external IDE.** Sequenced as **Phase 1.2**. Spyder waits for conda (Phase 3).
+
+Explicit non-goals unless the product bet changes: cloud VMs, embedding Pi’s UI, replacing Pi extensions with Electron linters, PowerShell, full Windows “IDE.”
 
 ---
 
@@ -360,15 +360,15 @@ Keep upstream `master` as a remote (`upstream`) and rebase or merge periodically
 
 1. Windows shell resolution + Git Bash PTY + documented rebuild. **Done** (Git Bash default + Settings presets; portable Node PATH and rebuild docs landed earlier).
 2. Configurable spawn PATH (portable Node) + env passthrough. **Done.**
-3. Win dir packaging notes / script. **Done.** (`npm run build:win` → `dist/win-unpacked`.)
+3. Win dir packaging notes / script. **Done.** (`npm run build:win` → `dist/win-unpacked`.) Keep this folder when Phase 5 adds an installer.
 4. File explorer CRUD. **Done** in `0.3.0` (filter, Reveal in Git Bash, 1.1 toolbar, 1.2 external IDE handover; ignore list removed).
 5. Open workspace in external IDE (Phase 1.2: toolbar split button + Settings list). **Done** in `0.3.0`.
 6. Supported Electron line + blank browser tab (Phase 1.3). **Done** in `0.3.1`.
 7. Windows shortcut map + labels (Phase 1.4). **Done** in `0.3.2`.
 8. Hook authentication + SSH trust (Phase 2). **Done** in `0.3.2` (no minor bump).
 9. Conda env picker on spawn (Phase 3). **Done** in `0.4.0`.
-10. JupyterLab browser-tab launcher (Phase 4).
-11. Python and Markdown LSP spike, then harden (Phase 5).
+10. JupyterLab browser-tab launcher (Phase 4). Ships as `0.5.0`.
+11. Packaging (Phase 5): keep portable `dist/win-unpacked`, then per-user NSIS Setup.exe + Start Menu, then Authenticode, then auto-update, app icon. Ships as `0.6.0`+. Do not insert native notebooks or LSP between 10 and 11.
 
 Skip a step only if the previous phase already includes it by accident (e.g. PATH work that makes conda trivial).
 
@@ -409,7 +409,8 @@ Work machine constraints to re-test every phase: Git Bash, portable Node zip, Pi
 | 2 | stayed `0.3.2` (no `0.4.0` tag) | Hook secret + Pi extension off `/tmp`; SSH uses `~/.ssh/known_hosts` | ~1 week |
 | 3 | `0.4.0` (shipped) | Conda picker on spawn | 1–2 weeks |
 | 4 | `0.5.0` | JupyterLab in a browser tab | days |
-| 5 | `0.6.0` | Usable Python and Markdown LSPs | 1–2 months |
-| 6 | `0.7.0`+ | Native notebooks / extra LSPs / deferred hardening / NSIS+Authenticode+updates / app icon | open-ended |
+| 5 | `0.6.0`+ | Portable folder kept; per-user NSIS Setup.exe; then Authenticode; then auto-update; app icon | installer in days–weeks; signing/updater depend on the cert |
+
+Language servers and native notebooks stay in the parking lot. They are not numbered phases. There is no Phase 6 until something else earns one.
 
 A year of evenings can yield a personal orchestrator. It will not become Cursor. That is success.
