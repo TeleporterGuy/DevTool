@@ -12,6 +12,7 @@ type EventMap = {
   'quit-app': void
   'switch-theme': 'dark' | 'light' | 'toggle'
   'palette-prefix-set': string
+  'action-error': string
 }
 
 type Listener<K extends keyof EventMap> = EventMap[K] extends void

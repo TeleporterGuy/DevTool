@@ -17,6 +17,7 @@ import type { TunnelConfig, TunnelState } from '../../shared/types'
 
 import { joinWorkspaceDir } from '../../shared/workspace-path'
 import { formatShortcutForApp } from '../../shared/shortcut-label'
+import { paletteEvents } from '../palette/paletteEvents'
 
 function FileBrowserTabButton({
   icon,
@@ -84,6 +85,10 @@ export default function ContentArea(): React.ReactElement {
   const [tunnelStates, setTunnelStates] = useState<Record<string, TunnelState>>({})
   const [tunnelPopupOpen, setTunnelPopupOpen] = useState(false)
   const [openInIdeError, setOpenInIdeError] = useState<string | null>(null)
+
+  useEffect(() => {
+    return paletteEvents.on('action-error', (message) => setOpenInIdeError(message))
+  }, [])
 
   useEffect(() => {
     window.api.onSshStatusChanged((projectId: string, status: string) => {

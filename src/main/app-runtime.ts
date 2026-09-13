@@ -20,13 +20,15 @@ import { tearDownTaskTabs } from './task-teardown'
 import { PaletteFrecencyStorage, type FrecencyFile } from './palette-frecency-storage'
 import { parseNumstat } from './git-diff-summary'
 import { GIT_STATUS_ARGS, parseGitStatusZ } from './git-status-parse'
-import { AI_TAB_META } from '../shared/types'
+import { AI_TAB_META, isRemoteProject, isShellCommandProject } from '../shared/types'
 import { agentCommandOverride, conptySpawnArgv, isAiAgentCommand, resolveAgentCommand } from './resolve-agent-command'
 import { detectExternalEditors, openFolderInEditor } from './external-ide'
 import { isLocalInteractiveTerminal, resolveLocalTerminalSpawn } from './resolve-local-terminal'
 import { findGitBashExe, setPortableNodeDir } from './shell-env'
 import { listCondaEnvs, resolveProjectCondaEnv, wrapInteractiveShellWithCondaActivate } from './conda-env'
 import type { CondaEnvInfo } from '../shared/conda'
+import { JupyterLabManager } from './jupyter-lab'
+import { JUPYTER_ERRORS } from '../shared/jupyter'
 import { resolveSafeProjectPath } from './project-fs-path'
 import {
   createProjectDirectory,
@@ -173,6 +175,9 @@ export class AppRuntime {
   private readonly paletteFrecencyStorage = new PaletteFrecencyStorage(CONFIG_DIR)
   private readonly ptyManager = new PtyManager()
   private readonly hookServer = new HookServer((message) => this.logDebug(message))
+  private readonly jupyterManager = new JupyterLabManager({
+    log: (message) => this.logDebug(message)
+  })
   private readonly codexSessionManager = new CodexSessionManager()
   private readonly workspaceManager = new WorkspaceManager()
   private readonly remoteWorkspaceManager = new RemoteWorkspaceManager()
@@ -465,6 +470,7 @@ export class AppRuntime {
     }
     this.ptyManager.killAll()
     this.hookInjector.cleanupAll()
+    await this.jupyterManager.stopAll().catch(() => {})
     await this.hookServer.stop()
     await this.sshManager.disconnectAll().catch(() => {})
   }
@@ -608,6 +614,13 @@ export class AppRuntime {
     })
 
     ipcMain.handle('conda-list-envs', () => listCondaEnvs({}, { force: true }))
+    ipcMain.handle('jupyter-open', async (_event, projectId: string, cwd?: string) => {
+      return this.openJupyterLab(projectId, cwd)
+    })
+    ipcMain.handle('jupyter-stop', async (_event, projectId: string) => {
+      await this.jupyterManager.stop(projectId)
+      return undefined
+    })
     ipcMain.handle('external-ide-detect', () => detectExternalEditors())
     ipcMain.handle('open-in-ide', async (_event, editorId: string, folder: string) => {
       const editors = this.config.externalEditors?.editors ?? []
@@ -1411,6 +1424,22 @@ export class AppRuntime {
     }
     this.logDebug(`condaEnv name=${resolved.name} prefix=${resolved.prefix} projectId=${projectId}`)
     return resolved
+  }
+
+  private async openJupyterLab(projectId: string, cwd?: string) {
+    const project = this.projectsStore.peek().projects.find((item) => item.id === projectId)
+    if (!project) return { ok: false as const, error: JUPYTER_ERRORS.noProject }
+    if (isRemoteProject(project) || isShellCommandProject(project)) {
+      return { ok: false as const, error: JUPYTER_ERRORS.notLocal }
+    }
+    const folder = (cwd ?? project.directory ?? '').trim()
+    if (!folder) return { ok: false as const, error: JUPYTER_ERRORS.noFolder }
+    const condaEnv = this.condaEnvForLocalProject(projectId)
+    if (!condaEnv) {
+      const saved = !!(project.condaEnvName?.trim() || project.condaEnvPrefix?.trim())
+      return { ok: false as const, error: saved ? JUPYTER_ERRORS.condaMissing : JUPYTER_ERRORS.noConda }
+    }
+    return this.jupyterManager.open({ projectId, cwd: folder, condaEnv })
   }
 
   private killPty(id: string): void {

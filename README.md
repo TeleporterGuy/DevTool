@@ -16,7 +16,7 @@ Built with Electron, React, and TypeScript.
 
 **Terminal Tabs** -- Full terminal emulation via xterm.js and node-pty. On Windows, tabs are **Git Bash** only (auto-detected `Git\bin\bash.exe`; optional path in Settings). PowerShell and Command Prompt are not offered. WebGL-accelerated rendering, scrollback preservation, search, clipboard integration, and copy-on-select.
 
-**Browser Tabs** -- Embedded Chromium browser with URL bar, navigation, and DevTools. SOCKS proxy support for remote project access.
+**Browser Tabs** -- Embedded Chromium browser with URL bar, navigation, and DevTools. SOCKS proxy support for remote project access. **Open JupyterLab for this project** (command palette or project context menu) starts or reuses JupyterLab in the project's conda env and opens it here. Local projects only.
 
 **Editor Tabs** -- Monaco editor with syntax highlighting, configurable fonts, line numbers, minimap, word wrap, and auto-save.
 

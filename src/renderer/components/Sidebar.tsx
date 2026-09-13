@@ -24,6 +24,7 @@ import { RowActions, RowAction } from './ui'
 import { paletteEvents } from '../palette/paletteEvents'
 import { dashboardIconUrl, fetchDashboardIconsMetadata, type DashboardIconsMetadata } from './dashboardIcons'
 import { formatShortcutForApp } from '../../shared/shortcut-label'
+import { openJupyterLabForProject } from '../openJupyterLab'
 
 type DragState = {
   type: 'project' | 'task'
@@ -166,6 +167,7 @@ function TaskStatusDot({ task, allStatuses }: { task: Task; allStatuses: Record<
 }
 
 export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { switcherRequested?: boolean; onSwitcherConsumed?: () => void }): React.ReactElement {
+  const actions = useApp()
   const {
     projects, tags, projectOrder,
     pinnedItems, togglePinnedItem, setPinnedOrder,
@@ -182,7 +184,7 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
     sidebarProjectsCollapsed, toggleSidebarProjectsCollapsed,
     sidebarTab, setSidebarTab,
     settleTask, unsettleTask, snoozeTask, unsnoozeTask, markTaskUnread, markTaskVisited
-  } = useApp()
+  } = actions
   const resizeHandle = useResizeHandle({ width: sidebarWidth, onWidthChange: setSidebarWidth, edge: 'right' })
   const allStatuses = useAllTabStatuses()
   const statusSince = useAllTabStatusSince()
@@ -1271,6 +1273,19 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
                   setContextMenu(null)
                 }}>Settings</button>
               )}
+              {contextMenu.type === 'project' && (() => {
+                const project = projects.find(p => p.id === contextMenu.projectId)
+                if (!project || isRemoteProject(project) || isShellCommandProject(project)) return null
+                return (
+                  <button className={menuItemCls} onClick={() => {
+                    const projectId = contextMenu.projectId
+                    setContextMenu(null)
+                    void openJupyterLabForProject(actions, projectId).then((error) => {
+                      if (error) paletteEvents.emit('action-error', error)
+                    })
+                  }}>Open JupyterLab</button>
+                )
+              })()}
               {contextMenu.type === 'project' && (() => {
                 const project = projects.find(p => p.id === contextMenu.projectId)
                 if (!project || !isRemoteProject(project)) return null

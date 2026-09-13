@@ -1,8 +1,9 @@
 // src/renderer/palette/sources/commands.ts
 import { commandRegistry } from '../CommandRegistry'
 import { paletteEvents } from '../paletteEvents'
-import { AI_TAB_TYPES, AI_TAB_META, isHomeTask, isShellCommandProject, pinnedItemKey, type AiTabType, type PinnedItem } from '../../../shared/types'
+import { AI_TAB_TYPES, AI_TAB_META, isHomeTask, isRemoteProject, isShellCommandProject, pinnedItemKey, type AiTabType, type PinnedItem } from '../../../shared/types'
 import { shortcutPlatform } from '../../../shared/shortcut-label'
+import { openJupyterLabForProject } from '../../openJupyterLab'
 
 function currentPinTargets(actions: any): { project: PinnedItem | null; task: PinnedItem | null; isPinned: (item: PinnedItem) => boolean } {
   const { selectedProjectId, selectedTaskId, projects, pinnedItems } = actions
@@ -84,6 +85,24 @@ commandRegistry.register({
     const { selectedProjectId, selectedTaskId } = ctx.actions
     if (!selectedProjectId || !selectedTaskId) return
     ctx.actions.addTab(selectedProjectId, selectedTaskId, 'left', 'browser')
+  }
+})
+
+commandRegistry.register({
+  id: 'cmd.openJupyterLab',
+  title: 'Open JupyterLab for this project',
+  aliases: ['jupyter', 'jupyterlab', 'notebook', 'lab'],
+  when: ctx => {
+    const { selectedProjectId, projects } = ctx.actions
+    if (!selectedProjectId) return false
+    const project = projects.find(p => p.id === selectedProjectId)
+    if (!project) return false
+    if (isRemoteProject(project) || isShellCommandProject(project)) return false
+    return true
+  },
+  run: async ctx => {
+    const error = await openJupyterLabForProject(ctx.actions)
+    if (error) paletteEvents.emit('action-error', error)
   }
 })
 

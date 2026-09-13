@@ -75,6 +75,20 @@ export default function BrowserTab({ tabId, visible, initialUrl, projectId, task
     return () => window.removeEventListener('reload-browser-tab', handleReload)
   }, [tabId])
 
+  useEffect(() => {
+    const handleNavigate = (e: Event) => {
+      const detail = (e as CustomEvent<{ tabId?: string; url?: string }>).detail
+      if (detail?.tabId !== tabId || !detail.url) return
+      const normalized = normalizeBrowserUrl(detail.url)
+      setUrl(normalized)
+      setInputUrl(normalized)
+      updateTabUrl(projectId, taskId, pane, tabId, normalized)
+      try { webviewRef.current?.loadURL(normalized) } catch {}
+    }
+    window.addEventListener('navigate-browser-tab', handleNavigate)
+    return () => window.removeEventListener('navigate-browser-tab', handleNavigate)
+  }, [tabId, projectId, taskId, pane, updateTabUrl])
+
   // Apply browser zoom factor
   useEffect(() => {
     const webview = webviewRef.current

@@ -26,7 +26,7 @@ Company-deploy security snapshot (what this app actually is on a workstation): [
 
 Stay on **0.x** until the app is something you would tell a friend to unzip. **1.0.0** is that call, not “Phase 5 finished.”
 
-`package.json` is **0.4.0** (Phase 3 done). Phase 2 landed without tagging `0.4.0` and stayed **0.3.2**, so Phase 3 uses that skipped minor instead of jumping to `0.5.0`. Shape:
+`package.json` is **0.5.0** (Phase 4 done). Phase 2 landed without tagging `0.4.0` and stayed **0.3.2**, so Phase 3 used that skipped minor instead of jumping to `0.5.0`. Shape:
 
 | Part | Meaning |
 | --- | --- |
@@ -276,19 +276,40 @@ Work items:
 - Custom installs outside well-known roots need `conda env list`, `~/.conda/environments.txt`, or PATH/`CONDA_EXE`.
 - Already-open tabs keep the old env until a **new** tab.
 
-**Closeout:** done. `package.json` is **0.4.0**. Next is Phase 4 (Jupyter via the browser tab). Spyder as an external IDE can follow this, still out of 1.2.
+**Closeout:** done. `package.json` is **0.4.0**. Next was Phase 4 (Jupyter via the browser tab). Spyder as an external IDE can follow this, still out of 1.2.
 
 **Effort:** 1–2 weeks. Windows + Git Bash activation is the only tricky part. Ships as **`0.4.0`**.
 
 ---
 
-## Phase 4 — Jupyter via the browser tab
+## Phase 4 — Jupyter via the browser tab — done (`0.5.0`)
 
-Was Phase 3. **Outcome:** command “Open JupyterLab for this project” starts (or reuses) a server in the conda env and opens an existing **browser tab**. SOCKS/SSH later if needed.
+Was Phase 3. **Outcome:** command “Open JupyterLab for this project” starts (or reuses) a server in the project conda env and opens it in an existing **in-app browser tab** (Phase 1.3 webview; blank default; no Node in the guest).
 
-Do **not** build a native notebook editor here. The browser tab is still the Phase 1.3 webview (blank default, no Node in the guest). There is no Phase 4.5. Native `.ipynb` stays in the parking lot until JupyterLab-in-browser has been tried and is still not enough.
+Do **not** build a native notebook editor here. There is no Phase 4.5. Native `.ipynb` stays in the parking lot until JupyterLab-in-browser has been tried and is still not enough.
 
-**Effort:** days to a week if conda spawn works. Ships as **`0.5.0`**.
+Work items:
+
+1. **Start JupyterLab from the project conda env** — done. `python -m jupyterlab` in the resolved env (`condaEnvPrefix` preferred, same `getShellEnv` as terminals/agents). Portable Node stays first on PATH. Bound to `127.0.0.1`, free port, token in the URL.
+2. **Reuse** — done. Same project + folder + conda prefix + live pid reuses the tracked server. Changing env or cwd replaces it.
+3. **Browser tab** — done. Palette command and local-project context menu. Reuses a tab already on that origin, otherwise `addTab(..., 'browser', { url })`.
+4. **Shutdown** — done. Kill the process tree on project delete and on app quit.
+5. **Errors** — done. No conda env, dead saved env, jupyterlab missing from the env, port bind / start failure.
+
+**Out of this PR:** Jupyter over SSH / SOCKS (remote projects). Local projects only. Git Bash is still the only interactive Windows shell — the Jupyter server is a background process, not a new shell surface.
+
+**Verify:** unit tests cover URL/port parsing, reuse, conda PATH wiring (Node first), `python -m jupyterlab` args, missing jupyterlab / python / bind errors, palette visibility, and opening or focusing a browser tab. **Human check still required on Windows** (and Mac if easy): pick a conda env with `jupyterlab` installed → command palette “Open JupyterLab for this project” → Lab loads in the in-app browser tab → run again reuses the server → quit leaves no orphan `jupyter` process.
+
+**Known limits**
+
+- Remote SSH / SOCKS Jupyter is not started from DevTool. Open a local project.
+- The env must already have `jupyterlab` (`pip install jupyterlab` or `conda install jupyterlab`). DevTool does not install it.
+- Already-running Jupyter you started yourself in a terminal is not adopted; DevTool only reuses the server it spawned.
+- First start can take a while while JupyterLab imports.
+
+**Closeout:** done. `package.json` is **0.5.0**. Next is Phase 5 (packaging / distribution). Native notebooks stay parked.
+
+**Effort:** days if conda spawn works. Ships as **`0.5.0`**.
 
 ---
 
@@ -367,7 +388,7 @@ Keep upstream `master` as a remote (`upstream`) and rebase or merge periodically
 7. Windows shortcut map + labels (Phase 1.4). **Done** in `0.3.2`.
 8. Hook authentication + SSH trust (Phase 2). **Done** in `0.3.2` (no minor bump).
 9. Conda env picker on spawn (Phase 3). **Done** in `0.4.0`.
-10. JupyterLab browser-tab launcher (Phase 4). Ships as `0.5.0`.
+10. JupyterLab browser-tab launcher (Phase 4). **Done** in `0.5.0`.
 11. Packaging (Phase 5): keep portable `dist/win-unpacked`, then per-user NSIS Setup.exe + Start Menu, then Authenticode, then auto-update, app icon. Ships as `0.6.0`+. Do not insert native notebooks or LSP between 10 and 11.
 
 Skip a step only if the previous phase already includes it by accident (e.g. PATH work that makes conda trivial).
@@ -408,7 +429,7 @@ Work machine constraints to re-test every phase: Git Bash, portable Node zip, Pi
 | 1.4 | `0.3.2` (shipped) | Existing shortcuts listed and shown as Windows keys | a short pass |
 | 2 | stayed `0.3.2` (no `0.4.0` tag) | Hook secret + Pi extension off `/tmp`; SSH uses `~/.ssh/known_hosts` | ~1 week |
 | 3 | `0.4.0` (shipped) | Conda picker on spawn | 1–2 weeks |
-| 4 | `0.5.0` | JupyterLab in a browser tab | days |
+| 4 | `0.5.0` (shipped) | JupyterLab in a browser tab | days |
 | 5 | `0.6.0`+ | Portable folder kept; per-user NSIS Setup.exe; then Authenticode; then auto-update; app icon | installer in days–weeks; signing/updater depend on the cert |
 
 Language servers and native notebooks stay in the parking lot. They are not numbered phases. There is no Phase 6 until something else earns one.

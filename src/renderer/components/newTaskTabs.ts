@@ -16,13 +16,17 @@ export type CreateTabOptions = {
   noteId?: string
   noteName?: string
   cwd?: string
+  /** Override the default tab title (e.g. JupyterLab in a browser tab). */
+  title?: string
 }
 
 export function createTab(type: TabType, options: CreateTabOptions = {}): Tab {
-  const { filePath, url, noteId, noteName, cwd } = options
+  const { filePath, url, noteId, noteName, cwd, title: titleOverride } = options
   const isAi = (AI_TAB_TYPES as readonly string[]).includes(type)
   let title: string
-  if (noteId) {
+  if (titleOverride) {
+    title = titleOverride
+  } else if (noteId) {
     title = noteName ?? 'Note'
   } else if (filePath) {
     const fileName = filePath.split('/').pop() ?? filePath

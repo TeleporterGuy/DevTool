@@ -970,6 +970,11 @@ export function useAppState() {
       if (project.ssh) {
         await window.api.sshDisconnect(id, project.ssh).catch(() => {})
       }
+      try {
+        await window.api.jupyterStop(id)
+      } catch {
+        /* already gone, or a test harness without this IPC */
+      }
     }
 
     mutateProjects(prev => ({

@@ -24,6 +24,7 @@ import type {
   WindowViewState
 } from '../shared/types'
 import type { CondaListResult } from '../shared/conda'
+import type { JupyterOpenResult } from '../shared/jupyter'
 
 const api = {
   // Projects
@@ -91,6 +92,11 @@ const api = {
 
   condaListEnvs: (): Promise<CondaListResult> =>
     ipcRenderer.invoke('conda-list-envs'),
+
+  jupyterOpen: (projectId: string, cwd?: string): Promise<JupyterOpenResult> =>
+    ipcRenderer.invoke('jupyter-open', projectId, cwd),
+  jupyterStop: (projectId: string): Promise<void> =>
+    ipcRenderer.invoke('jupyter-stop', projectId),
 
   externalIdeDetect: (): Promise<Array<{ name: string; command: string }>> =>
     ipcRenderer.invoke('external-ide-detect'),

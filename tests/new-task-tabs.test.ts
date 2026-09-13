@@ -43,6 +43,12 @@ describe('createTab', () => {
   it('carries a start url through when given one', () => {
     expect(createTab('browser', { url: 'https://example.com' }).url).toBe('https://example.com')
   })
+
+  it('uses an explicit title for JupyterLab browser tabs', () => {
+    expect(createTab('browser', { url: 'http://127.0.0.1:8888/lab', title: 'JupyterLab' }).title).toBe(
+      'JupyterLab'
+    )
+  })
 })
 
 describe('newTaskInitialTabs', () => {
