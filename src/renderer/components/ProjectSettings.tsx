@@ -173,7 +173,7 @@ export default function ProjectSettings({ project, onSave, onClose }: Props): Re
               ? 'Looking for conda envs…'
               : condaError
                 ? condaError
-                : 'New terminal and Pi tabs prepend this env onto PATH (already-open tabs keep theirs). Create or delete envs with conda itself.'}
+                : 'Save, then open a new tab — already-open tabs keep their env. New terminals run conda activate after login so conda init cannot leave you on base. Pi tabs get the same env on PATH. Create or delete envs with conda itself.'}
           </HelperText>
         </SetBlock>
       )}

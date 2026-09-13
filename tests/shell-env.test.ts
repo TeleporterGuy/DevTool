@@ -199,6 +199,7 @@ describe('applyCondaEnv', () => {
     expect(next.CONDA_DEFAULT_ENV).toBe('ml')
     expect(next.CONDA_SHLVL).toBe('1')
     expect(next.CONDA_PROMPT_MODIFIER).toBe('(ml) ')
+    expect(next.CONDA_AUTO_ACTIVATE_BASE).toBe('false')
     expect(next.PYTHONHOME).toBeUndefined()
   })
 
@@ -230,6 +231,7 @@ describe('getShellEnv with conda', () => {
     expect(parts[1]).toBe('C:\\Users\\me\\miniconda3\\envs\\ml')
     expect(parts).toContain('C:\\Users\\me\\miniconda3\\envs\\ml\\Scripts')
     expect(env.CONDA_DEFAULT_ENV).toBe('ml')
+    expect(env.CONDA_AUTO_ACTIVATE_BASE).toBe('false')
   })
 
   it('prepends Unix conda bin under portable Node', () => {

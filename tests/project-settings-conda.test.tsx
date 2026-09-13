@@ -60,6 +60,10 @@ describe('ProjectSettings conda picker', () => {
     fireEvent.change(select, { target: { value: 'ml' } })
     fireEvent.click(screen.getByRole('button', { name: 'Save' }))
     expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ condaEnvName: 'ml' }))
+    expect(
+      screen.getByText(/Save, then open a new tab/, { exact: false })
+    ).toBeTruthy()
+    expect(screen.getByText(/conda init cannot leave you on base/, { exact: false })).toBeTruthy()
   })
 
   it('hides the picker on remote projects', () => {

@@ -10,9 +10,12 @@ import {
   listCondaEnvsFromFilesystem,
   parseCondaEnvListJson,
   parseEnvironmentsTxt,
+  posixSingleQuote,
   resetCondaEnvForTests,
   resolveCondaEnvPrefix,
-  setCachedCondaEnvsForTests
+  setCachedCondaEnvsForTests,
+  wrapInteractiveShellWithCondaActivate,
+  condaRootFromEnvPrefix
 } from '../src/main/conda-env'
 
 const win = {
@@ -296,5 +299,65 @@ describe('resolveCondaEnvPrefix', () => {
         readdirSync: () => []
       })
     ).toBe('D:\\envs\\ml')
+  })
+})
+
+describe('wrapInteractiveShellWithCondaActivate', () => {
+  const pec = {
+    name: 'pec_simulator_env',
+    prefix: '/Users/me/miniconda3/envs/pec_simulator_env'
+  }
+
+  it('leaves spawn args alone when no project env is set', () => {
+    const spawn = { file: '/bin/zsh', args: ['-l'] }
+    expect(wrapInteractiveShellWithCondaActivate(spawn, null, posix)).toEqual(spawn)
+    expect(wrapInteractiveShellWithCondaActivate(spawn, undefined, posix)).toEqual(spawn)
+  })
+
+  it('runs conda activate after login rc so init activating base cannot win', () => {
+    const wrapped = wrapInteractiveShellWithCondaActivate(
+      { file: '/bin/zsh', args: ['-l'] },
+      pec,
+      posix
+    )
+    expect(wrapped.file).toBe('/bin/zsh')
+    // -l -i source zprofile/zshrc (conda initialize → often `conda activate base`)
+    // then -c runs, so the project env is activated after that hook.
+    expect(wrapped.args.slice(0, 3)).toEqual(['-l', '-i', '-c'])
+    const script = wrapped.args[3]
+    expect(script).toContain("export CONDA_AUTO_ACTIVATE_BASE=false")
+    expect(script).toContain("conda activate 'pec_simulator_env'")
+    expect(script).toContain("exec '/bin/zsh' -i")
+    expect(script).toContain('/Users/me/miniconda3/etc/profile.d/conda.sh')
+    expect(wrapped.args.indexOf('-l')).toBeLessThan(wrapped.args.indexOf('-c'))
+    expect(wrapped.args.indexOf('-i')).toBeLessThan(wrapped.args.indexOf('-c'))
+  })
+
+  it('uses Git Bash login flags on Windows', () => {
+    const wrapped = wrapInteractiveShellWithCondaActivate(
+      { file: 'C:\\Program Files\\Git\\bin\\bash.exe', args: ['--login', '-i'] },
+      { name: 'ml', prefix: 'C:\\Users\\me\\miniconda3\\envs\\ml' },
+      win
+    )
+    expect(wrapped.args.slice(0, 3)).toEqual(['--login', '-i', '-c'])
+    expect(wrapped.args[3]).toContain("conda activate 'ml'")
+    expect(wrapped.args[3]).toContain("exec 'C:/Program Files/Git/bin/bash.exe' -i")
+  })
+
+  it('quotes env names that contain spaces and quotes', () => {
+    expect(posixSingleQuote("foo'bar")).toBe(`'foo'\\''bar'`)
+    const wrapped = wrapInteractiveShellWithCondaActivate(
+      { file: '/bin/zsh', args: ['-l'] },
+      { name: "ml env", prefix: '/opt/conda/envs/ml env' },
+      posix
+    )
+    expect(wrapped.args[3]).toContain("conda activate 'ml env'")
+  })
+
+  it('treats envs/<name> as living under the conda install root', () => {
+    expect(condaRootFromEnvPrefix(pec, posix)).toBe('/Users/me/miniconda3')
+    expect(
+      condaRootFromEnvPrefix({ name: 'base', prefix: '/Users/me/miniconda3' }, posix)
+    ).toBe('/Users/me/miniconda3')
   })
 })

@@ -25,7 +25,7 @@ import { agentCommandOverride, conptySpawnArgv, isAiAgentCommand, resolveAgentCo
 import { detectExternalEditors, openFolderInEditor } from './external-ide'
 import { isLocalInteractiveTerminal, resolveLocalTerminalSpawn } from './resolve-local-terminal'
 import { findGitBashExe, setPortableNodeDir } from './shell-env'
-import { listCondaEnvs, resolveCondaEnvPrefix } from './conda-env'
+import { listCondaEnvs, resolveCondaEnvPrefix, wrapInteractiveShellWithCondaActivate } from './conda-env'
 import type { CondaEnvInfo } from '../shared/conda'
 import { resolveSafeProjectPath } from './project-fs-path'
 import {
@@ -1386,8 +1386,9 @@ export class AppRuntime {
       } else if (isLocalInteractiveTerminal(shell, spawnArgs)) {
         // Git Bash / $SHELL from Settings — do not inherit process.env.SHELL on Windows.
         const resolved = resolveLocalTerminalSpawn(this.config)
-        spawnFile = resolved.file
-        spawnArgs = resolved.args
+        const wrapped = wrapInteractiveShellWithCondaActivate(resolved, condaEnv)
+        spawnFile = wrapped.file
+        spawnArgs = wrapped.args
         this.logDebug(`ptySpawn resolve id=${id} shell=${shell} file=${spawnFile} args=${spawnArgs.join(' ')}`)
       }
       this.ptyManager.spawn(id, spawnFile, cwd, cols, rows, spawnArgs, localEnv, callbacks, condaEnv)

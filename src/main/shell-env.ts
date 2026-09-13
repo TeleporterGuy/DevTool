@@ -254,6 +254,8 @@ export function applyCondaEnv(
   next.CONDA_DEFAULT_ENV = name
   next.CONDA_PROMPT_MODIFIER = `(${name}) `
   next.CONDA_SHLVL = '1'
+  // Login rc evals `conda shell.*.hook`, which otherwise `conda activate base`.
+  next.CONDA_AUTO_ACTIVATE_BASE = 'false'
   // conda activate drops PYTHONHOME so the env's python is used.
   delete next.PYTHONHOME
   return next

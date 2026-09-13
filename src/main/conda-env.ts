@@ -465,3 +465,70 @@ export function resetCondaEnvForTests(): void {
 export function setCachedCondaEnvsForTests(envs: CondaEnvInfo[]): void {
   cachedList = { executable: null, envs }
 }
+
+/** Quote for `sh`/`bash`/`zsh -c` so env names with spaces stay one word. */
+export function posixSingleQuote(value: string): string {
+  return `'${value.replace(/'/g, `'\\''`)}'`
+}
+
+/** Install root that contains `etc/profile.d/conda.sh` (`base`, or parent of `envs/<name>`). */
+export function condaRootFromEnvPrefix(condaEnv: CondaEnvInfo, deps: CondaEnvDeps = {}): string {
+  const pathMod = pathOf(deps)
+  const prefix = condaEnv.prefix.replace(/[\\/]+$/, '')
+  if (condaEnv.name.trim() === 'base') return prefix
+  const envsDir = pathMod.dirname(prefix)
+  if (pathMod.basename(envsDir).toLowerCase() === 'envs') return pathMod.dirname(envsDir)
+  return prefix
+}
+
+export interface InteractiveShellSpawn {
+  file: string
+  args: string[]
+}
+
+/**
+ * Script run with `shell -l -i -c …` so login rc (conda initialize) runs first.
+ * That hook often `conda activate base`; this then activates the project env and
+ * execs a non-login interactive shell. `CONDA_AUTO_ACTIVATE_BASE=false` stops
+ * the inner rc from flipping back to base.
+ */
+export function condaActivateLoginScript(
+  shellFile: string,
+  condaEnv: CondaEnvInfo,
+  deps: CondaEnvDeps = {}
+): string {
+  const name = posixSingleQuote(condaEnv.name.trim())
+  const execFile = posixSingleQuote(shellFile.replace(/\\/g, '/'))
+  const condaShPath = pathOf(deps)
+    .join(condaRootFromEnvPrefix(condaEnv, deps), 'etc', 'profile.d', 'conda.sh')
+    .replace(/\\/g, '/')
+  const condaSh = posixSingleQuote(condaShPath)
+  return [
+    'export CONDA_AUTO_ACTIVATE_BASE=false',
+    `if [ -f ${condaSh} ]; then . ${condaSh}; fi`,
+    `if command -v conda >/dev/null 2>&1; then conda activate ${name}`,
+    `elif command -v micromamba >/dev/null 2>&1; then micromamba activate ${name}`,
+    'fi',
+    `exec ${execFile} -i`
+  ].join('; ')
+}
+
+/**
+ * Interactive local tabs only. Agent binaries (Pi/Claude/Codex) keep PATH prepend
+ * and must not go through this wrapper.
+ */
+export function wrapInteractiveShellWithCondaActivate(
+  spawn: InteractiveShellSpawn,
+  condaEnv: CondaEnvInfo | null | undefined,
+  deps: CondaEnvDeps = {}
+): InteractiveShellSpawn {
+  const name = condaEnv?.name?.trim() ?? ''
+  const prefix = condaEnv?.prefix?.trim() ?? ''
+  if (!name || !prefix) return spawn
+  const script = condaActivateLoginScript(spawn.file, { name, prefix }, deps)
+  const args =
+    platformOf(deps) === 'win32'
+      ? ['--login', '-i', '-c', script]
+      : ['-l', '-i', '-c', script]
+  return { file: spawn.file, args }
+}
