@@ -25,7 +25,7 @@ import { agentCommandOverride, conptySpawnArgv, isAiAgentCommand, resolveAgentCo
 import { detectExternalEditors, openFolderInEditor } from './external-ide'
 import { isLocalInteractiveTerminal, resolveLocalTerminalSpawn } from './resolve-local-terminal'
 import { findGitBashExe, setPortableNodeDir } from './shell-env'
-import { listCondaEnvs, resolveCondaEnvPrefix, wrapInteractiveShellWithCondaActivate } from './conda-env'
+import { listCondaEnvs, resolveProjectCondaEnv, wrapInteractiveShellWithCondaActivate } from './conda-env'
 import type { CondaEnvInfo } from '../shared/conda'
 import { resolveSafeProjectPath } from './project-fs-path'
 import {
@@ -1398,15 +1398,19 @@ export class AppRuntime {
   /** Local PTYs only. Remote tabs run on the SSH host, which has its own python. */
   private condaEnvForLocalProject(projectId?: string): CondaEnvInfo | undefined {
     if (!projectId) return undefined
-    const name = this.projectsStore.peek().projects.find((project) => project.id === projectId)?.condaEnvName?.trim()
-    if (!name) return undefined
-    const prefix = resolveCondaEnvPrefix(name)
-    if (!prefix) {
-      this.logDebug(`condaEnv missing name=${name} projectId=${projectId}`)
+    const project = this.projectsStore.peek().projects.find((item) => item.id === projectId)
+    if (!project) return undefined
+    const resolved = resolveProjectCondaEnv(project)
+    if (!resolved) {
+      if (project.condaEnvName?.trim() || project.condaEnvPrefix?.trim()) {
+        this.logDebug(
+          `condaEnv missing name=${project.condaEnvName ?? ''} prefix=${project.condaEnvPrefix ?? ''} projectId=${projectId}`
+        )
+      }
       return undefined
     }
-    this.logDebug(`condaEnv name=${name} prefix=${prefix} projectId=${projectId}`)
-    return { name, prefix }
+    this.logDebug(`condaEnv name=${resolved.name} prefix=${resolved.prefix} projectId=${projectId}`)
+    return resolved
   }
 
   private killPty(id: string): void {

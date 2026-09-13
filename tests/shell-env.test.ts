@@ -175,6 +175,7 @@ describe('applyCondaEnv', () => {
     const n = candidate.toLowerCase()
     return (
       n === 'c:\\users\\me\\miniconda3\\envs\\ml' ||
+      n === 'c:\\users\\me\\miniconda3\\envs\\ml\\conda-meta' ||
       n === 'c:\\users\\me\\miniconda3\\envs\\ml\\scripts' ||
       n === 'c:\\users\\me\\miniconda3\\envs\\ml\\library\\bin'
     )
@@ -230,6 +231,26 @@ describe('applyCondaEnv', () => {
       { ...win, existsSync: existsWin }
     )
     expect(next.Path).toBe(next.PATH)
+  })
+
+  it('does not set CONDA_* when the prefix is not a conda env', () => {
+    const env = { PATH: 'C:\\Windows\\System32', PYTHONHOME: 'C:\\Python' }
+    const next = applyCondaEnv(env, ml, { ...win, existsSync: () => false })
+    expect(next).toEqual(env)
+    expect(next.CONDA_PREFIX).toBeUndefined()
+    expect(next.CONDA_DEFAULT_ENV).toBeUndefined()
+    expect(next.CONDA_PROMPT_MODIFIER).toBeUndefined()
+  })
+
+  it('does not set CONDA_* when no PATH dirs remain after filtering', () => {
+    const env = { PATH: 'C:\\Windows\\System32' }
+    const next = applyCondaEnv(env, ml, {
+      ...win,
+      existsSync: (candidate) => candidate.toLowerCase() === 'c:\\users\\me\\miniconda3\\envs\\ml\\conda-meta'
+    })
+    expect(next).toEqual(env)
+    expect(next.CONDA_PREFIX).toBeUndefined()
+    expect(next.CONDA_DEFAULT_ENV).toBeUndefined()
   })
 })
 

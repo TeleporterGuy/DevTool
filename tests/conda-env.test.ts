@@ -15,6 +15,7 @@ import {
   posixSingleQuote,
   resetCondaEnvForTests,
   resolveCondaEnvPrefix,
+  resolveProjectCondaEnv,
   setCachedCondaEnvsForTests,
   wrapInteractiveShellWithCondaActivate
 } from '../src/main/conda-env'
@@ -278,9 +279,6 @@ describe('listCondaEnvs', () => {
     )
     expect(result.executable?.kind).toBe('conda')
     expect(result.envs.map((env) => env.name)).toEqual(['base', 'ml'])
-    expect(resolveCondaEnvPrefix('ml', { ...win, existsSync: () => false, readFileSync: () => '', readdirSync: () => [] })).toBe(
-      'C:\\Users\\me\\miniconda3\\envs\\ml'
-    )
   })
 
   it('falls back to folders on disk when conda env list fails', async () => {
@@ -313,7 +311,36 @@ describe('resolveCondaEnvPrefix', () => {
     expect(resolveCondaEnvPrefix('  ', win)).toBeNull()
   })
 
-  it('uses a cached list when the folder scan is empty', () => {
+  it('uses a cached list only when the prefix still looks like a conda env', () => {
+    setCachedCondaEnvsForTests([{ name: 'ml', prefix: 'D:\\envs\\ml' }])
+    expect(
+      resolveCondaEnvPrefix('ml', {
+        ...win,
+        existsSync: (candidate) => candidate.toLowerCase() === 'd:\\envs\\ml\\conda-meta',
+        readFileSync: () => '',
+        readdirSync: () => []
+      })
+    ).toBe('D:\\envs\\ml')
+  })
+
+  it('ignores a dead cached prefix and falls through to the filesystem', () => {
+    setCachedCondaEnvsForTests([{ name: 'ml', prefix: 'D:\\envs\\ml' }])
+    expect(
+      resolveCondaEnvPrefix('ml', {
+        ...win,
+        env: { PATH: 'C:\\Windows\\System32' },
+        existsSync: (candidate) => {
+          const n = candidate.toLowerCase()
+          return n === 'c:\\users\\me\\miniconda3\\envs\\ml\\conda-meta'
+        },
+        readFileSync: () => '',
+        readdirSync: (dir) =>
+          dir.toLowerCase() === 'c:\\users\\me\\miniconda3\\envs' ? ['ml'] : []
+      })
+    ).toBe('C:\\Users\\me\\miniconda3\\envs\\ml')
+  })
+
+  it('returns null when the cached prefix is dead and nothing is on disk', () => {
     setCachedCondaEnvsForTests([{ name: 'ml', prefix: 'D:\\envs\\ml' }])
     expect(
       resolveCondaEnvPrefix('ml', {
@@ -322,7 +349,96 @@ describe('resolveCondaEnvPrefix', () => {
         readFileSync: () => '',
         readdirSync: () => []
       })
-    ).toBe('D:\\envs\\ml')
+    ).toBeNull()
+  })
+
+  it('returns null when two live envs share the same name', () => {
+    setCachedCondaEnvsForTests([
+      { name: 'ml', prefix: 'C:\\miniconda3\\envs\\ml' },
+      { name: 'ml', prefix: 'D:\\other\\envs\\ml' }
+    ])
+    expect(
+      resolveCondaEnvPrefix('ml', {
+        ...win,
+        existsSync: (candidate) => candidate.toLowerCase().endsWith('\\conda-meta'),
+        readFileSync: () => '',
+        readdirSync: () => []
+      })
+    ).toBeNull()
+  })
+
+  it('matches a Windows name case-insensitively only when a single env matches', () => {
+    setCachedCondaEnvsForTests([{ name: 'ML', prefix: 'D:\\envs\\ML' }])
+    expect(
+      resolveCondaEnvPrefix('ml', {
+        ...win,
+        existsSync: (candidate) => candidate.toLowerCase() === 'd:\\envs\\ml\\conda-meta',
+        readFileSync: () => '',
+        readdirSync: () => []
+      })
+    ).toBe('D:\\envs\\ML')
+  })
+
+  it('does not case-fold a Windows name when two envs would match', () => {
+    setCachedCondaEnvsForTests([
+      { name: 'ML', prefix: 'D:\\envs\\ML' },
+      { name: 'Ml', prefix: 'E:\\envs\\Ml' }
+    ])
+    expect(
+      resolveCondaEnvPrefix('ml', {
+        ...win,
+        existsSync: (candidate) => candidate.toLowerCase().endsWith('\\conda-meta'),
+        readFileSync: () => '',
+        readdirSync: () => []
+      })
+    ).toBeNull()
+  })
+})
+
+describe('resolveProjectCondaEnv', () => {
+  const liveMeta = (prefix: string) => (candidate: string) =>
+    candidate.toLowerCase() === `${prefix.toLowerCase()}\\conda-meta`
+
+  it('prefers a still-valid saved prefix over name lookup', () => {
+    setCachedCondaEnvsForTests([
+      { name: 'ml', prefix: 'C:\\miniconda3\\envs\\ml' },
+      { name: 'ml', prefix: 'D:\\other\\envs\\ml' }
+    ])
+    expect(
+      resolveProjectCondaEnv(
+        { condaEnvName: 'ml', condaEnvPrefix: 'D:\\other\\envs\\ml' },
+        {
+          ...win,
+          existsSync: liveMeta('D:\\other\\envs\\ml'),
+          readFileSync: () => '',
+          readdirSync: () => []
+        }
+      )
+    ).toEqual({ name: 'ml', prefix: 'D:\\other\\envs\\ml' })
+  })
+
+  it('falls through to name lookup when the saved prefix is dead', () => {
+    setCachedCondaEnvsForTests([{ name: 'ml', prefix: 'C:\\miniconda3\\envs\\ml' }])
+    expect(
+      resolveProjectCondaEnv(
+        { condaEnvName: 'ml', condaEnvPrefix: 'D:\\gone\\envs\\ml' },
+        {
+          ...win,
+          existsSync: liveMeta('C:\\miniconda3\\envs\\ml'),
+          readFileSync: () => '',
+          readdirSync: () => []
+        }
+      )
+    ).toEqual({ name: 'ml', prefix: 'C:\\miniconda3\\envs\\ml' })
+  })
+
+  it('returns null when prefix and name are both missing or dead', () => {
+    expect(
+      resolveProjectCondaEnv(
+        { condaEnvName: 'ml', condaEnvPrefix: 'D:\\gone\\envs\\ml' },
+        { ...win, existsSync: () => false, readFileSync: () => '', readdirSync: () => [] }
+      )
+    ).toBeNull()
   })
 })
 
@@ -330,6 +446,16 @@ describe('wrapInteractiveShellWithCondaActivate', () => {
   const pec = {
     name: 'pec_simulator_env',
     prefix: '/Users/me/miniconda3/envs/pec_simulator_env'
+  }
+
+  function winWrapDeps(over: Record<string, unknown> = {}) {
+    return {
+      ...win,
+      tmpdir: () => '/tmp',
+      mkdtempSync: () => '/tmp/devtool-conda-test',
+      writeFileSync: () => {},
+      ...over
+    }
   }
 
   it('leaves spawn args alone when no project env is set', () => {
@@ -350,6 +476,7 @@ describe('wrapInteractiveShellWithCondaActivate', () => {
     expect(wrapped.args.slice(0, 3)).toEqual(['-l', '-i', '-c'])
     const script = wrapped.args[3]
     expect(script).toContain("export CONDA_AUTO_ACTIVATE_BASE=false")
+    expect(script).toContain("conda activate '/Users/me/miniconda3/envs/pec_simulator_env'")
     expect(script).toContain("conda activate 'pec_simulator_env'")
     expect(script).toContain("exec '/bin/zsh' -i")
     expect(script).not.toContain('--rcfile')
@@ -362,18 +489,52 @@ describe('wrapInteractiveShellWithCondaActivate', () => {
     const wrapped = wrapInteractiveShellWithCondaActivate(
       { file: 'C:\\Program Files\\Git\\bin\\bash.exe', args: ['--login', '-i'] },
       { name: 'ml', prefix: 'C:\\Users\\me\\miniforge3\\envs\\ml' },
-      win
+      winWrapDeps()
     )
     expect(wrapped.args.slice(0, 3)).toEqual(['--login', '-i', '-c'])
     const script = wrapped.args[3]
+    expect(script).toContain("conda activate 'C:/Users/me/miniforge3/envs/ml'")
     expect(script).toContain("conda activate 'ml'")
     expect(script).toContain("C:/Users/me/miniforge3/etc/profile.d/conda.sh")
     expect(script).toContain('--rcfile')
-    expect(script).toContain('.bashrc')
-    expect(script).toContain("exec 'C:/Program Files/Git/bin/bash.exe' --rcfile")
+    expect(script).toContain("exec 'C:/Program Files/Git/bin/bash.exe' --rcfile '/tmp/devtool-conda-test/bashrc' -i")
     // Non-login `exec bash -i` would drop the conda function from .bash_profile.
     expect(script).not.toMatch(/exec 'C:\/Program Files\/Git\/bin\/bash\.exe' -i/)
     expect(script).toContain('2>/dev/null || micromamba activate')
+  })
+
+  it('never embeds a $$ -only temp name in the Windows wrap script', () => {
+    const written: string[] = []
+    const wrapped = wrapInteractiveShellWithCondaActivate(
+      { file: 'C:\\Program Files\\Git\\bin\\bash.exe', args: ['--login', '-i'] },
+      { name: 'ml', prefix: 'C:\\Users\\me\\miniforge3\\envs\\ml' },
+      winWrapDeps({
+        writeFileSync: (_path: string, data: string) => {
+          written.push(data)
+        }
+      })
+    )
+    const script = wrapped.args[3]
+    expect(script).not.toContain('$$')
+    expect(script).not.toContain('mktemp')
+    expect(script).not.toMatch(/devtool-conda-\$\$/)
+    expect(written.join('\n')).not.toContain('$$')
+    expect(written.join('\n')).toContain('.bashrc')
+  })
+
+  it('skips the Windows wrap when the rcfile cannot be created', () => {
+    const spawn = { file: 'C:\\Program Files\\Git\\bin\\bash.exe', args: ['--login', '-i'] }
+    expect(
+      wrapInteractiveShellWithCondaActivate(
+        spawn,
+        { name: 'ml', prefix: 'C:\\Users\\me\\miniforge3\\envs\\ml' },
+        winWrapDeps({
+          mkdtempSync: () => {
+            throw new Error('no tmp')
+          }
+        })
+      )
+    ).toEqual(spawn)
   })
 
   it('quotes env names that contain spaces and quotes', () => {
@@ -384,6 +545,7 @@ describe('wrapInteractiveShellWithCondaActivate', () => {
       posix
     )
     expect(wrapped.args[3]).toContain("conda activate 'ml env'")
+    expect(wrapped.args[3]).toContain("conda activate '/opt/conda/envs/ml env'")
   })
 
   it('treats envs/<name> as living under the conda install root', () => {

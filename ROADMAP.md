@@ -26,7 +26,7 @@ Company-deploy security snapshot (what this app actually is on a workstation): [
 
 Stay on **0.x** until the app is something you would tell a friend to unzip. **1.0.0** is that call, not “Phase 6 finished.”
 
-`package.json` is **0.5.0** (Phase 3 done). Phase 2 landed without tagging `0.4.0` and stayed **0.3.2**. Shape:
+`package.json` is **0.4.0** (Phase 3 done). Phase 2 landed without tagging `0.4.0` and stayed **0.3.2**, so Phase 3 uses that skipped minor instead of jumping to `0.5.0`. Shape:
 
 | Part | Meaning |
 | --- | --- |
@@ -42,11 +42,11 @@ Work inside a phase is `0.x.y`; shipping the phase is the next `0.(x+1).0`.
 | Phase 1 done | `0.3.0` |
 | Phase 1.3 (Electron line) | `0.3.1` (tagged; not a numbered bump) |
 | Phase 1.4 (Windows shortcut labels) | `0.3.2` (tagged; not a numbered bump) |
-| Phase 2 done | `0.4.0` (not tagged this fork; Phase 2 closeout stayed `0.3.2`) |
-| Phase 3 done | `0.5.0` |
-| Phase 4 done | `0.6.0` |
-| Phase 5 done | `0.7.0` |
-| Phase 6 slices | keep bumping `0.7.y` / `0.8.0` as you tag them |
+| Phase 2 done | stayed `0.3.2` (no `0.4.0` tag on this fork) |
+| Phase 3 done | `0.4.0` |
+| Phase 4 done | `0.5.0` |
+| Phase 5 done | `0.6.0` |
+| Phase 6 slices | keep bumping `0.6.y` / `0.7.0` as you tag them |
 
 Phase 0.5 does not get a version. Ideas in the parking lot do not get a version until they are pulled into a phase.
 
@@ -251,21 +251,35 @@ Stay out of: config-dir `0700` for all of `~/.devtool`, scrollback `tabId` sanit
 
 ---
 
-## Phase 3 — Conda as a spawn picker — done (`0.5.0`)
+## Phase 3 — Conda as a spawn picker — done (`0.4.0`)
 
 Was Phase 2. **Outcome:** pick an env per project. Every local PTY inherits it. No env-create/delete UI.
 
 Work items:
 
 1. **Detect conda** — done. Anaconda / Miniconda / Miniforge / micromamba via `CONDA_EXE` / PATH / well-known install dirs (including when Electron's PATH is thin).
-2. **List + persist** — done. Project Settings dropdown on local projects; `condaEnvName` on the project. Remote and shell-command projects stay out (those PTYs are not a local conda).
-3. **Activate** — done as **PATH prepend**, same pattern as Settings → Node directory. Not `eval "$(conda shell.bash hook)"` + `conda activate`: Pi/Claude/Codex spawn as binaries (CreateProcess), so a Git Bash hook would miss them. Windows prepends the conda-activate layout (`prefix`, `Library\\…\\bin`, `Scripts`, `bin`); Unix prepends `prefix/bin`. Sets `CONDA_PREFIX` / `CONDA_DEFAULT_ENV`. Portable Node stays **first** on PATH. Apply to terminal **and** agent tabs (project id is passed on local spawn). Later LSP/Jupyter children can reuse `getShellEnv(..., { condaEnv })`.
+2. **List + persist** — done. Project Settings dropdown on local projects; value is the env **prefix** (unique), label is the name. Persist `condaEnvPrefix` plus `condaEnvName`. Remote and shell-command projects stay out (those PTYs are not a local conda).
+3. **Activate** — dual path, not PATH-prepend only.
 
-**Verify:** unit tests cover detection, `conda env list --json` / filesystem listing, Windows PATH order, Node-dir remaining first, and that `process.env.PATH` is not overwritten. `which python` / `python -c "import sys; print(sys.prefix)"` in a Windows Git Bash tab is a **human check still required**.
+   - **Pi / Claude / Codex** (spawned as binaries, not through Git Bash): PATH prepend + `CONDA_*`, same pattern as Settings → Node directory. Do **not** `eval "$(conda shell.bash hook)"` — that hook would miss CreateProcess agent tabs. Prepend env dirs first (`prefix`, Windows `Library\\…\\bin` / `Scripts` / `bin`, Unix `prefix/bin`), then install `condabin`/`Scripts` so `conda.exe` still resolves when the shell function is missing. Sets `CONDA_PREFIX` / `CONDA_DEFAULT_ENV` only when the prefix still looks like a conda env and at least one PATH dir exists. Portable Node stays **first**.
+   - **Interactive terminals**: login shell still runs (conda init often `conda activate base`), then wrap with `conda activate` for the project env (`CONDA_AUTO_ACTIVATE_BASE=false`). macOS: `zsh -l -i -c '…; exec zsh -i'`. Windows Git Bash: `bash --login -i -c` then `exec bash --rcfile <Node mkdtemp file> -i` so conda init in `.bash_profile` is not dropped by a non-login inner shell. The rcfile is created from Node; if temp creation fails the wrap is skipped (fail closed — no guessable `$$` path).
 
-**Closeout:** done. `package.json` is **0.5.0**. Next is Phase 4 (Jupyter via the browser tab). Spyder as an external IDE can follow this, still out of 1.2.
+   Spawn prefers a still-valid saved prefix; name lookup is a fallback and is unique-only (Windows case-insensitive only when a single env matches). Apply to terminal **and** agent tabs (project id is passed on local spawn). Later LSP/Jupyter children can reuse `getShellEnv(..., { condaEnv })`.
 
-**Effort:** 1–2 weeks. Windows + Git Bash activation is the only tricky part. Ships as **`0.5.0`**.
+**Verify:** unit tests cover detection, `conda env list --json` / filesystem listing, dead cache vs live prefix, Windows PATH order, Node-dir remaining first, `process.env.PATH` not overwritten, Windows wrap script never embedding a `$$` temp name, and Project Settings saving prefix+name. `which python` / `python -c "import sys; print(sys.prefix)"` in a Windows Git Bash tab is a **human check still required**.
+
+**Known limits**
+
+- Older macOS conda init can hardcode `conda activate base` after the inner `exec zsh -i`; the wrap sources `conda.sh` again before activate, but exotic rc files may still fight it.
+- Env deleted or renamed after save: spawn ignores a dead prefix (then unique name / null). Settings keeps a “(saved)” option until refresh.
+- Pi/Claude/Codex are PATH + `CONDA_*` only — packages that need `etc/conda/activate.d` hooks may differ from a fully activated terminal.
+- micromamba-only: list and PATH prepend can work while shell `conda activate` no-ops (`micromamba activate` is tried; still fail-soft).
+- Custom installs outside well-known roots need `conda env list`, `~/.conda/environments.txt`, or PATH/`CONDA_EXE`.
+- Already-open tabs keep the old env until a **new** tab.
+
+**Closeout:** done. `package.json` is **0.4.0**. Next is Phase 4 (Jupyter via the browser tab). Spyder as an external IDE can follow this, still out of 1.2.
+
+**Effort:** 1–2 weeks. Windows + Git Bash activation is the only tricky part. Ships as **`0.4.0`**.
 
 ---
 
@@ -275,7 +289,7 @@ Was Phase 3. **Outcome:** command “Open JupyterLab for this project” starts 
 
 Do **not** build a native notebook editor here. The browser tab is still the Phase 1.3 webview (blank default, no Node in the guest).
 
-**Effort:** days to a week if conda spawn works. Ships as **`0.6.0`**.
+**Effort:** days to a week if conda spawn works. Ships as **`0.5.0`**.
 
 ---
 
@@ -287,20 +301,26 @@ Out of scope: every language, debugger, refactor-rename-across-repo, Pi-quality 
 
 Stack hint: `monaco-languageclient` + JSON-RPC stdio. Kill the server when the project/env changes.
 
-**Effort:** 1–3 months for “actually usable,” not “hello world.” Only start after Phases 0–3 are daily-driver quality (terminal, hooks, conda). Ships as **`0.7.0`**.
+**Effort:** 1–3 months for “actually usable,” not “hello world.” Only start after Phases 0–3 are daily-driver quality (terminal, hooks, conda). Ships as **`0.6.0`**.
 
 ---
 
 ## Phase 6 — Later, maybe
 
-Was Phase 5. Only after the above is boring and stable:
+Was Phase 5. Only after the above is boring and stable. Ships as **`0.7.0`+** (notebooks, hardening, and Windows packaging below).
 
 - Native `.ipynb` cells in a tab (kernel via `jupyter_client` in the conda env).
 - TypeScript/JavaScript LSP if the Node zip is the runtime.
 - Windows OpenSSH for the existing remote-project flow (separate from Git Bash local).
 - Search-in-files, extra pane layouts.
 - Config-dir `0700`, scrollback `tabId` allow-list, file/git IPC bound to known project cwds (security audit items 5–6; deferred).
-- Authenticode / installer, if a certificate exists and Software Center requires it.
+
+**Windows packaging (VS Code / Cursor-like installer).** Do not start this until Phase 6. Until then the no-admin path stays the portable zip: `npm run build:win` → `dist/win-unpacked`. Sequence:
+
+1. Keep the portable folder as the locked-down / no-admin escape hatch.
+2. Add electron-builder **NSIS Setup.exe**, default **per-user** install (no admin), Start Menu shortcuts — similar feel to VS Code/Cursor user installers. Machine-wide / Program Files stays optional and needs admin; not the default. Company Software Center / MSI may be a separate artifact if IT requires it.
+3. Then **Authenticode** code signing (SmartScreen / IT trust). Signing is currently off on purpose for portable builds.
+4. Then **auto-update** (e.g. GitHub Releases + electron-updater or equivalent), not only manual re-download.
 
 Explicit non-goals unless the product bet changes: cloud VMs, embedding Pi’s UI, replacing Pi extensions with Electron linters, PowerShell, full Windows “IDE.”
 
@@ -322,7 +342,7 @@ Parking lot. Do not start these instead of the numbered phases. Several items al
 | Open workspace in VS Code / Cursor | Phase 1.2 |
 | Spyder as an external IDE | after Phase 3 |
 | Config-dir `0700`, scrollback id, IPC cwd allow-list | Phase 6 (deferred) |
-| Authenticode / installer | Phase 6 unless IT blocks sooner |
+| Authenticode / NSIS per-user installer / auto-update | Phase 6 (portable zip until then) |
 
 **Git tree.** A branch/commit graph in the UI (log, parents, maybe checkout). Useful for “where am I” without leaving DevTool. Phase 1 explicitly stays out of a git graph so the file explorer does not grow into an IDE. If it happens, it is Phase 6-or-later: read-only first, no rebase UI.
 
@@ -344,7 +364,7 @@ Keep upstream `master` as a remote (`upstream`) and rebase or merge periodically
 6. Supported Electron line + blank browser tab (Phase 1.3). **Done** in `0.3.1`.
 7. Windows shortcut map + labels (Phase 1.4). **Done** in `0.3.2`.
 8. Hook authentication + SSH trust (Phase 2). **Done** in `0.3.2` (no minor bump).
-9. Conda env picker on spawn (Phase 3). **Done** in `0.5.0`.
+9. Conda env picker on spawn (Phase 3). **Done** in `0.4.0`.
 10. JupyterLab browser-tab launcher (Phase 4).
 11. Python and Markdown LSP spike, then harden (Phase 5).
 
@@ -384,10 +404,10 @@ Work machine constraints to re-test every phase: Git Bash, portable Node zip, Pi
 | 1 | `0.3.0` (shipped) | File tree CRUD + 1.2 external IDE handover | 1–2 weeks |
 | 1.3 | `0.3.1` (shipped) | Supported Electron + blank browser tab (webview stays) | a few evenings to a week |
 | 1.4 | `0.3.2` (shipped) | Existing shortcuts listed and shown as Windows keys | a short pass |
-| 2 | `0.4.0` (code landed; version stayed `0.3.2` this pass) | Hook secret + Pi extension off `/tmp`; SSH uses `~/.ssh/known_hosts` | ~1 week |
-| 3 | `0.5.0` (shipped) | Conda picker on spawn | 1–2 weeks |
-| 4 | `0.6.0` | JupyterLab in a browser tab | days |
-| 5 | `0.7.0` | Usable Python and Markdown LSPs | 1–2 months |
-| 6 | `0.8.0`+ | Native notebooks / extra LSPs / deferred hardening | open-ended |
+| 2 | stayed `0.3.2` (no `0.4.0` tag) | Hook secret + Pi extension off `/tmp`; SSH uses `~/.ssh/known_hosts` | ~1 week |
+| 3 | `0.4.0` (shipped) | Conda picker on spawn | 1–2 weeks |
+| 4 | `0.5.0` | JupyterLab in a browser tab | days |
+| 5 | `0.6.0` | Usable Python and Markdown LSPs | 1–2 months |
+| 6 | `0.7.0`+ | Native notebooks / extra LSPs / deferred hardening / NSIS+Authenticode+updates | open-ended |
 
 A year of evenings can yield a personal orchestrator. It will not become Cursor. That is success.

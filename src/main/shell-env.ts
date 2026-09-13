@@ -2,7 +2,7 @@ import { execFile as execFileCb, type ExecFileOptions } from 'child_process'
 import fs from 'fs'
 import path from 'path'
 import type { CondaEnvInfo } from '../shared/conda'
-import { condaSpawnPathDirs } from './conda-env'
+import { condaSpawnPathDirs, isCondaEnvPrefix } from './conda-env'
 import { extraWindowsSearchDirs } from './resolve-agent-command'
 
 type PathApi = typeof path.win32 | typeof path.posix
@@ -241,9 +241,13 @@ export function applyCondaEnv(
   const name = condaEnv?.name?.trim() ?? ''
   const prefix = condaEnv?.prefix?.trim() ?? ''
   if (!name || !prefix) return env
+  // Dead / missing prefix: do not pretend conda is active.
+  if (!isCondaEnvPrefix(prefix, deps)) return env
 
   const existsSync = deps.existsSync ?? fs.existsSync
   const dirs = condaSpawnPathDirs({ name, prefix }, deps).filter((dir) => existsSync(dir))
+  if (dirs.length === 0) return env
+
   let next = env
   // prependDirToPath puts one folder first, so walk last→first to keep conda's order.
   for (let i = dirs.length - 1; i >= 0; i--) {

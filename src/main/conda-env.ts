@@ -2,7 +2,14 @@ import { execFile as execFileCb, type ExecFileOptions } from 'child_process'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
-import type { CondaEnvInfo, CondaExecutable, CondaKind, CondaListResult } from '../shared/conda'
+import {
+  condaEnvsMatchingName,
+  type CondaEnvInfo,
+  type CondaExecutable,
+  type CondaKind,
+  type CondaListResult,
+  type ProjectCondaSelection
+} from '../shared/conda'
 
 type PathApi = typeof path.win32 | typeof path.posix
 
@@ -22,6 +29,10 @@ export interface CondaEnvDeps {
   readFileSync?: (filePath: string, encoding: 'utf-8') => string
   path?: PathApi
   execFile?: ExecFileFn
+  /** Host temp dir for the Windows Git Bash rcfile. Not used on macOS/Linux wrap. */
+  tmpdir?: () => string
+  mkdtempSync?: (prefix: string) => string
+  writeFileSync?: (filePath: string, data: string, encoding: BufferEncoding) => void
 }
 
 const execFile: ExecFileFn = execFileCb as ExecFileFn
@@ -474,18 +485,46 @@ export async function listCondaEnvs(
 }
 
 /**
+ * Unique live prefix for a saved env name.
+ * A cache hit is used only when that folder still looks like a conda env.
+ * Duplicate names (two prefixes, same name) return null — save `condaEnvPrefix` instead.
+ */
+function uniqueLivePrefixForName(envs: CondaEnvInfo[], wanted: string, deps: CondaEnvDeps): string | null {
+  const live = condaEnvsMatchingName(envs, wanted, platformOf(deps)).filter((env) =>
+    isCondaEnvPrefix(env.prefix, deps)
+  )
+  return live.length === 1 ? live[0].prefix : null
+}
+
+/**
  * Prefix for a saved env name. Uses the last list cache, then folders on disk.
  * Spawn is synchronous, so this must not shell out to conda.
  */
 export function resolveCondaEnvPrefix(name: string, deps: CondaEnvDeps = {}): string | null {
   const wanted = name.trim()
   if (!wanted) return null
-  const pool = [
-    ...(cachedList?.envs ?? []),
-    ...listCondaEnvsFromFilesystem(deps)
-  ]
-  const hit = pool.find((env) => env.name === wanted)
-  return hit?.prefix ?? null
+  const fromCache = uniqueLivePrefixForName(cachedList?.envs ?? [], wanted, deps)
+  if (fromCache) return fromCache
+  return uniqueLivePrefixForName(listCondaEnvsFromFilesystem(deps), wanted, deps)
+}
+
+/**
+ * Spawn lookup: saved prefix if it is still a conda env, else unique name lookup.
+ * Missing / deleted / ambiguous → null (caller treats as no project env).
+ */
+export function resolveProjectCondaEnv(
+  project: ProjectCondaSelection,
+  deps: CondaEnvDeps = {}
+): CondaEnvInfo | null {
+  const prefix = project.condaEnvPrefix?.trim() ?? ''
+  const name = project.condaEnvName?.trim() ?? ''
+  if (prefix && isCondaEnvPrefix(prefix, deps)) {
+    return { name: name || envNameFromPrefix(prefix, undefined, deps), prefix }
+  }
+  if (!name) return null
+  const fromName = resolveCondaEnvPrefix(name, deps)
+  if (!fromName) return null
+  return { name, prefix: fromName }
 }
 
 export function resetCondaEnvForTests(): void {
@@ -522,15 +561,63 @@ function condaShPath(condaEnv: CondaEnvInfo, deps: CondaEnvDeps = {}): string {
     .replace(/\\/g, '/')
 }
 
-function condaActivateCommands(condaEnv: CondaEnvInfo, deps: CondaEnvDeps = {}): string[] {
+function posixifyPrefix(prefix: string): string {
+  return prefix.replace(/\\/g, '/')
+}
+
+function condaActivateCommand(condaEnv: CondaEnvInfo): string {
+  const prefix = posixSingleQuote(posixifyPrefix(condaEnv.prefix.trim()))
   const name = posixSingleQuote(condaEnv.name.trim())
+  // Prefix first so two envs with the same name cannot flip to the wrong one.
+  // Name is a fallback for older conda that prefers the env name.
+  return `conda activate ${prefix} 2>/dev/null || conda activate ${name} 2>/dev/null || micromamba activate ${prefix} 2>/dev/null || micromamba activate ${name} 2>/dev/null || true`
+}
+
+function condaActivateCommands(condaEnv: CondaEnvInfo, deps: CondaEnvDeps = {}): string[] {
   const condaSh = posixSingleQuote(condaShPath(condaEnv, deps))
   return [
     'export CONDA_AUTO_ACTIVATE_BASE=false',
     `if [ -f ${condaSh} ]; then . ${condaSh}; fi`,
     // Fail soft: condabin prepend still leaves conda.exe on PATH if activate cannot run.
-    `conda activate ${name} 2>/dev/null || micromamba activate ${name} 2>/dev/null || true`
+    condaActivateCommand(condaEnv)
   ]
+}
+
+/** Git Bash `--rcfile` body: re-source conda.sh, activate, then the user's `.bashrc`. */
+export function windowsCondaRcfileContents(
+  condaEnv: CondaEnvInfo,
+  rcfilePath: string,
+  deps: CondaEnvDeps = {}
+): string {
+  const condaSh = posixSingleQuote(condaShPath(condaEnv, deps))
+  const quotedRc = posixSingleQuote(posixifyPrefix(rcfilePath))
+  const quotedDir = posixSingleQuote(posixifyPrefix(path.dirname(rcfilePath)))
+  return [
+    'export CONDA_AUTO_ACTIVATE_BASE=false',
+    `if [ -f ${condaSh} ]; then . ${condaSh}; fi`,
+    condaActivateCommand(condaEnv),
+    'if [ -f "$HOME/.bashrc" ]; then . "$HOME/.bashrc"; fi',
+    `rm -f ${quotedRc}`,
+    `rmdir ${quotedDir} 2>/dev/null || true`
+  ].join('\n') + '\n'
+}
+
+/**
+ * Write the Windows rcfile from Node so the shell never guesses a temp path.
+ * Returns null if mkdtemp/write fails — caller must skip the wrap (fail closed).
+ */
+function writeWindowsCondaRcfile(condaEnv: CondaEnvInfo, deps: CondaEnvDeps): string | null {
+  const tmpdir = deps.tmpdir ?? os.tmpdir
+  const mkdtempSync = deps.mkdtempSync ?? fs.mkdtempSync
+  const writeFileSync = deps.writeFileSync ?? fs.writeFileSync
+  try {
+    const dir = mkdtempSync(path.join(tmpdir(), 'devtool-conda-'))
+    const rcPath = path.join(dir, 'bashrc')
+    writeFileSync(rcPath, windowsCondaRcfileContents(condaEnv, rcPath, deps), 'utf8')
+    return rcPath
+  } catch {
+    return null
+  }
 }
 
 /**
@@ -541,11 +628,13 @@ function condaActivateCommands(condaEnv: CondaEnvInfo, deps: CondaEnvDeps = {}):
  * On Windows Git Bash, conda init is in the **login** profile (`.bash_profile`),
  * so `exec bash -i` would drop the conda function. Inner Git Bash uses `--rcfile`
  * that re-sources conda.sh, activates again, then `.bashrc`.
+ * The rcfile path is created in Node (`mkdtempSync`); never a guessable `$$` name.
  */
 export function condaActivateLoginScript(
   shellFile: string,
   condaEnv: CondaEnvInfo,
-  deps: CondaEnvDeps = {}
+  deps: CondaEnvDeps = {},
+  rcfilePath?: string
 ): string {
   const execFile = posixSingleQuote(shellFile.replace(/\\/g, '/'))
   const setup = condaActivateCommands(condaEnv, deps)
@@ -553,22 +642,8 @@ export function condaActivateLoginScript(
     return [...setup, `exec ${execFile} -i`].join('; ')
   }
 
-  const name = posixSingleQuote(condaEnv.name.trim())
-  const condaSh = posixSingleQuote(condaShPath(condaEnv, deps))
-  const rcLines = [
-    'export CONDA_AUTO_ACTIVATE_BASE=false',
-    `if [ -f ${condaSh} ]; then . ${condaSh}; fi`,
-    `conda activate ${name} 2>/dev/null || micromamba activate ${name} 2>/dev/null || true`,
-    'if [ -f "$HOME/.bashrc" ]; then . "$HOME/.bashrc"; fi'
-  ]
-  const printfArgs = rcLines.map((line) => posixSingleQuote(line)).join(' ')
-  return [
-    ...setup,
-    '_dt_rc=$(mktemp "${TMPDIR:-/tmp}/devtool-condaXXXXXX" 2>/dev/null || echo "${TMPDIR:-/tmp}/devtool-conda-$$")',
-    `printf '%s\\n' ${printfArgs} > "$_dt_rc"`,
-    'echo "rm -f $_dt_rc" >> "$_dt_rc"',
-    `exec ${execFile} --rcfile "$_dt_rc" -i`
-  ].join('; ')
+  const quotedRc = posixSingleQuote(posixifyPrefix(rcfilePath ?? ''))
+  return [...setup, `exec ${execFile} --rcfile ${quotedRc} -i`].join('; ')
 }
 
 /**
@@ -583,7 +658,16 @@ export function wrapInteractiveShellWithCondaActivate(
   const name = condaEnv?.name?.trim() ?? ''
   const prefix = condaEnv?.prefix?.trim() ?? ''
   if (!name || !prefix) return spawn
-  const script = condaActivateLoginScript(spawn.file, { name, prefix }, deps)
+
+  let rcfilePath: string | undefined
+  if (platformOf(deps) === 'win32') {
+    const written = writeWindowsCondaRcfile({ name, prefix }, deps)
+    // Fail closed: keep the original spawn. PATH prepend still applies.
+    if (!written) return spawn
+    rcfilePath = written
+  }
+
+  const script = condaActivateLoginScript(spawn.file, { name, prefix }, deps, rcfilePath)
   const args =
     platformOf(deps) === 'win32'
       ? ['--login', '-i', '-c', script]

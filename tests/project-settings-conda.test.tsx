@@ -50,20 +50,41 @@ afterEach(() => {
 })
 
 describe('ProjectSettings conda picker', () => {
-  it('lists conda envs and saves the selected name', async () => {
+  it('lists conda envs and saves the selected name and prefix', async () => {
     const onSave = vi.fn()
     render(<ProjectSettings project={localProject()} onSave={onSave} onClose={vi.fn()} />)
     const select = await screen.findByLabelText('Conda environment')
     await waitFor(() => {
       expect(screen.getByRole('option', { name: 'ml' })).toBeTruthy()
     })
-    fireEvent.change(select, { target: { value: 'ml' } })
+    fireEvent.change(select, { target: { value: 'C:\\Users\\me\\miniconda3\\envs\\ml' } })
     fireEvent.click(screen.getByRole('button', { name: 'Save' }))
-    expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ condaEnvName: 'ml' }))
+    expect(onSave).toHaveBeenCalledWith(
+      expect.objectContaining({
+        condaEnvName: 'ml',
+        condaEnvPrefix: 'C:\\Users\\me\\miniconda3\\envs\\ml'
+      })
+    )
     expect(
       screen.getByText(/Save, then open a new tab/, { exact: false })
     ).toBeTruthy()
     expect(screen.getByText(/conda init cannot leave you on base/, { exact: false })).toBeTruthy()
+  })
+
+  it('keeps a (saved) option when the stored prefix is not in the live list', async () => {
+    render(
+      <ProjectSettings
+        project={localProject({
+          condaEnvName: 'gone',
+          condaEnvPrefix: 'D:\\gone\\envs\\gone'
+        })}
+        onSave={vi.fn()}
+        onClose={vi.fn()}
+      />
+    )
+    expect(await screen.findByRole('option', { name: 'gone (saved)' })).toBeTruthy()
+    const select = screen.getByLabelText('Conda environment')
+    expect((select as HTMLSelectElement).value).toBe('D:\\gone\\envs\\gone')
   })
 
   it('hides the picker on remote projects', () => {

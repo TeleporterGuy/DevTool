@@ -24,7 +24,7 @@ Built with Electron, React, and TypeScript.
 
 **AI Tool Integration** -- Dedicated tabs for Pi (primary), Claude Code, and Codex. Hook server enables bidirectional communication with AI tools running in terminals.
 
-**Conda environments** -- Pick a conda or micromamba env per local project (Project Settings). New terminal and Pi tabs prepend that env onto PATH, the same way Settings → Node directory prepends a portable Node zip. DevTool does not create or delete envs.
+**Conda environments** -- Pick a conda or micromamba env per local project (Project Settings). New Pi/Claude/Codex tabs prepend that env onto PATH (plus install `condabin`). New interactive terminals run a login shell, then `conda activate` for the project env (Windows Git Bash uses `--rcfile` so conda init in `.bash_profile` is not dropped). Already-open tabs keep their old env. DevTool does not create or delete envs.
 
 **Remote SSH Projects** -- Connect to remote machines via SSH with port forwarding, SOCKS proxy tunneling, key authentication, health checks, and auto-reconnection.
 
