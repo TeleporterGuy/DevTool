@@ -661,9 +661,17 @@ export default function AiToolTab({ tabId, toolType, visible, sessionId, pane, p
             entry.restoring = true
             entry.pendingData = []
 
-            const attachResult = sshConfig
-              ? await window.api.ptySpawn(tabId, command, projectDir, entry.term.cols, entry.term.rows, args, extraEnv, projectId, sshConfig)
-              : await window.api.ptySpawn(tabId, command, projectDir, entry.term.cols, entry.term.rows, args, extraEnv)
+            const attachResult = await window.api.ptySpawn(
+              tabId,
+              command,
+              projectDir,
+              entry.term.cols,
+              entry.term.rows,
+              args,
+              extraEnv,
+              projectId,
+              sshConfig
+            )
 
             resizeTerminal(entry, attachResult.cols, attachResult.rows)
 

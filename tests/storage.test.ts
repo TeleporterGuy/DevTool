@@ -114,6 +114,22 @@ describe('Storage', () => {
     expect(loaded.projects[0].name).toBe('Test')
   })
 
+  it('round-trips a project conda env name and prefix', () => {
+    storage.saveProjects({
+      projects: [{
+        id: '1',
+        name: 'ML',
+        directory: 'C:\\Repos\\ml',
+        tasks: [],
+        condaEnvName: 'ml',
+        condaEnvPrefix: 'C:\\Users\\me\\miniconda3\\envs\\ml'
+      }]
+    })
+    const loaded = storage.loadProjects().projects[0]
+    expect(loaded.condaEnvName).toBe('ml')
+    expect(loaded.condaEnvPrefix).toBe('C:\\Users\\me\\miniconda3\\envs\\ml')
+  })
+
   it('saves and loads lastProjectId and lastTaskId', () => {
     const config = storage.loadConfig()
     expect(config.lastProjectId).toBeNull()

@@ -203,6 +203,13 @@ export interface Project {
   tunnel?: TunnelConfig
   shellCommand?: ShellCommandConfig
   aiToolArgs?: Partial<Record<AiTabType, string>>
+  /**
+   * Conda / micromamba env name (display + fallback lookup).
+   * Spawn prefers `condaEnvPrefix` when that folder is still a real env.
+   */
+  condaEnvName?: string
+  /** Absolute conda env prefix. Unique when two installs share a name. */
+  condaEnvPrefix?: string
   lifetimeStats?: { tasksCreated: number; notesCreated: number }
   tagIds?: string[]
 }

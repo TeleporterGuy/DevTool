@@ -25,6 +25,8 @@ import { agentCommandOverride, conptySpawnArgv, isAiAgentCommand, resolveAgentCo
 import { detectExternalEditors, openFolderInEditor } from './external-ide'
 import { isLocalInteractiveTerminal, resolveLocalTerminalSpawn } from './resolve-local-terminal'
 import { findGitBashExe, setPortableNodeDir } from './shell-env'
+import { listCondaEnvs, resolveProjectCondaEnv, wrapInteractiveShellWithCondaActivate } from './conda-env'
+import type { CondaEnvInfo } from '../shared/conda'
 import { resolveSafeProjectPath } from './project-fs-path'
 import {
   createProjectDirectory,
@@ -605,6 +607,7 @@ export class AppRuntime {
       return undefined
     })
 
+    ipcMain.handle('conda-list-envs', () => listCondaEnvs({}, { force: true }))
     ipcMain.handle('external-ide-detect', () => detectExternalEditors())
     ipcMain.handle('open-in-ide', async (_event, editorId: string, folder: string) => {
       const editors = this.config.externalEditors?.editors ?? []
@@ -1349,6 +1352,7 @@ export class AppRuntime {
       this.logDebug(`ptySpawn ssh id=${id} file=${sshFile}`)
       this.ptyManager.spawn(id, sshFile, os.tmpdir(), cols, rows, sshArgs, undefined, callbacks)
     } else {
+      const condaEnv = this.condaEnvForLocalProject(projectId)
       const isClaudeLocal = shell === 'claude' && extraEnv?.DEVTOOL_TAB_ID
       const isPiLocal = shell === AI_TAB_META.pi.command && extraEnv?.DEVTOOL_TAB_ID
       if (isClaudeLocal) {
@@ -1382,12 +1386,31 @@ export class AppRuntime {
       } else if (isLocalInteractiveTerminal(shell, spawnArgs)) {
         // Git Bash / $SHELL from Settings — do not inherit process.env.SHELL on Windows.
         const resolved = resolveLocalTerminalSpawn(this.config)
-        spawnFile = resolved.file
-        spawnArgs = resolved.args
+        const wrapped = wrapInteractiveShellWithCondaActivate(resolved, condaEnv)
+        spawnFile = wrapped.file
+        spawnArgs = wrapped.args
         this.logDebug(`ptySpawn resolve id=${id} shell=${shell} file=${spawnFile} args=${spawnArgs.join(' ')}`)
       }
-      this.ptyManager.spawn(id, spawnFile, cwd, cols, rows, spawnArgs, localEnv, callbacks)
+      this.ptyManager.spawn(id, spawnFile, cwd, cols, rows, spawnArgs, localEnv, callbacks, condaEnv)
     }
+  }
+
+  /** Local PTYs only. Remote tabs run on the SSH host, which has its own python. */
+  private condaEnvForLocalProject(projectId?: string): CondaEnvInfo | undefined {
+    if (!projectId) return undefined
+    const project = this.projectsStore.peek().projects.find((item) => item.id === projectId)
+    if (!project) return undefined
+    const resolved = resolveProjectCondaEnv(project)
+    if (!resolved) {
+      if (project.condaEnvName?.trim() || project.condaEnvPrefix?.trim()) {
+        this.logDebug(
+          `condaEnv missing name=${project.condaEnvName ?? ''} prefix=${project.condaEnvPrefix ?? ''} projectId=${projectId}`
+        )
+      }
+      return undefined
+    }
+    this.logDebug(`condaEnv name=${resolved.name} prefix=${resolved.prefix} projectId=${projectId}`)
+    return resolved
   }
 
   private killPty(id: string): void {

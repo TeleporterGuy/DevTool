@@ -1,6 +1,7 @@
 import { app, BrowserWindow, Menu, systemPreferences } from 'electron'
 import { join } from 'path'
 import { resolveShellEnv } from './shell-env'
+import { listCondaEnvs } from './conda-env'
 import { AppRuntime } from './app-runtime'
 import type { WindowGeometry, WindowViewState } from '../shared/types'
 
@@ -244,6 +245,8 @@ function createWindow(initialViewState?: WindowViewState | null, geometry?: Wind
 
 app.whenReady().then(async () => {
   await resolveShellEnv()
+  // Warm the conda env list so the first local PTY can resolve a saved name without waiting.
+  void listCondaEnvs().catch(() => {})
   if (process.platform === 'darwin') {
     // Trigger the macOS mic-access prompt so terminal subprocesses (e.g. Claude Code voice mode)
     // can inherit the grant. Without this, pty children hit TCC with no Info.plist in their

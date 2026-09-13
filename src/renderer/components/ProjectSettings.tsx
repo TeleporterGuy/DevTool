@@ -1,9 +1,16 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { AI_TAB_TYPES, AI_TAB_META, isRemoteProject, isShellCommandProject } from '../../shared/types'
 import type { Project, AiTabType } from '../../shared/types'
+import {
+  condaEnvFromSelection,
+  condaSavedOptionLabel,
+  condaSavedOptionVisible,
+  condaSelectValue,
+  type CondaEnvInfo
+} from '../../shared/conda'
 import { useApp } from '../context/AppContext'
 import TagPicker from './TagPicker'
-import { Modal, SetBlock, Field, HelperText, PrimaryButton } from './ui'
+import { Modal, SetBlock, Field, Select, HelperText, PrimaryButton } from './ui'
 import {
   dashboardIconUrl,
   fetchDashboardIconsMetadata,
@@ -19,6 +26,8 @@ interface Props {
     icon?: string
     tagIds?: string[]
     directory?: string
+    condaEnvName?: string
+    condaEnvPrefix?: string
   }) => void
   onClose: () => void
 }
@@ -36,8 +45,15 @@ export default function ProjectSettings({ project, onSave, onClose }: Props): Re
   const [showSuggestions, setShowSuggestions] = useState(false)
   const [tagIds, setTagIds] = useState<string[]>(project.tagIds ?? [])
   const [directory, setDirectory] = useState(project.directory)
+  const [condaValue, setCondaValue] = useState(() =>
+    condaSelectValue(project, [], typeof process !== 'undefined' ? process.platform : '')
+  )
+  const [condaEnvs, setCondaEnvs] = useState<CondaEnvInfo[]>([])
+  const [condaError, setCondaError] = useState<string | null>(null)
+  const [condaLoading, setCondaLoading] = useState(false)
   const suggestionsRef = useRef<HTMLDivElement>(null)
   const canEditDirectory = !isRemoteProject(project) && !isShellCommandProject(project)
+  const canPickConda = canEditDirectory
 
   useEffect(() => {
     let cancelled = false
@@ -46,6 +62,39 @@ export default function ProjectSettings({ project, onSave, onClose }: Props): Re
       .catch((e) => { if (!cancelled) setIconError(e instanceof Error ? e.message : 'Failed to load icons') })
     return () => { cancelled = true }
   }, [])
+
+  useEffect(() => {
+    if (!canPickConda) return
+    let cancelled = false
+    setCondaLoading(true)
+    window.api.condaListEnvs()
+      .then((result) => {
+        if (cancelled) return
+        setCondaEnvs(result.envs)
+        // Map a name-only saved value onto a unique live prefix when the list arrives.
+        setCondaValue((current) =>
+          condaSelectValue(
+            condaEnvFromSelection(current, result.envs),
+            result.envs,
+            typeof process !== 'undefined' ? process.platform : ''
+          )
+        )
+        if (result.error && result.envs.length === 0) {
+          setCondaError(result.error)
+        } else if (!result.executable && result.envs.length === 0) {
+          setCondaError('No conda or micromamba install found.')
+        } else {
+          setCondaError(null)
+        }
+      })
+      .catch((e) => {
+        if (!cancelled) setCondaError(e instanceof Error ? e.message : 'Failed to list conda envs')
+      })
+      .finally(() => {
+        if (!cancelled) setCondaLoading(false)
+      })
+    return () => { cancelled = true }
+  }, [canPickConda])
 
   const suggestions = useMemo(() => {
     if (!iconMetadata || !iconQuery.trim()) return []
@@ -73,6 +122,11 @@ export default function ProjectSettings({ project, onSave, onClose }: Props): Re
       tagIds,
     }
     if (canEditDirectory) updates.directory = cleanedDirectory
+    if (canPickConda) {
+      const selected = condaEnvFromSelection(condaValue, condaEnvs)
+      updates.condaEnvName = selected.condaEnvName
+      updates.condaEnvPrefix = selected.condaEnvPrefix
+    }
     onSave(updates)
     onClose()
   }
@@ -113,6 +167,35 @@ export default function ProjectSettings({ project, onSave, onClose }: Props): Re
             </button>
           </div>
           <HelperText>Update this when the project folder is moved.</HelperText>
+        </SetBlock>
+      )}
+
+      {canPickConda && (
+        <SetBlock label="Conda environment">
+          <Select
+            className="w-full"
+            value={condaValue}
+            onChange={(e) => setCondaValue(e.target.value)}
+            disabled={condaLoading}
+            aria-label="Conda environment"
+          >
+            <option value="">None (default PATH)</option>
+            {condaSavedOptionVisible(condaValue, condaEnvs) && (
+              <option value={condaValue}>{condaSavedOptionLabel(condaValue, project.condaEnvName)}</option>
+            )}
+            {condaEnvs.map((env) => (
+              <option key={env.prefix} value={env.prefix}>
+                {env.name}
+              </option>
+            ))}
+          </Select>
+          <HelperText>
+            {condaLoading
+              ? 'Looking for conda envs…'
+              : condaError
+                ? condaError
+                : 'Save, then open a new tab — already-open tabs keep their env. New terminals run conda activate after login so conda init cannot leave you on base. Pi tabs get the same env on PATH. Create or delete envs with conda itself.'}
+          </HelperText>
         </SetBlock>
       )}
 
