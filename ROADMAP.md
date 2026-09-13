@@ -229,9 +229,9 @@ Stay out of: remapping, user-defined keys, PowerShell chords, teaching Git Bash 
 
 Completely new session. Do not mix this with the Electron bump. Roadmap table still maps a later tagged closeout to **`0.4.0`**; this pass stays a patch on **`0.3.2`**.
 
-The inbox status dot is a local HTTP server (`src/main/hook-server.ts`) on `127.0.0.1` plus, for remotes, `ssh -R` to that port. Pi’s remote helper is written under `$HOME/.devtool-remote/`. SSH uses a DevTool `known_hosts` file and `accept-new` for first connect. Details: [SECURITY.md](./SECURITY.md).
+The inbox status dot is a local HTTP server (`src/main/hook-server.ts`) on `127.0.0.1` plus, for remotes, `ssh -R` to that port. Pi’s remote helper is written under `$HOME/.devtool-remote/`. SSH uses the user’s `~/.ssh/known_hosts` and `accept-new` for first connect; Remote directory is required. Details: [SECURITY.md](./SECURITY.md).
 
-**Outcome:** a random local process (or a process on the SSH host) cannot spoof inbox events without a secret DevTool minted. Remote Pi code is not planted via `/tmp`. New SSH sessions use a DevTool-managed `known_hosts`, `IdentitiesOnly`, and a `0700` control-socket directory.
+**Outcome:** a random local process (or a process on the SSH host) cannot spoof inbox events without a secret DevTool minted. Remote Pi code is not planted via `/tmp`. New SSH sessions use `~/.ssh/known_hosts` (no DevTool `UserKnownHostsFile` / `IdentitiesOnly`) and a `0700` control-socket directory.
 
 Work items:
 
@@ -239,11 +239,11 @@ Work items:
 
 2. **Pi extension off `/tmp`.** **Landed.** Write `pi-status-extension.mjs` under `$HOME/.devtool-remote/` with directory mode `0700`. Claude remote inject stays in `remoteDir/.claude/` (never `/tmp`). Local `-e` path is already asar-unpacked; left as-is.
 
-3. **SSH hardening (practical, not a company CA).** **Landed.** `IdentitiesOnly=yes` when a `keyFile` is set. Create `<config dir>/ssh` as `0700`. `UserKnownHostsFile` points at `<config dir>/ssh/known_hosts` with `HashKnownHosts=no` so the TOFU file is readable. `accept-new` still TOFU-accepts the first key; a *changed* key fails with a message that names that file. A full SSH CA / `StrictHostKeyChecking=yes` with preloaded keys can wait for a company install.
+3. **SSH (join3r follow-up `ec077fc`).** **Landed, then aligned with upstream.** Control-socket dir `<config dir>/ssh` is still `0700`. Host keys use `~/.ssh/known_hosts` (`StrictHostKeyChecking=accept-new`; a *changed* key fails with a message that names that file). No `IdentitiesOnly`. Remote directory is required (no `$HOME` probe / `projects.json` write-back). A full SSH CA can wait for a company install.
 
 Stay out of: config-dir `0700` for all of `~/.devtool`, scrollback `tabId` sanitizing, IPC cwd allow-list (deferred). Stay out of conda.
 
-**Verify:** unit tests cover 401/413, remote Pi path, IdentitiesOnly, known_hosts, and 0700. Local Pi/Claude status dots and a Windows Git Bash pass still need a machine check. A Linux SSH box can confirm known_hosts reuse + `$HOME/.devtool-remote`.
+**Verify:** unit tests cover 401/413, remote Pi path, `~/.ssh/known_hosts` / no `IdentitiesOnly`, required remote dir, and 0700 sockets. Local Pi/Claude status dots and a Windows Git Bash pass still need a machine check.
 
 **Closeout:** landed. `package.json` stays **0.3.2** (no numbered bump this pass). Next is Phase 3 (conda spawn picker).
 
@@ -310,7 +310,7 @@ Parking lot. Do not start these instead of the numbered phases. Several items al
 | --- | --- |
 | Supported Electron line + blank browser tab | Phase 1.3 |
 | Map existing shortcuts and show Windows keys (Ctrl, not ⌘) | Phase 1.4 |
-| Hook auth + SSH known_hosts / IdentitiesOnly / no `/tmp` Pi drop | Phase 2 |
+| Hook auth + Pi off `/tmp` + SSH via `~/.ssh/known_hosts` (required remote dir) | Phase 2 |
 | Conda env on spawn | Phase 3 |
 | JupyterLab in a browser tab | Phase 4 |
 | Language servers (Python, Markdown) | Phase 5 |
@@ -380,7 +380,7 @@ Work machine constraints to re-test every phase: Git Bash, portable Node zip, Pi
 | 1 | `0.3.0` (shipped) | File tree CRUD + 1.2 external IDE handover | 1–2 weeks |
 | 1.3 | `0.3.1` (shipped) | Supported Electron + blank browser tab (webview stays) | a few evenings to a week |
 | 1.4 | `0.3.2` (shipped) | Existing shortcuts listed and shown as Windows keys | a short pass |
-| 2 | `0.4.0` (code landed; version stays `0.3.2` this pass) | Hook secret + Pi extension off `/tmp` + SSH known_hosts | ~1 week |
+| 2 | `0.4.0` (code landed; version stays `0.3.2` this pass) | Hook secret + Pi extension off `/tmp`; SSH uses `~/.ssh/known_hosts` | ~1 week |
 | 3 | `0.5.0` | Conda picker on spawn | 1–2 weeks |
 | 4 | `0.6.0` | JupyterLab in a browser tab | days |
 | 5 | `0.7.0` | Usable Python and Markdown LSPs | 1–2 months |

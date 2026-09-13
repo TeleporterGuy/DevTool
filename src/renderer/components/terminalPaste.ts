@@ -1,16 +1,30 @@
-/** Keys that should paste OS clipboard into an xterm pane (not send ^V to the PTY). */
-export function isTerminalPasteKey(event: KeyboardEvent): boolean {
+/** OS the renderer runs on: preload `window.api.platform` in the app, else Node's platform. */
+export function terminalPastePlatform(): string {
+  if (typeof window !== 'undefined') {
+    const apiPlatform = window.api?.platform
+    if (apiPlatform) return apiPlatform
+  }
+  if (typeof process !== 'undefined' && process.platform) return process.platform
+  return 'darwin'
+}
+
+/**
+ * Keys that should paste OS clipboard into an xterm pane (not send ^V to the PTY).
+ * On macOS the paste modifier is Cmd; Ctrl+V is a real control character there
+ * (vim visual-block, readline quoted-insert) and must reach the shell.
+ */
+export function isTerminalPasteKey(event: KeyboardEvent, platform: string = terminalPastePlatform()): boolean {
   if (event.altKey) return false
   if (event.key === 'Insert' && event.shiftKey && !event.ctrlKey && !event.metaKey) return true
   if (event.key !== 'v' && event.key !== 'V') return false
-  return event.ctrlKey || event.metaKey
+  return platform === 'darwin' ? event.metaKey : event.ctrlKey
 }
 
-/** Edit → Paste (Cmd/Ctrl+V). Electron also injects that paste; we must not paste again. */
-export function isEditMenuPasteKey(event: KeyboardEvent): boolean {
+/** Edit → Paste (Cmd+V on macOS, Ctrl+V elsewhere). Electron also injects that paste; we must not paste again. */
+export function isEditMenuPasteKey(event: KeyboardEvent, platform: string = terminalPastePlatform()): boolean {
   if (event.altKey || event.shiftKey) return false
   if (event.key !== 'v' && event.key !== 'V') return false
-  return event.ctrlKey || event.metaKey
+  return platform === 'darwin' ? event.metaKey : event.ctrlKey
 }
 
 export async function readClipboardText(): Promise<string> {
@@ -36,16 +50,17 @@ export function pasteIntoTerminal(term: { paste(data: string): void }, text: str
 }
 
 /**
- * xterm key handler: `false` swallows the key so the shell never sees ^V.
- * Ctrl/Cmd+V is left to Electron's Paste menu (otherwise the clipboard is inserted twice).
+ * xterm key handler: `false` swallows the key so the shell never sees the paste chord.
+ * The Edit-menu paste key is left to Electron's Paste menu (otherwise the clipboard is inserted twice).
  * Shift+Insert and Ctrl+Shift+V have no menu role, so we paste ourselves.
  */
 export function handleTerminalPasteKey(
   event: KeyboardEvent,
-  term: { paste(data: string): void } | undefined
+  term: { paste(data: string): void } | undefined,
+  platform: string = terminalPastePlatform()
 ): boolean {
-  if (!isTerminalPasteKey(event)) return true
-  if (event.type === 'keydown' && term && !isEditMenuPasteKey(event)) {
+  if (!isTerminalPasteKey(event, platform)) return true
+  if (event.type === 'keydown' && term && !isEditMenuPasteKey(event, platform)) {
     void readClipboardText().then((text) => pasteIntoTerminal(term, text))
   }
   return false

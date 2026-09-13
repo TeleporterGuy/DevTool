@@ -36,7 +36,7 @@ export default function AddRemoteProject({ onAdd, onCancel, initialValues, allTa
   const [error, setError] = useState('')
   const [tagIds, setTagIds] = useState<string[]>([])
 
-  const isValid = host.trim() && username.trim()
+  const isValid = host.trim() && username.trim() && remoteDir.trim()
 
   const handleTest = async () => {
     if (!isValid) return
@@ -152,13 +152,12 @@ export default function AddRemoteProject({ onAdd, onCancel, initialValues, allTa
         </div>
       </SetBlock>
 
-      <SetBlock label="Remote directory (optional)">
+      <SetBlock label="Remote directory">
         <Field
           value={remoteDir}
           onChange={(e) => setRemoteDir(e.target.value)}
           placeholder="/home/deploy/my-project"
         />
-        <HelperText>Leave empty to start in that user’s home directory.</HelperText>
       </SetBlock>
 
       <SetBlock label="AI tool arguments (optional)">

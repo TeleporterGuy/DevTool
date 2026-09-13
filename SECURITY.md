@@ -57,7 +57,7 @@ Keep these; do not regress them.
 - Hook HTTP server binds **`127.0.0.1`**, not all interfaces. POSTs require `X-Devtool-Token`; bodies over 64 KiB are rejected. SOCKS and SSH `-L` are localhost-style binds by default.
 - Markdown preview is sanitized with DOMPurify.
 - Chrome DevTools Protocol (`DEVTOOL_CDP_PORT`) is opt-in; packaged runs do not open it.
-- SSH remote commands are mostly `execFile` plus quoting (`shellQuote` in `ssh-connection-manager.ts`), not a local `sh -c` string built from untrusted pieces. Control-socket dir is `0700`. `UserKnownHostsFile` is `<config dir>/ssh/known_hosts`. `IdentitiesOnly=yes` when a key file is set.
+- SSH remote commands are mostly `execFile` plus quoting (`shellQuote` in `ssh-connection-manager.ts`), not a local `sh -c` string built from untrusted pieces. Control-socket dir is `0700`. Host keys use `~/.ssh/known_hosts` (`StrictHostKeyChecking=accept-new`). Identity selection is left to ssh (optional `-i` key file, no `IdentitiesOnly`).
 - Dev and packaged config dirs are split on purpose (`src/main/config-dir.ts`).
 - Spectre-mitigated `node-pty` builds stay on; do not strip that to make compile easier (see README).
 - Do not `chmod +s` `chrome-sandbox` (AGENTS.md).
@@ -76,7 +76,7 @@ Severity is “what a company security review usually does with it,” not CVSS.
 
 **Renderer / webview: remaining gaps.** Main window still has `sandbox: false` and `webviewTag: true`. There is no CSP in `src/renderer/index.html`, no `setWindowOpenHandler`. DevTools are always available (app menu and the browser-tab button). Local browser tabs use the default session. Remote tabs use `persist:browser-${projectId}` plus SOCKS through the SSH host — company browsing can egress via that box. Guest Node is locked off (Phase 1.3); that does not sandbox the rest of the IPC surface.
 
-**SSH first-connect is still TOFU, not company PKI.** Master, SOCKS, and spawn args keep `StrictHostKeyChecking=accept-new`. First connection to the wrong host is remembered in `<config dir>/ssh/known_hosts` (unhashed hostnames, not mixed with `~/.ssh/known_hosts`). A *changed* key fails with a message that names that file. No SSH CA. `projects.json` stores host / user / port / **path** to a key file.
+**SSH first-connect is still TOFU, not company PKI.** Master, SOCKS, and spawn args keep `StrictHostKeyChecking=accept-new`. First connection to the wrong host is remembered in `~/.ssh/known_hosts` (same file as terminal `ssh`). A *changed* key fails with a message that names that file. No SSH CA. `projects.json` stores host / user / port / **path** to a key file. Remote directory is required.
 
 **Privileged IPC is a wide main-process API.** After XSS or a webview escape, the renderer can already do what the user can do. Extra problems even then:
 
@@ -132,7 +132,7 @@ Recorded so this file and [ROADMAP.md](./ROADMAP.md) stay aligned. Findings belo
 | 2. Upgrade Electron | **Done** in `0.3.1` (43.6.0). Stay on a supported major. | **Phase 1.3** |
 | 3. Default browser page | **Done.** New tabs are `about:blank`, not Google. | **Phase 1.3** |
 | 3. Webview / Node | **Done.** Webview kept; guest pages do not get Node. | **Phase 1.3** |
-| 4. Hook secret, Pi off `/tmp`, SSH known_hosts | **Done.** Token + body cap; `$HOME/.devtool-remote/`; DevTool `known_hosts` + `IdentitiesOnly` + socket dir `0700`. First-connect TOFU remains. | **Phase 2** |
+| 4. Hook secret, Pi off `/tmp`, SSH trust | **Done.** Token + body cap; `$HOME/.devtool-remote/`; `~/.ssh/known_hosts` (no `IdentitiesOnly`); socket dir `0700`; remote dir required. First-connect TOFU remains. | **Phase 2** |
 | 5. Config dir `0700`, scrollback id, IPC cwd allow-list | Deferred. | Phase 6 |
 | 6. Company pilot / DLP | Deferred. | Phase 6 / outside the repo |
 
@@ -145,7 +145,7 @@ Work in this order so each step is demoable. Roadmap numbering after the audit:
 1. **Policy accept** — done as “same as a terminal.”
 2. **Phase 1.3** — **done** (`0.3.1`): Electron 43.6.0; blank browser tab; guest Node off; signing still off.
 3. **Phase 1.4** — **done** (`0.3.2`): Windows shortcut labels. Labels only; no security change.
-4. **Phase 2** — **done** (`0.3.2`, no minor bump): hook authentication; Pi extension off `/tmp`; SSH `IdentitiesOnly` + DevTool `known_hosts` + socket dir `0700`.
+4. **Phase 2** — **done** (`0.3.2`, no minor bump): hook authentication; Pi extension off `/tmp`; SSH via `~/.ssh/known_hosts` (no `IdentitiesOnly`); required remote dir; socket dir `0700`.
 5. Then conda (Phase 3), Jupyter (Phase 4), LSP (Phase 5) as before.
 6. **Deferred:** config-dir ACLs, scrollback `tabId`, IPC cwd allow-list, Authenticode, a formal pilot.
 
@@ -178,4 +178,4 @@ Roadmap phases (conda, Jupyter, LSP) add more child processes and another browse
 
 Parking-lot ideas that would *increase* surface if pulled in: native notebook kernels, Windows OpenSSH as a second remote stack, extra LSPs talking stdio as the same user.
 
-This audit started as a snapshot at `0.3.0`. **Phase 1.3 (`0.3.1`):** Electron 43.6.0, `about:blank` new tabs, guest webview Node locked off. **Phase 1.4 (`0.3.2`):** Windows shortcut labels only. **Phase 2 (`0.3.2`, no minor bump):** hook shared secret + 64 KiB body cap; remote Pi extension under `$HOME/.devtool-remote/` (`0700`); SSH `UserKnownHostsFile` + `IdentitiesOnly` when a key is set + control-socket dir `0700`; changed host keys fail with a message that names the DevTool `known_hosts` file. Still open: unsigned Windows folder, no CSP, first-connect TOFU, wide IPC, plaintext `~/.devtool`.
+This audit started as a snapshot at `0.3.0`. **Phase 1.3 (`0.3.1`):** Electron 43.6.0, `about:blank` new tabs, guest webview Node locked off. **Phase 1.4 (`0.3.2`):** Windows shortcut labels only. **Phase 2 (`0.3.2`, no minor bump):** hook shared secret + 64 KiB body cap; remote Pi extension under `$HOME/.devtool-remote/` (`0700`); SSH uses `~/.ssh/known_hosts` and `accept-new` (no DevTool `UserKnownHostsFile` / `IdentitiesOnly`); remote directory required; control-socket dir `0700`. Still open: unsigned Windows folder, no CSP, first-connect TOFU, wide IPC, plaintext `~/.devtool`.

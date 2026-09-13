@@ -56,6 +56,17 @@ function findOnPath(
   platform: NodeJS.Platform,
   env: NodeJS.ProcessEnv
 ): DetectedEditor | null {
+  if (platform !== 'win32') {
+    // resolveAgentCommand leaves PATH search to the OS on Unix, which is fine
+    // for spawning but useless for detection — walk PATH ourselves.
+    const existsSync = deps.existsSync ?? fs.existsSync
+    for (const dir of (env.PATH || '').split(path.posix.delimiter)) {
+      if (!dir) continue
+      const candidate = path.posix.join(dir, logical)
+      if (existsSync(candidate)) return { name, command: candidate }
+    }
+    return null
+  }
   try {
     const command = resolveAgentCommand(logical, {
       platform,

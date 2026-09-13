@@ -39,13 +39,14 @@ describe('buildReadRemoteFileArgs', () => {
     expect(args.some(a => a === 'user@host.example')).toBe(true)
   })
 
-  it('uses the DevTool known_hosts file', () => {
+  it('uses the user\'s own known_hosts and leaves identity selection to ssh', () => {
     const args = buildReadRemoteFileArgs(SOCKET_DIR, 'proj-1', SSH_CONFIG, 'README.md')
-    expect(args).toContain(`UserKnownHostsFile=${path.join(SOCKET_DIR, 'known_hosts')}`)
+    expect(args).toContain('StrictHostKeyChecking=accept-new')
+    expect(args).not.toContain('UserKnownHostsFile')
     expect(args).not.toContain('IdentitiesOnly=yes')
   })
 
-  it('sets IdentitiesOnly when a key file is configured', () => {
+  it('passes the key file with -i when configured', () => {
     const args = buildReadRemoteFileArgs(
       SOCKET_DIR,
       'proj-1',
@@ -54,6 +55,6 @@ describe('buildReadRemoteFileArgs', () => {
     )
     expect(args).toContain('-i')
     expect(args).toContain('/home/user/.ssh/id_ed25519')
-    expect(args).toContain('IdentitiesOnly=yes')
+    expect(args).not.toContain('IdentitiesOnly=yes')
   })
 })

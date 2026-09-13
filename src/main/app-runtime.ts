@@ -720,9 +720,8 @@ export class AppRuntime {
       // The tunnel and the SOCKS proxy are restored by the manager's connect
       // path and the 'connected' status handler respectively, so that automatic
       // reconnects go through exactly the same restoration as this one.
-      const result = await this.sshManager.connect(projectId, sshConfig, { tunnel: this.getProjectTunnel(projectId) ?? null })
+      await this.sshManager.connect(projectId, sshConfig, { tunnel: this.getProjectTunnel(projectId) ?? null })
       this.sshManager.startHealthChecks(projectId, sshConfig)
-      return result
     })
 
     ipcMain.handle('ssh-disconnect', async (_event, projectId: string, sshConfig: SshConfig) => {
@@ -1314,8 +1313,7 @@ export class AppRuntime {
         throw new Error('SSH connection not established')
       }
 
-      const storedDir = this.sshManager.effectiveRemoteDir(projectId, sshConfig)
-      const remoteCwd = (cwd && cwd.trim()) || storedDir
+      const remoteCwd = cwd || sshConfig.remoteDir
       const isClaudeRemote = shell === 'claude' && extraEnv?.DEVTOOL_TAB_ID
       const isPiRemote = shell === AI_TAB_META.pi.command && extraEnv?.DEVTOOL_TAB_ID
       let hookInjectPrefix = ''

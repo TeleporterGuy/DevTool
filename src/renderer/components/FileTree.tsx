@@ -688,7 +688,7 @@ const FileTree = React.forwardRef<FileTreeHandle, Props>(function FileTree({
       const listing = childrenCache[parentDirOf(path)] ?? []
       const entry = listing.find((item) => item.relativePath === path)
       startRename(path, entry?.type === 'directory', name)
-    } else if (event.key === 'Delete' || event.key === 'Backspace') {
+    } else if (event.key === 'Delete' || (event.key === 'Backspace' && (event.metaKey || event.ctrlKey))) {
       if (!path) return
       event.preventDefault()
       const listing = childrenCache[parentDirOf(path)] ?? []
