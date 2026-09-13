@@ -152,7 +152,7 @@ export default function AddRemoteProject({ onAdd, onCancel, initialValues, allTa
         </div>
       </SetBlock>
 
-      <SetBlock label="Remote directory (optional)">
+      <SetBlock label="Remote directory">
         <Field
           value={remoteDir}
           onChange={(e) => setRemoteDir(e.target.value)}
