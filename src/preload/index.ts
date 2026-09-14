@@ -323,8 +323,13 @@ const api = {
   // Native notebooks (Phase 4). One jupyter_client helper per tab, local conda env only.
   notebookKernelStart: (tabId: string, projectId: string, cwd: string): Promise<{ error?: string; code?: string }> =>
     ipcRenderer.invoke('notebook-kernel-start', tabId, projectId, cwd),
-  notebookKernelExecute: (tabId: string, requestId: string, code: string): Promise<{ error?: string }> =>
-    ipcRenderer.invoke('notebook-kernel-execute', tabId, requestId, code),
+  notebookKernelExecute: (
+    tabId: string,
+    requestId: string,
+    code: string,
+    cellId?: string
+  ): Promise<{ error?: string }> =>
+    ipcRenderer.invoke('notebook-kernel-execute', tabId, requestId, code, cellId),
   notebookKernelInterrupt: (tabId: string): Promise<void> =>
     ipcRenderer.invoke('notebook-kernel-interrupt', tabId),
   notebookKernelRestart: (tabId: string, projectId: string, cwd: string): Promise<{ error?: string; code?: string }> =>

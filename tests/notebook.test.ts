@@ -9,6 +9,10 @@ import {
   isNotebookFile,
   joinNotebookText,
   moveCell,
+  NOTEBOOK_MIME_CHAR_LIMIT,
+  NOTEBOOK_PNG_OMITTED,
+  NOTEBOOK_STREAM_CHAR_LIMIT,
+  NOTEBOOK_TRUNCATED_MARKER,
   parseKernelEventLine,
   parseNotebook,
   serializeNotebook,
@@ -200,6 +204,58 @@ describe('kernel message handling', () => {
     expect(parseKernelEventLine('{"event":"ready"}')).toEqual({ event: 'ready' })
     expect(parseKernelEventLine('  ')).toBeNull()
     expect(parseKernelEventLine('not-json')).toBeNull()
+    expect(parseKernelEventLine('{"event":"nope"}')).toBeNull()
+  })
+
+  it('requires per-event fields and ignores malformed lines', () => {
+    expect(parseKernelEventLine('{"event":"stream","name":"stdout","text":"x"}')).toBeNull()
+    expect(parseKernelEventLine('{"event":"stream","id":"a#1","name":"other","text":"x"}')).toBeNull()
+    expect(parseKernelEventLine('{"event":"stream","id":"a#1","name":"stdout"}')).toBeNull()
+    expect(parseKernelEventLine('{"event":"status"}')).toBeNull()
+    expect(parseKernelEventLine('{"event":"status","execution_state":"weird"}')).toBeNull()
+    expect(parseKernelEventLine('{"event":"fail","code":"cwd"}')).toBeNull()
+    expect(parseKernelEventLine('{"event":"execute_reply","id":"a#1","status":"nope"}')).toBeNull()
+    expect(parseKernelEventLine('{"event":"error","id":"a#1","ename":"E"}')).toBeNull()
+    expect(parseKernelEventLine('{"event":"execute_result","id":"a#1"}')).toBeNull()
+    expect(parseKernelEventLine('{"event":"ready","kernel_pid":-1}')).toBeNull()
+    expect(parseKernelEventLine('{"event":"ready","kernel_pid":"12"}')).toBeNull()
+    expect(parseKernelEventLine('{"event":"ready","kernel_pid":4242}')).toEqual({
+      event: 'ready',
+      kernel_pid: 4242
+    })
+    expect(
+      parseKernelEventLine('{"event":"stream","id":"a#1","cellId":"a","name":"stdout","text":"ok"}')
+    ).toEqual({
+      event: 'stream',
+      id: 'a#1',
+      cellId: 'a',
+      name: 'stdout',
+      text: 'ok'
+    })
+  })
+
+  it('truncates oversized stream text and omits huge PNGs', () => {
+    const huge = 'x'.repeat(NOTEBOOK_STREAM_CHAR_LIMIT + 50)
+    const stream = parseKernelEventLine(
+      JSON.stringify({ event: 'stream', id: 'a#1', name: 'stdout', text: huge })
+    )
+    expect(stream?.event).toBe('stream')
+    if (stream?.event !== 'stream') return
+    expect(stream.text.length).toBeLessThanOrEqual(NOTEBOOK_STREAM_CHAR_LIMIT)
+    expect(stream.text.endsWith(NOTEBOOK_TRUNCATED_MARKER)).toBe(true)
+
+    const png = 'A'.repeat(NOTEBOOK_MIME_CHAR_LIMIT + 10)
+    const display = parseKernelEventLine(
+      JSON.stringify({
+        event: 'display_data',
+        id: 'a#1',
+        data: { 'image/png': png, 'text/plain': '<Figure>' }
+      })
+    )
+    expect(display?.event).toBe('display_data')
+    if (display?.event !== 'display_data') return
+    expect(display.data['image/png']).toBeUndefined()
+    expect(String(display.data['text/plain'])).toContain(NOTEBOOK_PNG_OMITTED)
   })
 
   it('appends stream chunks and merges consecutive stdout', () => {

@@ -2,6 +2,8 @@ import React from 'react'
 import {
   mimePlainText,
   mimePng,
+  NOTEBOOK_PNG_OMITTED,
+  NOTEBOOK_TRUNCATED_MARKER,
   type NotebookOutput
 } from '../../shared/notebook'
 
@@ -9,16 +11,29 @@ function stripAnsi(text: string): string {
   return text.replace(/\u001b\[[0-9;]*m/g, '')
 }
 
+function looksTruncated(text: string): boolean {
+  return text.includes(NOTEBOOK_TRUNCATED_MARKER.trim()) || text.includes(NOTEBOOK_PNG_OMITTED)
+}
+
+function TruncationNote(): React.ReactElement {
+  return (
+    <div className="px-3 pb-1.5 text-2xs text-text-muted">Output truncated.</div>
+  )
+}
+
 function OutputBlock({ output }: { output: NotebookOutput }): React.ReactElement | null {
   if (output.type === 'stream') {
     const color = output.name === 'stderr' ? 'var(--color-danger)' : undefined
     return (
-      <pre
-        className="m-0 px-3 py-1.5 text-[12px] leading-snug font-mono whitespace-pre-wrap break-words"
-        style={{ color }}
-      >
-        {output.text}
-      </pre>
+      <>
+        <pre
+          className="m-0 px-3 py-1.5 text-[12px] leading-snug font-mono whitespace-pre-wrap break-words"
+          style={{ color }}
+        >
+          {output.text}
+        </pre>
+        {looksTruncated(output.text) && <TruncationNote />}
+      </>
     )
   }
 
@@ -27,18 +42,22 @@ function OutputBlock({ output }: { output: NotebookOutput }): React.ReactElement
       ? output.traceback.map(stripAnsi).join('\n')
       : `${output.ename}: ${output.evalue}`
     return (
-      <pre
-        className="m-0 px-3 py-1.5 text-[12px] leading-snug font-mono whitespace-pre-wrap break-words"
-        style={{ color: 'var(--color-danger)' }}
-      >
-        {body}
-      </pre>
+      <>
+        <pre
+          className="m-0 px-3 py-1.5 text-[12px] leading-snug font-mono whitespace-pre-wrap break-words"
+          style={{ color: 'var(--color-danger)' }}
+        >
+          {body}
+        </pre>
+        {looksTruncated(body) && <TruncationNote />}
+      </>
     )
   }
 
   if (output.type === 'execute_result' || output.type === 'display_data') {
     const png = mimePng(output.data)
     const text = mimePlainText(output.data)
+    const truncated = (text != null && looksTruncated(text)) || Object.values(output.data).some(looksTruncated)
     return (
       <div className="px-3 py-1.5">
         {png && (
@@ -51,6 +70,7 @@ function OutputBlock({ output }: { output: NotebookOutput }): React.ReactElement
         {!png && text && (
           <pre className="m-0 text-[12px] leading-snug font-mono whitespace-pre-wrap break-words">{text}</pre>
         )}
+        {truncated && <TruncationNote />}
       </div>
     )
   }

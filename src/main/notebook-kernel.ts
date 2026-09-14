@@ -1,9 +1,9 @@
-import { spawn, type ChildProcessWithoutNullStreams } from 'child_process'
+import { execFile, spawn, type ChildProcessWithoutNullStreams, type ExecFileException } from 'child_process'
 import fs from 'fs'
 import path from 'path'
 import type { CondaEnvInfo } from '../shared/conda'
+import { NotebookExecuteGate } from '../shared/notebook-execute'
 import {
-  NOTEBOOK_ERROR_MISSING_JUPYTER,
   NOTEBOOK_ERROR_NO_CONDA,
   NOTEBOOK_ERROR_NO_PYTHON,
   parseKernelEventLine,
@@ -87,6 +87,77 @@ export type NotebookKernelListener = (tabId: string, event: NotebookKernelEvent)
 interface KernelSession {
   child: ChildProcessWithoutNullStreams
   buffer: string
+  kernelPid: number | null
+  executeGate: NotebookExecuteGate
+}
+
+type KillFn = (pid: number, signal?: NodeJS.Signals | number) => boolean
+type ExecFileFn = (
+  file: string,
+  args: string[],
+  callback: (error: ExecFileException | null) => void
+) => unknown
+
+/** Exit copy for a helper that already died. Missing-jupyter is only helper exit 2. */
+export function deadKernelExitMessage(
+  code: number | null,
+  signal: NodeJS.Signals | string | null
+): string {
+  if (signal) return `Kernel exited (${signal}).`
+  if (code && code !== 0) return `Kernel exited (code ${code}).`
+  return 'Kernel exited.'
+}
+
+function tryKill(kill: KillFn, pid: number, signal: NodeJS.Signals | number): void {
+  try {
+    kill(pid, signal)
+  } catch {
+    /* already gone */
+  }
+}
+
+/**
+ * Last-resort teardown so ipykernel grandchildren do not orphan.
+ * Windows: taskkill /T on helper (and kernel PID if different).
+ * POSIX: SIGKILL kernel pid, then the helper process group (`-helperPid`).
+ */
+export function killProcessTree(
+  pids: { helperPid?: number | null; kernelPid?: number | null },
+  deps: {
+    platform?: NodeJS.Platform
+    kill?: KillFn
+    execFile?: ExecFileFn
+  } = {}
+): void {
+  const platform = deps.platform ?? process.platform
+  const kill = deps.kill ?? process.kill.bind(process)
+  const runExecFile = deps.execFile ?? execFile
+  const helperPid = pids.helperPid && pids.helperPid > 0 ? pids.helperPid : null
+  const kernelPid = pids.kernelPid && pids.kernelPid > 0 ? pids.kernelPid : null
+
+  if (platform === 'win32') {
+    const seen = new Set<number>()
+    for (const pid of [helperPid, kernelPid]) {
+      if (!pid || seen.has(pid)) continue
+      seen.add(pid)
+      try {
+        runExecFile('taskkill', ['/T', '/F', '/PID', String(pid)], () => {
+          /* ignore — process may already be gone */
+        })
+      } catch {
+        tryKill(kill, pid, 'SIGKILL')
+      }
+    }
+    return
+  }
+
+  if (kernelPid && kernelPid !== helperPid) {
+    tryKill(kill, kernelPid, 'SIGKILL')
+  }
+  if (helperPid) {
+    tryKill(kill, -helperPid, 'SIGKILL')
+    tryKill(kill, helperPid, 'SIGKILL')
+  }
 }
 
 /**
@@ -123,10 +194,18 @@ export class NotebookKernelManager {
       cwd: prepared.cwd,
       env: prepared.env,
       stdio: ['pipe', 'pipe', 'pipe'],
-      windowsHide: true
+      windowsHide: true,
+      // POSIX: new process group so we can kill(-pid) the helper tree.
+      // Windows: leave false; taskkill /T is the tree kill.
+      detached: process.platform !== 'win32'
     })
 
-    const session: KernelSession = { child, buffer: '' }
+    const session: KernelSession = {
+      child,
+      buffer: '',
+      kernelPid: null,
+      executeGate: new NotebookExecuteGate()
+    }
     this.sessions.set(tabId, session)
 
     child.stdout.setEncoding('utf8')
@@ -138,7 +217,15 @@ export class NotebookKernelManager {
       session.buffer = lines.pop() ?? ''
       for (const line of lines) {
         const event = parseKernelEventLine(line)
-        if (event) this.emit(tabId, event)
+        if (!event) continue
+        if (event.event === 'ready' && event.kernel_pid && event.kernel_pid > 0) {
+          session.kernelPid = event.kernel_pid
+        }
+        if (event.event === 'execute_reply') {
+          const next = session.executeGate.complete(event.id)
+          if (next) this.writeExecute(session, next.requestId, next.code, next.cellId)
+        }
+        this.emit(tabId, event)
       }
     })
 
@@ -152,18 +239,17 @@ export class NotebookKernelManager {
 
     child.on('exit', (code, signal) => {
       if (this.sessions.get(tabId)?.child !== child) return
+      const kernelPid = session.kernelPid
+      const helperPid = child.pid ?? null
       this.sessions.delete(tabId)
+      // Helper crashed or exited without our shutdown path — still reap ipykernel.
+      killProcessTree({ helperPid, kernelPid })
       if (code === 2) {
         // Helper already emitted a fail event for missing jupyter_client / ipykernel.
         this.emit(tabId, { event: 'status', execution_state: 'dead' })
         return
       }
-      const reason = signal
-        ? `Kernel exited (${signal}).`
-        : code
-          ? `Kernel exited (code ${code}). ${NOTEBOOK_ERROR_MISSING_JUPYTER}`
-          : 'Kernel exited.'
-      this.emit(tabId, { event: 'dead', message: reason })
+      this.emit(tabId, { event: 'dead', message: deadKernelExitMessage(code, signal) })
       this.emit(tabId, { event: 'status', execution_state: 'dead' })
     })
 
@@ -177,16 +263,21 @@ export class NotebookKernelManager {
     return {}
   }
 
-  execute(tabId: string, requestId: string, code: string): { error?: string } {
+  execute(
+    tabId: string,
+    requestId: string,
+    code: string,
+    cellId?: string
+  ): { error?: string } {
     const session = this.sessions.get(tabId)
     if (!session) return { error: 'Kernel is not running. Click Restart kernel.' }
-    try {
-      session.child.stdin.write(`${JSON.stringify({ cmd: 'execute', id: requestId, code })}\n`)
-      return {}
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err)
-      return { error: message }
-    }
+    const action = session.executeGate.submit({
+      requestId,
+      code,
+      cellId: cellId ?? ''
+    })
+    if (action === 'start') this.writeExecute(session, requestId, code, cellId)
+    return {}
   }
 
   interrupt(tabId: string): void {
@@ -203,20 +294,7 @@ export class NotebookKernelManager {
     const session = this.sessions.get(tabId)
     if (!session) return
     this.sessions.delete(tabId)
-    try {
-      session.child.stdin.write(`${JSON.stringify({ cmd: 'shutdown' })}\n`)
-    } catch {
-      // Ignore.
-    }
-    const child = session.child
-    const timer = setTimeout(() => {
-      try {
-        child.kill()
-      } catch {
-        // Ignore.
-      }
-    }, 2000)
-    child.once('exit', () => clearTimeout(timer))
+    this.forceShutdownSession(session)
   }
 
   shutdownAll(): void {
@@ -227,5 +305,48 @@ export class NotebookKernelManager {
 
   has(tabId: string): boolean {
     return this.sessions.has(tabId)
+  }
+
+  private forceShutdownSession(session: KernelSession): void {
+    const helperPid = session.child.pid ?? null
+    const kernelPid = session.kernelPid
+    let settled = false
+    const finishKill = (): void => {
+      if (settled) return
+      settled = true
+      killProcessTree({ helperPid, kernelPid })
+    }
+
+    try {
+      session.child.stdin.write(`${JSON.stringify({ cmd: 'shutdown' })}\n`)
+    } catch {
+      // Ignore.
+    }
+
+    const timer = setTimeout(finishKill, 2000)
+    session.child.once('exit', () => {
+      clearTimeout(timer)
+      // Helper exited — still kill leftover kernel PID / process group if needed.
+      finishKill()
+    })
+    session.child.once('error', () => {
+      clearTimeout(timer)
+      finishKill()
+    })
+  }
+
+  private writeExecute(
+    session: KernelSession,
+    requestId: string,
+    code: string,
+    cellId?: string
+  ): void {
+    try {
+      session.child.stdin.write(
+        `${JSON.stringify({ cmd: 'execute', id: requestId, cellId, code })}\n`
+      )
+    } catch {
+      // Process already gone.
+    }
   }
 }

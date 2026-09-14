@@ -1,11 +1,21 @@
 # JSON-lines bridge: DevTool main process <-> jupyter_client / ipykernel.
 # stdin commands, stdout events. Keep prints as JSON; diagnostics go to stderr.
+#
+# Stream / mime caps must stay in sync with src/shared/notebook.ts.
 from __future__ import annotations
 
+import atexit
 import json
+import signal
 import sys
 import threading
 import traceback
+
+STREAM_CHAR_LIMIT = 200_000
+MIME_CHAR_LIMIT = 1_500_000
+TRUNCATED_MARKER = "\n[truncated]\n"
+PNG_OMITTED = "[truncated: image/png omitted (too large)]"
+
 
 def emit(payload):
     sys.stdout.write(json.dumps(payload, ensure_ascii=False) + "\n")
@@ -15,6 +25,15 @@ def emit(payload):
 def fail(code, message):
     emit({"event": "fail", "code": code, "message": message})
     sys.exit(2)
+
+
+def cap_text(text, limit=STREAM_CHAR_LIMIT):
+    if not isinstance(text, str):
+        text = str(text)
+    if len(text) <= limit:
+        return text
+    keep = max(0, limit - len(TRUNCATED_MARKER))
+    return text[:keep] + TRUNCATED_MARKER
 
 
 try:
@@ -37,34 +56,100 @@ except ImportError:
 
 
 km = KernelManager()
+kc = None
+lock = threading.Lock()
+# jupyter msg_id -> {"id": request id, "cellId": cell id}
+pending = {}
+alive = True
+_shutting_down = False
+
+
+def kernel_pid():
+    try:
+        provisioner = getattr(km, "provisioner", None)
+        if provisioner is not None:
+            pid = getattr(provisioner, "pid", None)
+            if pid:
+                return int(pid)
+    except Exception:
+        pass
+    try:
+        kernel = getattr(km, "kernel", None)
+        if kernel is not None:
+            pid = getattr(kernel, "pid", None)
+            if pid:
+                return int(pid)
+    except Exception:
+        pass
+    return None
+
+
+def shutdown():
+    """Always stop ipykernel. Safe to call more than once (atexit + signals)."""
+    global alive, _shutting_down
+    if _shutting_down:
+        return
+    _shutting_down = True
+    alive = False
+    try:
+        if kc is not None:
+            kc.stop_channels()
+    except Exception:
+        pass
+    try:
+        km.shutdown_kernel(now=True)
+    except Exception:
+        pass
+
+
+def _on_signal(signum, _frame):
+    shutdown()
+    sys.exit(0)
+
+
+# Register before start_kernel so SIGTERM during startup still reaps ipykernel.
+atexit.register(shutdown)
+signal.signal(signal.SIGTERM, _on_signal)
+signal.signal(signal.SIGINT, _on_signal)
+if hasattr(signal, "SIGBREAK"):
+    signal.signal(signal.SIGBREAK, _on_signal)
+
 try:
     km.start_kernel()
     kc = km.client()
     kc.start_channels()
     kc.wait_for_ready(timeout=60)
 except Exception as exc:
+    try:
+        km.shutdown_kernel(now=True)
+    except Exception:
+        pass
     fail("kernel-start", "Could not start an ipykernel: %s" % exc)
-
-lock = threading.Lock()
-# jupyter msg_id -> DevTool request id
-pending = {}
-alive = True
 
 
 def mime_data(content):
     data = content.get("data") or {}
     out = {}
+    omitted_png = False
     for key, value in data.items():
         if isinstance(value, list):
-            out[key] = "".join(str(part) for part in value)
+            text = "".join(str(part) for part in value)
         elif isinstance(value, str):
-            out[key] = value
+            text = value
         else:
-            out[key] = str(value)
+            text = str(value)
+        if key == "image/png" and len(text) > MIME_CHAR_LIMIT:
+            omitted_png = True
+            continue
+        out[key] = cap_text(text, MIME_CHAR_LIMIT)
+    if omitted_png:
+        existing = out.get("text/plain") or ""
+        note = (existing + "\n" + PNG_OMITTED) if existing else PNG_OMITTED
+        out["text/plain"] = note
     return out
 
 
-def lookup_request_id(parent_header):
+def lookup_request(parent_header):
     msg_id = (parent_header or {}).get("msg_id")
     if not msg_id:
         return None
@@ -83,7 +168,7 @@ def iopub_loop():
         msg_type = header.get("msg_type")
         content = msg.get("content") or {}
         parent = msg.get("parent_header") or {}
-        req_id = lookup_request_id(parent)
+        req = lookup_request(parent)
 
         if msg_type == "status":
             state = content.get("execution_state")
@@ -91,8 +176,10 @@ def iopub_loop():
                 emit({"event": "status", "execution_state": state})
             continue
 
-        if not req_id:
+        if not req:
             continue
+        req_id = req.get("id")
+        cell_id = req.get("cellId")
 
         if msg_type == "stream":
             name = content.get("name") or "stdout"
@@ -101,31 +188,49 @@ def iopub_loop():
             text = content.get("text") or ""
             if isinstance(text, list):
                 text = "".join(text)
-            emit({"event": "stream", "id": req_id, "name": name, "text": text})
+            payload = {
+                "event": "stream",
+                "id": req_id,
+                "name": name,
+                "text": cap_text(text),
+            }
+            if cell_id:
+                payload["cellId"] = cell_id
+            emit(payload)
         elif msg_type == "execute_result":
-            emit({
+            payload = {
                 "event": "execute_result",
                 "id": req_id,
                 "data": mime_data(content),
                 "execution_count": content.get("execution_count"),
-            })
+            }
+            if cell_id:
+                payload["cellId"] = cell_id
+            emit(payload)
         elif msg_type == "display_data":
-            emit({
+            payload = {
                 "event": "display_data",
                 "id": req_id,
                 "data": mime_data(content),
-            })
+            }
+            if cell_id:
+                payload["cellId"] = cell_id
+            emit(payload)
         elif msg_type == "error":
             tb = content.get("traceback") or []
             if not isinstance(tb, list):
                 tb = [str(tb)]
-            emit({
+            joined = "\n".join(str(line) for line in tb)
+            payload = {
                 "event": "error",
                 "id": req_id,
                 "ename": content.get("ename") or "Error",
                 "evalue": content.get("evalue") or "",
-                "traceback": [str(line) for line in tb],
-            })
+                "traceback": [cap_text(joined)],
+            }
+            if cell_id:
+                payload["cellId"] = cell_id
+            emit(payload)
 
 
 def shell_loop():
@@ -142,31 +247,21 @@ def shell_loop():
         jupyter_id = parent.get("msg_id")
         content = msg.get("content") or {}
         with lock:
-            req_id = pending.pop(jupyter_id, None)
-        if not req_id:
+            req = pending.pop(jupyter_id, None)
+        if not req:
             continue
         status = content.get("status") or "ok"
         if status not in ("ok", "error", "abort"):
             status = "ok"
-        emit({
+        payload = {
             "event": "execute_reply",
-            "id": req_id,
+            "id": req.get("id"),
             "status": status,
             "execution_count": content.get("execution_count"),
-        })
-
-
-def shutdown():
-    global alive
-    alive = False
-    try:
-        kc.stop_channels()
-    except Exception:
-        pass
-    try:
-        km.shutdown_kernel(now=True)
-    except Exception:
-        pass
+        }
+        if req.get("cellId"):
+            payload["cellId"] = req.get("cellId")
+        emit(payload)
 
 
 def handle_command(cmd):
@@ -174,11 +269,12 @@ def handle_command(cmd):
     if kind == "execute":
         req_id = cmd.get("id")
         code = cmd.get("code") or ""
+        cell_id = cmd.get("cellId") or ""
         if not req_id:
             return
         jupyter_id = kc.execute(code, store_history=True, allow_stdin=False)
         with lock:
-            pending[jupyter_id] = req_id
+            pending[jupyter_id] = {"id": req_id, "cellId": cell_id}
     elif kind == "interrupt":
         try:
             km.interrupt_kernel()
@@ -199,7 +295,11 @@ shell_thread = threading.Thread(target=shell_loop, daemon=True)
 iopub_thread.start()
 shell_thread.start()
 
-emit({"event": "ready"})
+ready = {"event": "ready"}
+pid = kernel_pid()
+if pid:
+    ready["kernel_pid"] = pid
+emit(ready)
 emit({"event": "status", "execution_state": "idle"})
 
 try:

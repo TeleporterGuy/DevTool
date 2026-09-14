@@ -15,6 +15,15 @@ import {
   type NotebookDocument,
   type NotebookKernelStatus
 } from '../../shared/notebook'
+import {
+  beginRunAll,
+  beginSingleRun,
+  cellIdFromRequestId,
+  completeRun,
+  idleRunQueue,
+  makeExecuteRequestId,
+  type NotebookRunQueueState
+} from '../../shared/notebook-execute'
 import { useApp } from '../context/AppContext'
 import { useDirtyBufferStore } from '../context/DirtyBufferContext'
 import { FILE_BROWSER_REFRESH_MS } from '../hooks/fileBrowserRefresh'
@@ -66,7 +75,8 @@ export default function NotebookTab({
   const savedRef = useRef<string | null>(null)
   const dirtyRef = useRef(false)
   const requestIdRef = useRef(0)
-  const runQueueRef = useRef<string[]>([])
+  const executeSeqRef = useRef(0)
+  const runStateRef = useRef<NotebookRunQueueState>(idleRunQueue())
   const kernelStatusRef = useRef<NotebookKernelStatus>('starting')
 
   const markDirty = useCallback((next: NotebookDocument) => {
@@ -215,34 +225,57 @@ export default function NotebookTab({
     }
   }, [startKernel, tabId, everVisible])
 
-  const runCellById = useCallback((cellId: string) => {
+  const clearRunQueue = useCallback(() => {
+    runStateRef.current = idleRunQueue()
+    setRunningIds(new Set())
+  }, [])
+
+  const sendExecute = useCallback((cellId: string) => {
     const current = docRef.current
     const cell = current?.cells.find((item) => item.id === cellId)
-    if (!current || !cell || cell.cellType !== 'code') return
+    if (!current || !cell || cell.cellType !== 'code') {
+      const { state, next } = completeRun(runStateRef.current, cellId)
+      runStateRef.current = state
+      if (next) sendExecute(next)
+      return
+    }
     if (kernelStatusRef.current === 'error' || kernelStatusRef.current === 'dead') {
       setKernelError((prev) => prev ?? 'Kernel is not running. Click Restart kernel.')
-      runQueueRef.current = []
+      clearRunQueue()
       return
     }
     markDirty(replaceCellOutputs(current, cellId, [], cell.executionCount))
     setRunningIds((prev) => new Set(prev).add(cellId))
-    void window.api.notebookKernelExecute(tabId, cellId, cell.source).then((result) => {
-      if (result?.error) {
-        setKernelError(result.error)
-        setRunningIds((prev) => {
-          const next = new Set(prev)
-          next.delete(cellId)
-          return next
-        })
-        runQueueRef.current = []
+    executeSeqRef.current += 1
+    const requestId = makeExecuteRequestId(cellId, executeSeqRef.current)
+    void window.api.notebookKernelExecute(tabId, requestId, cell.source, cellId).then((result) => {
+      if (!result?.error) return
+      setKernelError(result.error)
+      setRunningIds((prev) => {
+        const next = new Set(prev)
+        next.delete(cellId)
+        return next
+      })
+      if (/not running/i.test(result.error)) {
+        clearRunQueue()
+        return
       }
+      const finished = completeRun(runStateRef.current, cellId)
+      runStateRef.current = finished.state
+      if (finished.next) sendExecute(finished.next)
     })
-  }, [markDirty, tabId])
+  }, [clearRunQueue, markDirty, tabId])
 
-  const runQueueNext = useCallback(() => {
-    const nextId = runQueueRef.current.shift()
-    if (nextId) runCellById(nextId)
-  }, [runCellById])
+  const requestSingleRun = useCallback((cellId: string) => {
+    const previous = runStateRef.current
+    const nextState = beginSingleRun(previous, cellId)
+    runStateRef.current = nextState
+    // Only dispatch when this cell is the one that just became in-flight.
+    // A mid-flight Run is appended; it must not wipe Run-all.
+    if (!previous.inFlight && nextState.inFlight === cellId) {
+      sendExecute(cellId)
+    }
+  }, [sendExecute])
 
   useEffect(() => {
     const unsubscribe = window.api.onNotebookKernelEvent((id, event) => {
@@ -263,42 +296,46 @@ export default function NotebookTab({
         kernelStatusRef.current = 'error'
         setKernelStatus('error')
         setKernelError(event.message)
-        runQueueRef.current = []
-        setRunningIds(new Set())
+        clearRunQueue()
         return
       }
       if (event.event === 'dead') {
         kernelStatusRef.current = 'dead'
         setKernelStatus('dead')
         if (event.message) setKernelError(event.message)
-        runQueueRef.current = []
-        setRunningIds(new Set())
+        clearRunQueue()
         return
       }
+      const cellId = 'id' in event ? cellIdFromRequestId(event.id, event.cellId) : null
       if (event.event === 'execute_reply') {
         const current = docRef.current
-        if (current && typeof event.execution_count === 'number') {
-          const cell = current.cells.find((item) => item.id === event.id)
+        if (cellId && current && typeof event.execution_count === 'number') {
+          const cell = current.cells.find((item) => item.id === cellId)
           if (cell) {
-            markDirty(replaceCellOutputs(current, event.id, cell.outputs, event.execution_count))
+            markDirty(replaceCellOutputs(current, cellId, cell.outputs, event.execution_count))
           }
         }
-        setRunningIds((prev) => {
-          const next = new Set(prev)
-          next.delete(event.id)
-          return next
-        })
-        runQueueNext()
+        if (cellId) {
+          setRunningIds((prev) => {
+            const next = new Set(prev)
+            next.delete(cellId)
+            return next
+          })
+          const finished = completeRun(runStateRef.current, cellId)
+          runStateRef.current = finished.state
+          if (finished.next) sendExecute(finished.next)
+        }
         return
       }
+      if (!cellId) return
       const current = docRef.current
-      const cell = current?.cells.find((item) => item.id === event.id)
+      const cell = current?.cells.find((item) => item.id === cellId)
       if (!current || !cell) return
       const nextOutputs = applyKernelEventToOutputs(cell.outputs, event)
-      if (nextOutputs) markDirty(replaceCellOutputs(current, event.id, nextOutputs))
+      if (nextOutputs) markDirty(replaceCellOutputs(current, cellId, nextOutputs))
     })
     return unsubscribe
-  }, [markDirty, runQueueNext, tabId])
+  }, [clearRunQueue, markDirty, sendExecute, tabId])
 
   const runActive = useCallback(() => {
     const current = docRef.current
@@ -310,9 +347,8 @@ export default function NotebookTab({
       return
     }
     if (cell.cellType === 'raw') return
-    runQueueRef.current = []
-    runCellById(cell.id)
-  }, [activeCellId, runCellById])
+    requestSingleRun(cell.id)
+  }, [activeCellId, requestSingleRun])
 
   const runAndNext = useCallback(() => {
     const current = docRef.current
@@ -323,8 +359,7 @@ export default function NotebookTab({
     if (cell.cellType === 'markdown') {
       setEditingMarkdownId(null)
     } else if (cell.cellType === 'code') {
-      runQueueRef.current = []
-      runCellById(cell.id)
+      requestSingleRun(cell.id)
     }
     const latest = docRef.current ?? current
     const next = latest.cells[index + 1]
@@ -337,20 +372,22 @@ export default function NotebookTab({
       markDirty(withNew)
       setActiveCellId(created.id)
     }
-  }, [activeCellId, markDirty, runCellById])
+  }, [activeCellId, markDirty, requestSingleRun])
 
   const runAll = useCallback(() => {
     const current = docRef.current
     if (!current) return
+    // Do not replace an in-flight Run / Run-all; that would double-send the first cell.
+    if (runStateRef.current.inFlight || runStateRef.current.queued.length > 0) return
     const ids = current.cells.filter((cell) => cell.cellType === 'code').map((cell) => cell.id)
     if (ids.length === 0) return
-    runQueueRef.current = ids.slice(1)
-    runCellById(ids[0])
-  }, [runCellById])
+    const nextState = beginRunAll(ids)
+    runStateRef.current = nextState
+    if (nextState.inFlight) sendExecute(nextState.inFlight)
+  }, [sendExecute])
 
   const restartKernel = useCallback(() => {
-    runQueueRef.current = []
-    setRunningIds(new Set())
+    clearRunQueue()
     setKernelError(null)
     setKernelStatus('starting')
     kernelStatusRef.current = 'starting'
@@ -361,7 +398,7 @@ export default function NotebookTab({
         kernelStatusRef.current = 'error'
       }
     })
-  }, [projectDir, projectId, tabId])
+  }, [clearRunQueue, projectDir, projectId, tabId])
 
   const interruptKernel = useCallback(() => {
     void window.api.notebookKernelInterrupt(tabId)
@@ -453,8 +490,7 @@ export default function NotebookTab({
                   setEditingMarkdownId(null)
                   return
                 }
-                runQueueRef.current = []
-                runCellById(cell.id)
+                requestSingleRun(cell.id)
               }}
               onRunAndNext={runAndNext}
               onChangeType={(type: NotebookCellType) => {

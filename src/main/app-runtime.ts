@@ -25,6 +25,7 @@ import {
   NOTEBOOK_ERROR_REMOTE,
   NOTEBOOK_ERROR_SHELL_PROJECT
 } from '../shared/notebook'
+import { notebookAllowedCwdRoots, resolveNotebookKernelCwd } from './notebook-cwd'
 import { agentCommandOverride, conptySpawnArgv, isAiAgentCommand, resolveAgentCommand } from './resolve-agent-command'
 import { detectExternalEditors, openFolderInEditor } from './external-ide'
 import { isLocalInteractiveTerminal, resolveLocalTerminalSpawn } from './resolve-local-terminal'
@@ -949,8 +950,8 @@ export class AppRuntime {
     )
     ipcMain.handle(
       'notebook-kernel-execute',
-      (_event, tabId: string, requestId: string, code: string): { error?: string } => {
-        return this.notebookKernels.execute(tabId, requestId, code)
+      (_event, tabId: string, requestId: string, code: string, cellId?: string): { error?: string } => {
+        return this.notebookKernels.execute(tabId, requestId, code, cellId)
       }
     )
     ipcMain.handle('notebook-kernel-interrupt', (_event, tabId: string) => {
@@ -1474,9 +1475,18 @@ export class AppRuntime {
       })
       return { error: NOTEBOOK_ERROR_SHELL_PROJECT, code: 'shell-project' }
     }
+    const cwdResult = resolveNotebookKernelCwd(cwd, notebookAllowedCwdRoots(project))
+    if (!cwdResult.ok) {
+      this.broadcastToAllWindows('notebook-kernel-event', tabId, {
+        event: 'fail',
+        code: 'cwd',
+        message: cwdResult.error
+      })
+      return { error: cwdResult.error, code: 'cwd' }
+    }
     const condaEnv = this.condaEnvForLocalProject(projectId)
-    this.logDebug(`notebookKernelStart tabId=${tabId} projectId=${projectId} cwd=${cwd}`)
-    return this.notebookKernels.start(tabId, condaEnv, cwd)
+    this.logDebug(`notebookKernelStart tabId=${tabId} projectId=${projectId} cwd=${cwdResult.cwd}`)
+    return this.notebookKernels.start(tabId, condaEnv, cwdResult.cwd)
   }
 
   private killPty(id: string): void {

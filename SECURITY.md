@@ -1,6 +1,6 @@
 # Security audit (company-deploy readiness)
 
-Snapshot of what this fork actually is, from a security point of view, before putting it on company machines. Dated against **`0.3.2`** (Phase 1 shipped; Phase 1.4 tagged). Not a pentest. Not a promise that later phases stay clean.
+Snapshot of what this fork actually is, from a security point of view, before putting it on company machines. Dated against **`0.5.0`** (Phase 4 native notebooks). Not a pentest. Not a promise that later phases stay clean.
 
 This repository is a fork of [join3r/claude-project](https://github.com/join3r/claude-project). Work stays on [TeleporterGuy/DevTool](https://github.com/TeleporterGuy/DevTool). Product direction is in [ROADMAP.md](./ROADMAP.md).
 
@@ -168,7 +168,7 @@ Highest-leverage remaining engineering pass: **unsigned Windows folder** / Phase
 | Scrollback files | `src/main/scrollback-storage.ts` |
 | Config dir | `src/main/config-dir.ts`, `src/main/storage.ts` |
 | Embedded browser | `src/renderer/components/BrowserTab.tsx` |
-| Native notebooks | `src/shared/notebook.ts`, `src/main/notebook-kernel.ts`, `resources/notebook-kernel.py` |
+| Native notebooks | `src/shared/notebook.ts`, `src/main/notebook-kernel.ts`, `src/main/notebook-cwd.ts`, `resources/notebook-kernel.py` |
 | Packaging / signing | `package.json` `build.win` |
 
 ---

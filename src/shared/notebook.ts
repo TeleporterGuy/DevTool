@@ -40,15 +40,21 @@ export interface NotebookDocument {
 
 /** Events the Python jupyter_client helper writes as JSON lines. */
 export type NotebookKernelEvent =
-  | { event: 'ready' }
+  | { event: 'ready'; kernel_pid?: number }
   | { event: 'status'; execution_state: 'starting' | 'idle' | 'busy' | 'dead' }
-  | { event: 'stream'; id: string; name: NotebookStreamName; text: string }
-  | { event: 'execute_result'; id: string; data: Record<string, unknown>; execution_count?: number }
-  | { event: 'display_data'; id: string; data: Record<string, unknown> }
-  | { event: 'error'; id: string; ename: string; evalue: string; traceback: string[] }
-  | { event: 'execute_reply'; id: string; status: 'ok' | 'error' | 'abort'; execution_count?: number }
+  | { event: 'stream'; id: string; cellId?: string; name: NotebookStreamName; text: string }
+  | { event: 'execute_result'; id: string; cellId?: string; data: Record<string, unknown>; execution_count?: number }
+  | { event: 'display_data'; id: string; cellId?: string; data: Record<string, unknown> }
+  | { event: 'error'; id: string; cellId?: string; ename: string; evalue: string; traceback: string[] }
+  | { event: 'execute_reply'; id: string; cellId?: string; status: 'ok' | 'error' | 'abort'; execution_count?: number }
   | { event: 'fail'; code: string; message: string }
   | { event: 'dead'; message?: string }
+
+/** Keep in sync with resources/notebook-kernel.py. */
+export const NOTEBOOK_STREAM_CHAR_LIMIT = 200_000
+export const NOTEBOOK_MIME_CHAR_LIMIT = 1_500_000
+export const NOTEBOOK_TRUNCATED_MARKER = '\n[truncated]\n'
+export const NOTEBOOK_PNG_OMITTED = '[truncated: image/png omitted (too large)]'
 
 export type NotebookKernelStatus = 'starting' | 'idle' | 'busy' | 'dead' | 'error'
 
@@ -66,6 +72,9 @@ export const NOTEBOOK_ERROR_SHELL_PROJECT =
 
 export const NOTEBOOK_ERROR_MISSING_JUPYTER =
   'Install jupyter_client and ipykernel in the project conda env, then Restart kernel.\n  conda install ipykernel jupyter_client'
+
+export const NOTEBOOK_ERROR_CWD =
+  'Notebook kernel cwd is outside this project.'
 
 export function isNotebookFile(filePath?: string | null): boolean {
   if (!filePath) return false
@@ -361,13 +370,64 @@ export function clearAllOutputs(doc: NotebookDocument): NotebookDocument {
   }
 }
 
+export function truncateText(
+  text: string,
+  limit: number,
+  marker: string = NOTEBOOK_TRUNCATED_MARKER
+): string {
+  if (text.length <= limit) return text
+  const keep = Math.max(0, limit - marker.length)
+  return text.slice(0, keep) + marker
+}
+
+export function truncateMimeBundle(data: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {}
+  let omittedPng = false
+  for (const [key, value] of Object.entries(data)) {
+    const text = typeof value === 'string' ? value : joinNotebookText(value)
+    if (key === 'image/png' && text.length > NOTEBOOK_MIME_CHAR_LIMIT) {
+      omittedPng = true
+      continue
+    }
+    out[key] = truncateText(text, NOTEBOOK_MIME_CHAR_LIMIT)
+  }
+  if (omittedPng) {
+    const existing = out['text/plain']
+    const note = typeof existing === 'string' && existing.length > 0
+      ? `${existing}\n${NOTEBOOK_PNG_OMITTED}`
+      : NOTEBOOK_PNG_OMITTED
+    out['text/plain'] = note
+  }
+  return out
+}
+
+export function truncateKernelEvent(event: NotebookKernelEvent): NotebookKernelEvent {
+  if (event.event === 'stream') {
+    return { ...event, text: truncateText(event.text, NOTEBOOK_STREAM_CHAR_LIMIT) }
+  }
+  if (event.event === 'execute_result' || event.event === 'display_data') {
+    return { ...event, data: truncateMimeBundle(event.data) }
+  }
+  if (event.event === 'error') {
+    const joined = event.traceback.join('\n')
+    if (joined.length > NOTEBOOK_STREAM_CHAR_LIMIT) {
+      return { ...event, traceback: [truncateText(joined, NOTEBOOK_STREAM_CHAR_LIMIT)] }
+    }
+  }
+  return event
+}
+
 /** Merge consecutive stdout/stderr streams so the UI does not flicker a node per chunk. */
 export function appendOutput(outputs: NotebookOutput[], next: NotebookOutput): NotebookOutput[] {
   if (next.type === 'stream' && outputs.length > 0) {
     const last = outputs[outputs.length - 1]
     if (last.type === 'stream' && last.name === next.name) {
-      return [...outputs.slice(0, -1), { ...last, text: last.text + next.text }]
+      const merged = last.text + next.text
+      return [...outputs.slice(0, -1), { ...last, text: truncateText(merged, NOTEBOOK_STREAM_CHAR_LIMIT) }]
     }
+  }
+  if (next.type === 'stream') {
+    return [...outputs, { ...next, text: truncateText(next.text, NOTEBOOK_STREAM_CHAR_LIMIT) }]
   }
   return [...outputs, next]
 }
@@ -419,6 +479,17 @@ export function applyKernelEventToOutputs(
   return null
 }
 
+function optionalCellId(record: Record<string, unknown>): string | undefined {
+  return typeof record.cellId === 'string' && record.cellId.length > 0 ? record.cellId : undefined
+}
+
+function requireRequestId(record: Record<string, unknown>): string | null {
+  return typeof record.id === 'string' && record.id.length > 0 ? record.id : null
+}
+
+/**
+ * Parse one helper stdout line. Unknown events and missing required fields are ignored.
+ */
 export function parseKernelEventLine(line: string): NotebookKernelEvent | null {
   const trimmed = line.trim()
   if (!trimmed) return null
@@ -430,5 +501,97 @@ export function parseKernelEventLine(line: string): NotebookKernelEvent | null {
   }
   const record = asRecord(parsed)
   if (!record || typeof record.event !== 'string') return null
-  return record as NotebookKernelEvent
+
+  switch (record.event) {
+    case 'ready': {
+      const pid = record.kernel_pid
+      if (pid === undefined || pid === null) return { event: 'ready' }
+      if (typeof pid !== 'number' || !Number.isInteger(pid) || pid <= 0) return null
+      return { event: 'ready', kernel_pid: pid }
+    }
+    case 'status': {
+      const state = record.execution_state
+      if (state !== 'starting' && state !== 'idle' && state !== 'busy' && state !== 'dead') return null
+      return { event: 'status', execution_state: state }
+    }
+    case 'stream': {
+      const id = requireRequestId(record)
+      if (!id) return null
+      if (record.name !== 'stdout' && record.name !== 'stderr') return null
+      if (typeof record.text !== 'string') return null
+      return truncateKernelEvent({
+        event: 'stream',
+        id,
+        cellId: optionalCellId(record),
+        name: record.name,
+        text: record.text
+      })
+    }
+    case 'execute_result': {
+      const id = requireRequestId(record)
+      if (!id) return null
+      const data = asRecord(record.data)
+      if (!data) return null
+      const count = record.execution_count
+      return truncateKernelEvent({
+        event: 'execute_result',
+        id,
+        cellId: optionalCellId(record),
+        data,
+        execution_count: typeof count === 'number' ? count : undefined
+      })
+    }
+    case 'display_data': {
+      const id = requireRequestId(record)
+      if (!id) return null
+      const data = asRecord(record.data)
+      if (!data) return null
+      return truncateKernelEvent({
+        event: 'display_data',
+        id,
+        cellId: optionalCellId(record),
+        data
+      })
+    }
+    case 'error': {
+      const id = requireRequestId(record)
+      if (!id) return null
+      if (typeof record.ename !== 'string' || typeof record.evalue !== 'string') return null
+      const traceback = Array.isArray(record.traceback)
+        ? record.traceback.filter((line): line is string => typeof line === 'string')
+        : []
+      return truncateKernelEvent({
+        event: 'error',
+        id,
+        cellId: optionalCellId(record),
+        ename: record.ename,
+        evalue: record.evalue,
+        traceback
+      })
+    }
+    case 'execute_reply': {
+      const id = requireRequestId(record)
+      if (!id) return null
+      if (record.status !== 'ok' && record.status !== 'error' && record.status !== 'abort') return null
+      const count = record.execution_count
+      return {
+        event: 'execute_reply',
+        id,
+        cellId: optionalCellId(record),
+        status: record.status,
+        execution_count: typeof count === 'number' ? count : undefined
+      }
+    }
+    case 'fail': {
+      if (typeof record.code !== 'string' || typeof record.message !== 'string') return null
+      return { event: 'fail', code: record.code, message: record.message }
+    }
+    case 'dead': {
+      const message = record.message
+      if (message !== undefined && typeof message !== 'string') return null
+      return { event: 'dead', message: typeof message === 'string' ? message : undefined }
+    }
+    default:
+      return null
+  }
 }
