@@ -1,10 +1,11 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react'
-import { Play, RotateCw, Square } from 'lucide-react'
+import { Eraser, Play, RotateCw, Square } from 'lucide-react'
 import { DEFAULT_CONFIG } from '../../shared/types'
 import {
   addCellAt,
   applyKernelEventToOutputs,
   changeCellTypeAt,
+  clearAllOutputs,
   deleteCellAt,
   moveCell,
   parseNotebook,
@@ -37,6 +38,14 @@ interface Props {
   projectDir: string
   projectId: string
   effectiveTheme: 'dark' | 'light'
+}
+
+/** True when at least one code cell has outputs or an execution count to clear. */
+function notebookHasOutputs(doc: NotebookDocument | null): boolean {
+  if (!doc) return false
+  return doc.cells.some(
+    (cell) => cell.cellType === 'code' && (cell.outputs.length > 0 || cell.executionCount != null)
+  )
 }
 
 function statusLabel(status: NotebookKernelStatus): string {
@@ -404,6 +413,13 @@ export default function NotebookTab({
     void window.api.notebookKernelInterrupt(tabId)
   }, [tabId])
 
+  // Document-only: wipe cell outputs and execution counts. Kernel stays up.
+  const clearOutputs = useCallback(() => {
+    const current = docRef.current
+    if (!current || !notebookHasOutputs(current)) return
+    markDirty(clearAllOutputs(current))
+  }, [markDirty])
+
   if (!visible && !everVisible) return <div style={{ display: 'none' }} />
 
   const statusColor =
@@ -448,6 +464,15 @@ export default function NotebookTab({
           title="Interrupt kernel"
         >
           <span className="inline-flex items-center gap-1"><Square size={12} /> Interrupt</span>
+        </button>
+        <button
+          type="button"
+          className="bg-transparent border-0 text-text-muted cursor-pointer px-1.5 py-1 rounded-md text-xs hover:bg-surface-3 hover:text-text disabled:opacity-40"
+          onClick={clearOutputs}
+          disabled={!notebookHasOutputs(doc)}
+          title="Clear all cell outputs"
+        >
+          <span className="inline-flex items-center gap-1"><Eraser size={12} /> Clear outputs</span>
         </button>
         <span className="flex items-center gap-1.5 ml-2 text-xs text-text-muted">
           <span className="w-1.5 h-1.5 rounded-full" style={{ background: statusColor }} />
