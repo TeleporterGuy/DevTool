@@ -257,7 +257,7 @@ export default function ContentArea(): React.ReactElement {
         window.dispatchEvent(new CustomEvent('reload-browser-tab', { detail: { tabId: info.activeTabId } }))
         return
       }
-      if ((info?.activeTab?.type === 'diff' || info?.activeTab?.type === 'editor') && info.activeTabId) {
+      if ((info?.activeTab?.type === 'diff' || info?.activeTab?.type === 'editor' || info?.activeTab?.type === 'notebook') && info.activeTabId) {
         window.dispatchEvent(new CustomEvent('reload-file-tab', { detail: { tabId: info.activeTabId } }))
       }
     })

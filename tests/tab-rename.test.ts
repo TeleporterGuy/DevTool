@@ -18,6 +18,7 @@ describe('isRenamableTab', () => {
     expect(isRenamableTab(makeTab({ type: 'note' }))).toBe(false)
     expect(isRenamableTab(makeTab({ type: 'diff' }))).toBe(false)
     expect(isRenamableTab(makeTab({ type: 'editor' }))).toBe(false)
+    expect(isRenamableTab(makeTab({ type: 'notebook' }))).toBe(false)
     expect(isRenamableTab(makeTab({ type: 'home' }))).toBe(false)
     expect(isRenamableTab(makeTab({ type: 'terminal', system: 'home' }))).toBe(false)
   })

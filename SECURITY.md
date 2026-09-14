@@ -146,12 +146,12 @@ Work in this order so each step is demoable. Roadmap numbering after the audit:
 2. **Phase 1.3** — **done** (`0.3.1`): Electron 43.6.0; blank browser tab; guest Node off; signing still off.
 3. **Phase 1.4** — **done** (`0.3.2`): Windows shortcut labels. Labels only; no security change.
 4. **Phase 2** — **done** (`0.3.2`, no minor bump): hook authentication; Pi extension off `/tmp`; SSH via `~/.ssh/known_hosts` (no `IdentitiesOnly`); required remote dir; socket dir `0700`.
-5. Conda (Phase 3) is **done** (`0.4.0`). Next: Jupyter in a browser tab (Phase 4, `0.5.0`), then packaging (Phase 5, `0.6.0`+). LSP is parked, not a numbered phase.
+5. Conda (Phase 3) is **done** (`0.4.0`). Native notebooks (Phase 4) ship as **`0.5.0`**. Next: packaging (Phase 5, `0.6.0`+). LSP is parked, not a numbered phase.
 6. **Deferred:** config-dir ACLs, scrollback `tabId`, IPC cwd allow-list, a formal pilot. Authenticode is Phase 5 after NSIS, not a separate “later maybe” bucket.
 
-Do not start parked LSP work, or a native `.ipynb` editor, instead of Phases 3–5.
+Do not start parked LSP work, or a JupyterLab-in-browser launcher, instead of Phase 5 packaging.
 
-Highest-leverage remaining engineering pass: **Jupyter (Phase 4)** for the daily driver, then **unsigned Windows folder** / Phase 5 packaging as the company-deploy blocker.
+Highest-leverage remaining engineering pass: **unsigned Windows folder** / Phase 5 packaging as the company-deploy blocker.
 
 ---
 
@@ -168,14 +168,15 @@ Highest-leverage remaining engineering pass: **Jupyter (Phase 4)** for the daily
 | Scrollback files | `src/main/scrollback-storage.ts` |
 | Config dir | `src/main/config-dir.ts`, `src/main/storage.ts` |
 | Embedded browser | `src/renderer/components/BrowserTab.tsx` |
+| Native notebooks | `src/shared/notebook.ts`, `src/main/notebook-kernel.ts`, `resources/notebook-kernel.py` |
 | Packaging / signing | `package.json` `build.win` |
 
 ---
 
 ## How this file relates to the roadmap
 
-Roadmap phases (conda, Jupyter, then packaging) add more child processes, another browser use, and an installer/updater. They do not remove anything above. Do not declare Phase 3–5 “company ready” without revisiting this file.
+Roadmap phases (conda, native notebooks, then packaging) add more child processes (an ipykernel per notebook tab) and an installer/updater. They do not remove anything above. Do not declare Phase 3–5 “company ready” without revisiting this file.
 
-Parking-lot ideas that would *increase* surface if pulled in: native notebook kernels, Windows OpenSSH as a second remote stack, language servers talking stdio as the same user.
+Parking-lot ideas that would *increase* surface if pulled in: Windows OpenSSH as a second remote stack, language servers talking stdio as the same user. Native notebook kernels (Phase 4) spawn `python` from the project conda env as the logged-in user — same trust as a terminal running that env.
 
 This audit started as a snapshot at `0.3.0`. **Phase 1.3 (`0.3.1`):** Electron 43.6.0, `about:blank` new tabs, guest webview Node locked off. **Phase 1.4 (`0.3.2`):** Windows shortcut labels only. **Phase 2 (`0.3.2`, no minor bump):** hook shared secret + 64 KiB body cap; remote Pi extension under `$HOME/.devtool-remote/` (`0700`); SSH uses `~/.ssh/known_hosts` and `accept-new` (no DevTool `UserKnownHostsFile` / `IdentitiesOnly`); remote directory required; control-socket dir `0700`. Still open: unsigned Windows folder, no CSP, first-connect TOFU, wide IPC, plaintext `~/.devtool`.

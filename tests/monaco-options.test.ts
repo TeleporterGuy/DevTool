@@ -3,6 +3,7 @@ import { DEFAULT_CONFIG } from '../src/shared/types'
 import {
   buildMonacoDiffOptions,
   buildMonacoEditorOptions,
+  buildMonacoNotebookCellOptions,
   getLanguageFromPath
 } from '../src/renderer/components/monacoOptions'
 
@@ -51,5 +52,17 @@ describe('monacoOptions', () => {
       readOnly: true,
       renderSideBySide: false
     })
+  })
+
+  it('builds compact notebook cell options without a minimap', () => {
+    const options = buildMonacoNotebookCellOptions({
+      ...DEFAULT_CONFIG,
+      editorMinimap: true,
+      editorFontFamily: 'JetBrains Mono'
+    })
+    expect(options.minimap).toEqual({ enabled: false })
+    expect(options.scrollBeyondLastLine).toBe(false)
+    expect(options.fontFamily).toBe('JetBrains Mono')
+    expect(options.wordWrap).toBe('on')
   })
 })

@@ -77,3 +77,24 @@ export function buildMonacoDiffOptions(config: AppConfig): editor.IStandaloneDif
     renderSideBySide: config.diffRenderSideBySide
   }
 }
+
+/** Compact Monaco options for one notebook cell (no minimap, grow with content). */
+export function buildMonacoNotebookCellOptions(config: AppConfig): editor.IStandaloneEditorConstructionOptions {
+  return {
+    ...buildMonacoEditorOptions(config),
+    minimap: { enabled: false },
+    scrollBeyondLastLine: false,
+    overviewRulerLanes: 0,
+    hideCursorInOverviewRuler: true,
+    folding: false,
+    renderLineHighlight: 'none',
+    wordWrap: 'on',
+    automaticLayout: true,
+    scrollbar: {
+      vertical: 'hidden',
+      horizontal: 'auto',
+      handleMouseWheel: false,
+      alwaysConsumeMouseWheel: false
+    }
+  }
+}

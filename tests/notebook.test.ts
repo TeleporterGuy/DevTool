@@ -1,0 +1,252 @@
+import { describe, expect, it } from 'vitest'
+import {
+  addCellAt,
+  applyKernelEventToOutputs,
+  changeCellTypeAt,
+  clearAllOutputs,
+  deleteCellAt,
+  emptyNotebook,
+  isNotebookFile,
+  joinNotebookText,
+  moveCell,
+  parseKernelEventLine,
+  parseNotebook,
+  serializeNotebook,
+  splitNotebookText,
+  updateCellSource
+} from '../src/shared/notebook'
+
+const sample = `{
+ "nbformat": 4,
+ "nbformat_minor": 5,
+ "metadata": {
+  "kernelspec": {
+   "display_name": "Python 3",
+   "language": "python",
+   "name": "python3"
+  }
+ },
+ "cells": [
+  {
+   "id": "md-1",
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": ["# Hello\\n", "world"]
+  },
+  {
+   "id": "code-1",
+   "cell_type": "code",
+   "metadata": {},
+   "execution_count": 3,
+   "source": ["print(1)\\n", "2 + 2"],
+   "outputs": [
+    {
+     "output_type": "stream",
+     "name": "stdout",
+     "text": ["1\\n"]
+    },
+    {
+     "output_type": "execute_result",
+     "execution_count": 3,
+     "data": { "text/plain": ["4"] },
+     "metadata": {}
+    }
+   ]
+  }
+ ]
+}
+`
+
+describe('isNotebookFile', () => {
+  it('matches .ipynb case-insensitively', () => {
+    expect(isNotebookFile('analysis.ipynb')).toBe(true)
+    expect(isNotebookFile('notes.IPYNB')).toBe(true)
+    expect(isNotebookFile('src/app.ts')).toBe(false)
+    expect(isNotebookFile(undefined)).toBe(false)
+  })
+})
+
+describe('join/split notebook text', () => {
+  it('round-trips Jupyter line arrays', () => {
+    const source = 'print(1)\n2 + 2'
+    const lines = splitNotebookText(source)
+    expect(lines).toEqual(['print(1)\n', '2 + 2'])
+    expect(joinNotebookText(lines)).toBe(source)
+  })
+
+  it('treats empty source as an empty array', () => {
+    expect(splitNotebookText('')).toEqual([])
+    expect(joinNotebookText([])).toBe('')
+    expect(joinNotebookText('already a string')).toBe('already a string')
+  })
+})
+
+describe('parseNotebook / serializeNotebook', () => {
+  it('parses nbformat 4 cells and outputs', () => {
+    const doc = parseNotebook(sample)
+    expect(doc.nbformat).toBe(4)
+    expect(doc.cells).toHaveLength(2)
+    expect(doc.cells[0]).toMatchObject({ id: 'md-1', cellType: 'markdown', source: '# Hello\nworld' })
+    expect(doc.cells[1].source).toBe('print(1)\n2 + 2')
+    expect(doc.cells[1].executionCount).toBe(3)
+    expect(doc.cells[1].outputs[0]).toEqual({ type: 'stream', name: 'stdout', text: '1\n' })
+    expect(doc.cells[1].outputs[1]).toMatchObject({
+      type: 'execute_result',
+      executionCount: 3,
+      data: { 'text/plain': '4' }
+    })
+  })
+
+  it('round-trips a parsed notebook without dropping ids or outputs', () => {
+    const doc = parseNotebook(sample)
+    const again = parseNotebook(serializeNotebook(doc))
+    expect(again.cells.map((cell) => cell.id)).toEqual(['md-1', 'code-1'])
+    expect(again.cells[1].source).toBe('print(1)\n2 + 2')
+    expect(again.cells[1].outputs).toEqual(doc.cells[1].outputs)
+  })
+
+  it('turns an empty file into a one-cell notebook', () => {
+    const doc = parseNotebook('')
+    expect(doc.cells).toHaveLength(1)
+    expect(doc.cells[0].cellType).toBe('code')
+    expect(doc.cells[0].source).toBe('')
+  })
+
+  it('rejects unsupported nbformat and invalid JSON', () => {
+    expect(() => parseNotebook('{ "nbformat": 3, "cells": [] }')).toThrow(/nbformat 3/)
+    expect(() => parseNotebook('not json')).toThrow(/valid JSON/)
+  })
+
+  it('preserves error and png outputs', () => {
+    const doc = parseNotebook(JSON.stringify({
+      nbformat: 4,
+      nbformat_minor: 5,
+      metadata: {},
+      cells: [{
+        id: 'c1',
+        cell_type: 'code',
+        metadata: {},
+        execution_count: 1,
+        source: 'raise ValueError("nope")',
+        outputs: [
+          {
+            output_type: 'error',
+            ename: 'ValueError',
+            evalue: 'nope',
+            traceback: ['Traceback...', 'ValueError: nope']
+          },
+          {
+            output_type: 'display_data',
+            data: { 'image/png': 'abc123', 'text/plain': '<Figure>' },
+            metadata: {}
+          }
+        ]
+      }]
+    }))
+    expect(doc.cells[0].outputs[0]).toEqual({
+      type: 'error',
+      ename: 'ValueError',
+      evalue: 'nope',
+      traceback: ['Traceback...', 'ValueError: nope']
+    })
+    expect(doc.cells[0].outputs[1]).toMatchObject({
+      type: 'display_data',
+      data: { 'image/png': 'abc123', 'text/plain': '<Figure>' }
+    })
+    const roundTrip = parseNotebook(serializeNotebook(doc))
+    expect(roundTrip.cells[0].outputs).toEqual(doc.cells[0].outputs)
+  })
+})
+
+describe('cell operations', () => {
+  it('adds, deletes, retypes, and reorders cells', () => {
+    let doc = emptyNotebook()
+    const firstId = doc.cells[0].id
+    doc = addCellAt(doc, 1, 'markdown')
+    expect(doc.cells).toHaveLength(2)
+    expect(doc.cells[1].cellType).toBe('markdown')
+
+    doc = changeCellTypeAt(doc, 0, 'markdown')
+    expect(doc.cells[0].cellType).toBe('markdown')
+    expect(doc.cells[0].id).toBe(firstId)
+
+    doc = moveCell(doc, 1, 0)
+    expect(doc.cells[1].id).toBe(firstId)
+
+    doc = updateCellSource(doc, firstId, '# title')
+    expect(doc.cells[1].source).toBe('# title')
+
+    doc = deleteCellAt(doc, 0)
+    expect(doc.cells).toHaveLength(1)
+    expect(doc.cells[0].id).toBe(firstId)
+
+    doc = clearAllOutputs({
+      ...doc,
+      cells: [{ ...doc.cells[0], cellType: 'code', outputs: [{ type: 'stream', name: 'stdout', text: 'x' }], executionCount: 2 }]
+    })
+    expect(doc.cells[0].outputs).toEqual([])
+    expect(doc.cells[0].executionCount).toBeNull()
+  })
+
+  it('keeps one empty code cell when deleting the last cell', () => {
+    const doc = deleteCellAt(emptyNotebook(), 0)
+    expect(doc.cells).toHaveLength(1)
+    expect(doc.cells[0].cellType).toBe('code')
+  })
+})
+
+describe('kernel message handling', () => {
+  it('parses JSON event lines and ignores junk', () => {
+    expect(parseKernelEventLine('{"event":"ready"}')).toEqual({ event: 'ready' })
+    expect(parseKernelEventLine('  ')).toBeNull()
+    expect(parseKernelEventLine('not-json')).toBeNull()
+  })
+
+  it('appends stream chunks and merges consecutive stdout', () => {
+    const first = applyKernelEventToOutputs([], {
+      event: 'stream',
+      id: 'c1',
+      name: 'stdout',
+      text: 'hel'
+    })
+    expect(first).toEqual([{ type: 'stream', name: 'stdout', text: 'hel' }])
+    const merged = applyKernelEventToOutputs(first!, {
+      event: 'stream',
+      id: 'c1',
+      name: 'stdout',
+      text: 'lo\n'
+    })
+    expect(merged).toEqual([{ type: 'stream', name: 'stdout', text: 'hello\n' }])
+  })
+
+  it('records execute_result, display_data, and errors', () => {
+    let outputs = applyKernelEventToOutputs([], {
+      event: 'execute_result',
+      id: 'c1',
+      data: { 'text/plain': '4' },
+      execution_count: 1
+    })
+    outputs = applyKernelEventToOutputs(outputs!, {
+      event: 'display_data',
+      id: 'c1',
+      data: { 'image/png': 'iVBOR' }
+    })
+    outputs = applyKernelEventToOutputs(outputs!, {
+      event: 'error',
+      id: 'c1',
+      ename: 'NameError',
+      evalue: 'x',
+      traceback: ['NameError: x']
+    })
+    expect(outputs).toEqual([
+      { type: 'execute_result', data: { 'text/plain': '4' }, executionCount: 1 },
+      { type: 'display_data', data: { 'image/png': 'iVBOR' } },
+      { type: 'error', ename: 'NameError', evalue: 'x', traceback: ['NameError: x'] }
+    ])
+  })
+
+  it('does not change outputs for status or reply events', () => {
+    expect(applyKernelEventToOutputs([], { event: 'status', execution_state: 'idle' })).toBeNull()
+    expect(applyKernelEventToOutputs([], { event: 'execute_reply', id: 'c1', status: 'ok', execution_count: 2 })).toBeNull()
+  })
+})

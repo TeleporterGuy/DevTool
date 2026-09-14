@@ -154,6 +154,18 @@ export function isCondaEnvPrefix(prefix: string, deps: CondaEnvDeps = {}): boole
   )
 }
 
+/** python.exe / python in the env prefix. Null when the env has no interpreter. */
+export function condaPythonExecutable(prefix: string, deps: CondaEnvDeps = {}): string | null {
+  const trimmed = prefix.trim()
+  if (!trimmed) return null
+  const pathMod = pathOf(deps)
+  const existsSync = existsOf(deps)
+  const candidates = platformOf(deps) === 'win32'
+    ? [pathMod.join(trimmed, 'python.exe'), pathMod.join(trimmed, 'Scripts', 'python.exe')]
+    : [pathMod.join(trimmed, 'bin', 'python'), pathMod.join(trimmed, 'bin', 'python3')]
+  return candidates.find((file) => existsSync(file)) ?? null
+}
+
 function readDirNames(dir: string, deps: CondaEnvDeps = {}): string[] {
   try {
     if (deps.readdirSync) return deps.readdirSync(dir)

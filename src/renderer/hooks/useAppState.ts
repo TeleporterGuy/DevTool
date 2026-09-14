@@ -37,6 +37,7 @@ import type {
   FileBrowserTab
 } from '../../shared/types'
 import { applyQueuedStateUpdates, persistSelectionState, type StateUpdater } from './stateHydration'
+import { isNotebookFile } from '../../shared/notebook'
 import { RevisionSyncClient } from './revisionSync'
 import { resolveLandingTaskId } from './taskNavigation'
 import { backfillLifetimeStats, incrementLifetimeStat } from './lifetimeStats'
@@ -1726,7 +1727,7 @@ export function useAppState() {
     if (!task) return
 
     const existingTab = [...task.tabs.left, ...task.tabs.right].find(
-      t => t.type === 'editor' && t.filePath === filePath
+      t => (t.type === 'editor' || t.type === 'notebook') && t.filePath === filePath
     )
     if (existingTab) {
       const existingPane = task.tabs.left.includes(existingTab) ? 'left' : 'right'
@@ -1734,7 +1735,7 @@ export function useAppState() {
       return
     }
 
-    addTab(projectId, taskId, pane, 'editor', filePath)
+    addTab(projectId, taskId, pane, isNotebookFile(filePath) ? 'notebook' : 'editor', filePath)
   }, [addTab, setActiveTab])
 
   const createNote = useCallback((projectId: string, name: string): ProjectNote => {
