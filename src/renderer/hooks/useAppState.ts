@@ -13,7 +13,8 @@ import {
   pinnedItemKey,
   pruneUnusedTags,
   reconcileTaskViewState,
-  reconcileWindowViewState
+  reconcileWindowViewState,
+  DEFAULT_CONFIG
 } from '../../shared/types'
 import type {
   NotesRecord,
@@ -50,6 +51,7 @@ import {
 import { createInteractionStampGate } from '../components/taskRecency'
 import { createTab, type CreateTabOptions } from '../components/newTaskTabs'
 import { useDirtyBufferStore, type DirtyBuffer } from '../context/DirtyBufferContext'
+import { nextEditorFontSize } from '../components/zoom'
 
 export type ProjectUpdate = Partial<Pick<Project, 'directory' | 'aiToolArgs' | 'condaEnvName' | 'condaEnvPrefix' | 'tunnel' | 'emoji' | 'icon' | 'tagIds'>>
 type AddTabOptions = CreateTabOptions
@@ -1635,6 +1637,12 @@ export function useAppState() {
     })
   }, [])
 
+  const zoomEditor = useCallback((direction: 'in' | 'out' | 'reset') => {
+    updateConfig({
+      editorFontSize: nextEditorFontSize(config?.editorFontSize ?? DEFAULT_CONFIG.editorFontSize, direction)
+    })
+  }, [config?.editorFontSize, updateConfig])
+
   const writeSidebarToCurrentTask = useCallback((
     prev: WindowViewState,
     patch: { fileBrowserOpen?: boolean; fileBrowserActiveTab?: FileBrowserTab }
@@ -2005,6 +2013,7 @@ export function useAppState() {
     browserZoomFactor,
     zoomTerminal,
     zoomBrowser,
+    zoomEditor,
     fileBrowserOpen: windowViewState.fileBrowserOpen,
     fileBrowserWidth: windowViewState.fileBrowserWidth,
     fileBrowserActiveTab: windowViewState.fileBrowserActiveTab,

@@ -150,7 +150,14 @@ export default function NotebookCellView({
           onClick={onStartMarkdownEdit}
         >
           {cell.source.trim()
-            ? <MarkdownPreview content={cell.source} effectiveTheme={effectiveTheme} variant="flow" />
+            ? (
+              <MarkdownPreview
+                content={cell.source}
+                effectiveTheme={effectiveTheme}
+                variant="notebook"
+                fontSize={config.editorFontSize}
+              />
+            )
             : <div className="px-3 py-4 text-sm text-text-muted italic">Empty markdown cell — click to edit</div>}
         </button>
       ) : (

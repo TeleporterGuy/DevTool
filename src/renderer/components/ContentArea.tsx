@@ -12,6 +12,7 @@ import UnsavedChangesModal from './UnsavedChangesModal'
 import StateSyncErrorModal from './StateSyncErrorModal'
 import OpenInIdeButton from './OpenInIdeButton'
 import { getPaneFromValue, resolvePaneForMenuAction, type PaneSide } from './paneFocus'
+import { zoomTargetForTabType } from './zoom'
 import type { TabDragState, TabDropTarget } from './tabDrag'
 import type { TunnelConfig, TunnelState } from '../../shared/types'
 
@@ -65,6 +66,7 @@ export default function ContentArea(): React.ReactElement {
     setFileBrowserActiveTab,
     zoomTerminal,
     zoomBrowser,
+    zoomEditor,
     getTaskViewState,
     updateProject,
     connectSsh,
@@ -270,12 +272,10 @@ export default function ContentArea(): React.ReactElement {
     })
 
     const handleZoom = (direction: 'in' | 'out' | 'reset') => {
-      const info = getActiveTabInfo()
-      if (info?.activeTab?.type === 'browser') {
-        zoomBrowser(direction)
-      } else {
-        zoomTerminal(direction)
-      }
+      const target = zoomTargetForTabType(getActiveTabInfo()?.activeTab?.type)
+      if (target === 'browser') zoomBrowser(direction)
+      else if (target === 'editor') zoomEditor(direction)
+      else zoomTerminal(direction)
     }
 
     const cleanupZoomIn = window.api.onMenuZoomIn(() => handleZoom('in'))
@@ -291,7 +291,7 @@ export default function ContentArea(): React.ReactElement {
       cleanupZoomOut()
       cleanupZoomReset()
     }
-  }, [projects, selectedProjectId, selectedTaskId, addTab, removeTab, reopenClosedTab, zoomTerminal, zoomBrowser, rememberFocusedPane, getTaskViewState])
+  }, [projects, selectedProjectId, selectedTaskId, addTab, removeTab, reopenClosedTab, zoomTerminal, zoomBrowser, zoomEditor, rememberFocusedPane, getTaskViewState])
 
   const handleDividerMouseDown = useCallback(
     (projectId: string, taskId: string) => (e: React.MouseEvent) => {
