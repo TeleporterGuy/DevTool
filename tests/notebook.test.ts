@@ -274,6 +274,13 @@ describe('cell operations', () => {
     expect(moveCell(doc, 0, 0)).toBe(doc)
     expect(moveCell(doc, -1, 0)).toBe(doc)
     expect(moveCell(doc, 0, 99)).toBe(doc)
+
+    // Adjacent swap (toolbar Move down) keeps every id; renderer relies on
+    // stable keys so the active cell's Monaco host is not remounted.
+    const before = doc.cells.map((item) => item.id)
+    const swapped = moveCellById(doc, before[0], 1)
+    expect(swapped.cells.map((item) => item.id)).toEqual([before[1], before[0], before[2]])
+    expect(swapped.cells).toHaveLength(before.length)
   })
 })
 

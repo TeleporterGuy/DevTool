@@ -10,6 +10,7 @@ import {
   type NotebookCellType
 } from '../../shared/notebook'
 import { buildMonacoNotebookCellOptions, notebookCellEditorHeight } from './monacoOptions'
+import { notebookCellMountsMonaco } from './notebookCellEditor'
 import { defineMonacoThemes, monacoThemeFor } from './monacoTheme'
 import MarkdownPreview from './MarkdownPreview'
 import NotebookOutputs from './NotebookOutputs'
@@ -38,6 +39,14 @@ interface Props {
 
 const RUN_KEY = 2048 | 3
 const RUN_AND_NEXT_KEY = 2048 | 1024 | 3
+
+function safeMonacoCall(fn: () => void): void {
+  try {
+    fn()
+  } catch {
+    /* layout/dispose can throw if Monaco already tore down during a cell move */
+  }
+}
 
 export default function NotebookCellView({
   cell,
@@ -69,6 +78,12 @@ export default function NotebookCellView({
   const collapsed = isNotebookCellCollapsed(cell)
   const sourcePreview = notebookCellSourcePreview(cell.source)
   const showMarkdownPreview = cell.cellType === 'markdown' && !isEditingMarkdown
+  const mountMonaco = notebookCellMountsMonaco({
+    isActive,
+    collapsed,
+    cellType: cell.cellType,
+    isEditingMarkdown
+  })
   const language = cell.cellType === 'code' ? 'python' : 'markdown'
 
   useEffect(() => {
@@ -78,16 +93,29 @@ export default function NotebookCellView({
   }, [onChangeSource, onRun, onRunAndNext])
 
   useEffect(() => {
-    editorRef.current?.updateOptions(buildMonacoNotebookCellOptions(config))
-    editorRef.current?.layout()
+    const ed = editorRef.current
+    if (!ed) return
+    safeMonacoCall(() => {
+      ed.updateOptions(buildMonacoNotebookCellOptions(config))
+      ed.layout()
+    })
   }, [config])
 
   useEffect(() => {
-    editorRef.current?.layout()
+    const ed = editorRef.current
+    if (!ed) return
+    safeMonacoCall(() => ed.layout())
   }, [height])
 
+  useEffect(() => {
+    if (mountMonaco) return
+    safeMonacoCall(() => sizeSubRef.current?.dispose())
+    sizeSubRef.current = null
+    editorRef.current = null
+  }, [mountMonaco])
+
   useEffect(() => () => {
-    sizeSubRef.current?.dispose()
+    safeMonacoCall(() => sizeSubRef.current?.dispose())
     sizeSubRef.current = null
     editorRef.current = null
   }, [])
@@ -105,8 +133,12 @@ export default function NotebookCellView({
         /* ignore disposed editor */
       }
     }
-    sizeSubRef.current?.dispose()
-    sizeSubRef.current = ed.onDidContentSizeChange(applyHeight)
+    safeMonacoCall(() => sizeSubRef.current?.dispose())
+    try {
+      sizeSubRef.current = ed.onDidContentSizeChange(applyHeight)
+    } catch {
+      sizeSubRef.current = null
+    }
     applyHeight()
   }
 
@@ -206,8 +238,8 @@ export default function NotebookCellView({
                 )
                 : <div className="px-3 py-4 text-sm text-text-muted italic">Empty markdown cell — click to edit</div>}
             </button>
-          ) : (
-            <div style={{ height }}>
+          ) : mountMonaco ? (
+            <div style={{ height }} data-testid="notebook-cell-monaco">
               <Editor
                 key={`${cell.cellType}-${resetKey}`}
                 path={`${cell.id}.${cell.cellType === 'code' ? 'py' : 'md'}`}
@@ -223,6 +255,17 @@ export default function NotebookCellView({
                 }}
               />
             </div>
+          ) : (
+            <pre
+              data-testid="notebook-cell-source-pre"
+              className="m-0 px-3 py-2 text-sm text-text whitespace-pre-wrap break-words cursor-text min-h-[48px]"
+              style={{
+                fontFamily: config.editorFontFamily || 'var(--font-mono)',
+                fontSize: config.editorFontSize
+              }}
+            >
+              {cell.source || ' '}
+            </pre>
           )}
 
           {cell.cellType === 'code' && <NotebookOutputs outputs={cell.outputs} />}

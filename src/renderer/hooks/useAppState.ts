@@ -426,13 +426,15 @@ export function useAppState() {
    * safeguard rather than a prompt — and main cannot see one on its own.
    */
   useEffect(() => {
+    const api = window.api
+    if (!api) return undefined
     let lastReported = ''
     const report = () => {
       const tabIds = dirtyBuffers.getDirtyTabs().map(buffer => buffer.tabId).sort()
       const serialized = JSON.stringify(tabIds)
       if (serialized === lastReported) return
       lastReported = serialized
-      void window.api?.reportDirtyTabs(tabIds).catch(() => {})
+      void api.reportDirtyTabs(tabIds).catch(() => {})
     }
     report()
     return dirtyBuffers.subscribe(report)
@@ -445,14 +447,16 @@ export function useAppState() {
    * tabs, and this window's own view state.
    */
   useEffect(() => {
-    return window.api.onTasksRemoved(({ taskId, tabIds }) => {
+    const api = window.api
+    if (!api) return undefined
+    return api.onTasksRemoved(({ taskId, tabIds }) => {
       for (const tabId of tabIds) {
         window.dispatchEvent(new CustomEvent('tab-removed', { detail: { tabId } }))
       }
       // Disposing a live xterm writes its buffer back synchronously, which would
       // put back the scrollback file main just deleted.
       for (const tabId of tabIds) {
-        void window.api.scrollbackDelete(tabId)
+        void api.scrollbackDelete(tabId)
       }
       updateWindowViewState(prev => {
         if (!(taskId in prev.taskStates) && prev.selectedTaskId !== taskId) return prev
@@ -489,23 +493,27 @@ export function useAppState() {
   }, [projectsData, projectsSync])
 
   useEffect(() => {
+    const api = window.api
+    if (!api) return
     if (!configLoadedRef.current || !config) return
 
     const serialized = JSON.stringify(config)
     if (serialized === lastSavedConfigJsonRef.current) return
 
     lastSavedConfigJsonRef.current = serialized
-    void window.api.saveConfig(config)
+    void api.saveConfig(config)
   }, [config])
 
   useEffect(() => {
+    const api = window.api
+    if (!api) return
     if (!windowStateLoadedRef.current) return
 
     const serialized = JSON.stringify(windowViewState)
     if (serialized === lastSavedWindowStateJsonRef.current) return
 
     lastSavedWindowStateJsonRef.current = serialized
-    void window.api.saveWindowState(windowViewState)
+    void api.saveWindowState(windowViewState)
   }, [windowViewState])
 
   useEffect(() => {
@@ -549,11 +557,13 @@ export function useAppState() {
   ])
 
   useEffect(() => {
+    const api = window.api
+    if (!api) return
     const selectedProjectId = windowViewState.selectedProjectId
     if (!selectedProjectId || projects.length === 0) return
     const project = projects.find(p => p.id === selectedProjectId)
     if (project && isRemoteProject(project) && project.ssh) {
-      window.api.sshStatus(selectedProjectId).then(status => {
+      api.sshStatus(selectedProjectId).then(status => {
         if (status !== 'connected' && status !== 'connecting') {
           connectSsh(selectedProjectId, project.ssh!).catch(() => {})
         }

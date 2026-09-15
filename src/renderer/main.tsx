@@ -1,6 +1,6 @@
 import React from 'react'
 import ReactDOM from 'react-dom/client'
-import { isIgnorableRendererError } from './renderer-errors'
+import { shouldSkipRendererCrashScreen } from './renderer-errors'
 import './styles.css'
 
 interface CrashDetails {
@@ -84,8 +84,11 @@ function renderCrash(details: CrashDetails): void {
 }
 
 window.addEventListener('error', (event) => {
-  if (isIgnorableRendererError(event.error, event.message)) {
+  // Do not replace the React tree for Monaco/ResizeObserver noise. root.render(CrashScreen)
+  // unmounts AppProvider; the next mount can run with window.api undefined.
+  if (shouldSkipRendererCrashScreen(event.error, event.message)) {
     event.preventDefault()
+    console.warn('Ignoring renderer noise', event.error ?? event.message)
     return
   }
   const details = normalizeError(event.error ?? event.message, 'Unhandled renderer error')
@@ -94,6 +97,11 @@ window.addEventListener('error', (event) => {
 })
 
 window.addEventListener('unhandledrejection', (event) => {
+  if (shouldSkipRendererCrashScreen(event.reason)) {
+    event.preventDefault()
+    console.warn('Ignoring renderer rejection noise', event.reason)
+    return
+  }
   const details = normalizeError(event.reason, 'Unhandled promise rejection')
   console.error('window.unhandledrejection', event.reason)
   renderCrash(details)
