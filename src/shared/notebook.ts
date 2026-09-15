@@ -148,6 +148,43 @@ export function notebookCondaOverridePayload(
   }
 }
 
+/** Closed-field / `<option value="">` text: env name first, then `(project default)`. */
+export function notebookProjectDefaultOptionLabel(projectEnvLabel: string | null | undefined): string {
+  const name = projectEnvLabel?.trim() ?? ''
+  return name ? `${name} (project default)` : 'Project default'
+}
+
+/**
+ * Visible env label for the combined kernel/env control.
+ * Override shows just the env name; project default adds `(project default)`.
+ */
+export function notebookKernelEnvControlLabel(
+  usingOverride: boolean,
+  envLabel: string | null | undefined,
+  projectEnvLabel: string | null | undefined
+): string {
+  if (usingOverride) {
+    const name = envLabel?.trim() ?? ''
+    return name || 'Untitled'
+  }
+  return notebookProjectDefaultOptionLabel(projectEnvLabel)
+}
+
+export function notebookKernelStatusWord(status: NotebookKernelStatus): string {
+  if (status === 'starting' || status === 'busy' || status === 'dead' || status === 'error') {
+    return status
+  }
+  return 'idle'
+}
+
+/** Tooltip / aria-label: status is not shown in the chrome, only here. */
+export function notebookKernelEnvControlTitle(
+  status: NotebookKernelStatus,
+  controlLabel: string
+): string {
+  return `Kernel ${notebookKernelStatusWord(status)} — ${controlLabel}. Click to change.`
+}
+
 /**
  * Live resolve result, or the saved name/prefix so spawn can fail closed
  * (stale override must not fall back to the project env).

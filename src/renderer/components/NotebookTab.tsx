@@ -12,6 +12,9 @@ import {
   notebookCondaEnvFromMetadata,
   notebookCondaOverridePayload,
   notebookKernelCondaSelection,
+  notebookKernelEnvControlLabel,
+  notebookKernelEnvControlTitle,
+  notebookProjectDefaultOptionLabel,
   parseNotebook,
   replaceCellOutputs,
   serializeNotebook,
@@ -61,14 +64,6 @@ function notebookHasOutputs(doc: NotebookDocument | null): boolean {
   return doc.cells.some(
     (cell) => cell.cellType === 'code' && (cell.outputs.length > 0 || cell.executionCount != null)
   )
-}
-
-function statusLabel(status: NotebookKernelStatus): string {
-  if (status === 'starting') return 'starting'
-  if (status === 'busy') return 'busy'
-  if (status === 'dead') return 'dead'
-  if (status === 'error') return 'error'
-  return 'idle'
 }
 
 export default function NotebookTab({
@@ -502,6 +497,11 @@ export default function NotebookTab({
       : kernelStatus === 'dead' || kernelStatus === 'error'
         ? 'var(--color-danger)'
         : 'var(--color-success)'
+  const usingOverride = Boolean(condaOverride)
+  const projectDefaultOptionLabel = notebookProjectDefaultOptionLabel(projectEnvLabel)
+  const envControlLabel = notebookKernelEnvControlLabel(usingOverride, envLabel, projectEnvLabel)
+  const envControlTitle = notebookKernelEnvControlTitle(kernelStatus, envControlLabel)
+  const envControlHint = condaListError ? `${envControlTitle} ${condaListError}` : envControlTitle
 
   return (
     <div style={{ position: 'absolute', inset: 0, display: visible ? 'flex' : 'none', flexDirection: 'column' }}>
@@ -548,30 +548,33 @@ export default function NotebookTab({
         >
           <span className="inline-flex items-center gap-1"><Eraser size={12} /> Clear outputs</span>
         </button>
-        <span className="flex items-center gap-1.5 ml-2 text-xs text-text-muted shrink-0">
-          <span className="w-1.5 h-1.5 rounded-full" style={{ background: statusColor }} />
-          Kernel {statusLabel(kernelStatus)}{envLabel ? ` · ${envLabel}` : ''}
-        </span>
-        <select
-          className="h-(--ctl-h-sm) max-w-[10rem] min-w-[6.5rem] px-1 rounded-md bg-field border border-border text-2xs text-text cursor-pointer shrink-0 disabled:opacity-40"
-          value={condaValue}
-          onChange={(e) => onCondaChange(e.target.value)}
-          disabled={!doc}
-          aria-label="Notebook conda environment"
-          title={condaListError ?? 'Conda environment for this notebook'}
+        <label
+          className="ml-2 inline-flex items-center gap-1 h-(--ctl-h-sm) max-w-[18rem] min-w-[8rem] pl-1.5 pr-0.5 rounded-md bg-field border border-border shrink-0 cursor-pointer focus-within:border-border-focus"
+          title={envControlHint}
         >
-          <option value="">
-            {projectEnvLabel ? `Project default (${projectEnvLabel})` : 'Project default'}
-          </option>
-          {condaSavedOptionVisible(condaValue, condaEnvs) && (
-            <option value={condaValue}>
-              {condaSavedOptionLabel(condaValue, condaOverride?.condaEnvName ?? envLabel ?? undefined)}
-            </option>
-          )}
-          {condaEnvs.map((env) => (
-            <option key={env.prefix} value={env.prefix}>{env.name}</option>
-          ))}
-        </select>
+          <span
+            className="w-1.5 h-1.5 rounded-full shrink-0"
+            style={{ background: statusColor }}
+            aria-hidden
+          />
+          <select
+            className="h-full min-w-0 flex-1 max-w-full px-0.5 border-0 bg-transparent text-2xs text-text cursor-pointer outline-none disabled:opacity-40"
+            value={condaValue}
+            onChange={(e) => onCondaChange(e.target.value)}
+            disabled={!doc}
+            aria-label={envControlTitle}
+          >
+            <option value="">{projectDefaultOptionLabel}</option>
+            {condaSavedOptionVisible(condaValue, condaEnvs) && (
+              <option value={condaValue}>
+                {condaSavedOptionLabel(condaValue, condaOverride?.condaEnvName ?? envLabel ?? undefined)}
+              </option>
+            )}
+            {condaEnvs.map((env) => (
+              <option key={env.prefix} value={env.prefix}>{env.name}</option>
+            ))}
+          </select>
+        </label>
         <span className="ml-2 flex min-w-0 flex-1 items-center justify-end gap-1.5">
           <span className="min-w-0 truncate text-2xs text-text-subtle" title={filePath}>{filePath}</span>
           <span

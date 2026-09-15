@@ -21,6 +21,9 @@ import {
   setNotebookCellCollapsed,
   setNotebookCondaEnvMetadata,
   notebookCondaEnvFromMetadata,
+  notebookKernelEnvControlLabel,
+  notebookKernelEnvControlTitle,
+  notebookProjectDefaultOptionLabel,
   splitNotebookText,
   updateCellSource
 } from '../src/shared/notebook'
@@ -179,6 +182,35 @@ describe('parseNotebook / serializeNotebook', () => {
     })
     const roundTrip = parseNotebook(serializeNotebook(doc))
     expect(roundTrip.cells[0].outputs).toEqual(doc.cells[0].outputs)
+  })
+})
+
+describe('notebook kernel env control labels', () => {
+  it('puts the env name first for the project-default option', () => {
+    expect(notebookProjectDefaultOptionLabel('pec_simulator_env')).toBe(
+      'pec_simulator_env (project default)'
+    )
+    expect(notebookProjectDefaultOptionLabel(null)).toBe('Project default')
+    expect(notebookProjectDefaultOptionLabel('  ')).toBe('Project default')
+  })
+
+  it('omits the project-default suffix when an override is selected', () => {
+    expect(notebookKernelEnvControlLabel(true, 'ml', 'pec_simulator_env')).toBe('ml')
+    expect(notebookKernelEnvControlLabel(false, 'pec_simulator_env', 'pec_simulator_env')).toBe(
+      'pec_simulator_env (project default)'
+    )
+  })
+
+  it('puts kernel status in the title, not the closed-field label', () => {
+    expect(
+      notebookKernelEnvControlTitle('idle', 'pec_simulator_env (project default)')
+    ).toBe('Kernel idle — pec_simulator_env (project default). Click to change.')
+    expect(notebookKernelEnvControlTitle('busy', 'ml')).toBe(
+      'Kernel busy — ml. Click to change.'
+    )
+    expect(notebookKernelEnvControlTitle('error', 'Project default')).toBe(
+      'Kernel error — Project default. Click to change.'
+    )
   })
 })
 
