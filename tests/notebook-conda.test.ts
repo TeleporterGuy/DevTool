@@ -4,7 +4,13 @@ import { condaPythonExecutable, resetCondaEnvForTests } from '../src/main/conda-
 import {
   prepareNotebookKernelSpawn
 } from '../src/main/notebook-kernel'
-import { NOTEBOOK_ERROR_NO_CONDA, NOTEBOOK_ERROR_NO_PYTHON } from '../src/shared/notebook'
+import {
+  condaEnvInfoForNotebookSpawn,
+  notebookCondaOverridePayload,
+  notebookKernelCondaSelection,
+  NOTEBOOK_ERROR_NO_CONDA,
+  NOTEBOOK_ERROR_NO_PYTHON
+} from '../src/shared/notebook'
 import { resetShellEnvForTests } from '../src/main/shell-env'
 
 const win = {
@@ -136,5 +142,72 @@ describe('prepareNotebookKernelSpawn', () => {
     if (!result.ok) return
     expect(result.python).toBe(python)
     expect(result.env.PATH.split(':')[0]).toBe(`${prefix}/bin`)
+  })
+})
+
+describe('notebook conda override vs project default', () => {
+  it('defaults to the project env when the notebook has no override', () => {
+    const project = { condaEnvName: 'proj', condaEnvPrefix: 'C:\\proj-env' }
+    expect(notebookKernelCondaSelection(null, project)).toEqual(project)
+    expect(notebookCondaOverridePayload(null)).toBeUndefined()
+  })
+
+  it('prefers the notebook override for spawn', () => {
+    const project = { condaEnvName: 'proj', condaEnvPrefix: 'C:\\proj-env' }
+    const override = { condaEnvName: 'ml', condaEnvPrefix: 'C:\\ml' }
+    const selection = notebookKernelCondaSelection(override, project)
+    expect(selection).toEqual(override)
+    expect(notebookCondaOverridePayload(override)).toEqual({ name: 'ml', prefix: 'C:\\ml' })
+
+    const prefix = 'C:\\ml'
+    const python = `${prefix}\\python.exe`
+    const helper = 'C:\\app\\notebook-kernel.py'
+    const spawnEnv = condaEnvInfoForNotebookSpawn(selection, {
+      name: 'ml',
+      prefix
+    })
+    const result = prepareNotebookKernelSpawn(
+      spawnEnv,
+      'C:\\proj',
+      {
+        ...win,
+        env: { PATH: 'C:\\Windows\\system32', Path: 'C:\\Windows\\system32' },
+        existsSync: (file) =>
+          file === python ||
+          file === `${prefix}\\conda-meta` ||
+          file === prefix ||
+          file === `${prefix}\\Scripts` ||
+          file === `${prefix}\\Library\\bin`,
+        helperExistsSync: (file) => file === helper
+      },
+      helper
+    )
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.python).toBe(python)
+    expect(result.env.CONDA_DEFAULT_ENV).toBe('ml')
+    expect(result.env.CONDA_PREFIX).toBe(prefix)
+  })
+
+  it('does not fall back to the project env when the override is stale', () => {
+    const selection = notebookKernelCondaSelection(
+      { condaEnvName: 'gone', condaEnvPrefix: 'D:\\gone\\envs\\gone' },
+      { condaEnvName: 'proj', condaEnvPrefix: 'C:\\proj-env' }
+    )
+    expect(condaEnvInfoForNotebookSpawn(selection, null)).toEqual({
+      name: 'gone',
+      prefix: 'D:\\gone\\envs\\gone'
+    })
+  })
+
+  it('treats a picker change as a new start/restart payload', () => {
+    const before = notebookCondaOverridePayload(null)
+    const after = notebookCondaOverridePayload({
+      condaEnvName: 'scipy',
+      condaEnvPrefix: '/home/me/miniconda3/envs/scipy'
+    })
+    expect(before).toBeUndefined()
+    expect(after).toEqual({ name: 'scipy', prefix: '/home/me/miniconda3/envs/scipy' })
+    expect(after).not.toEqual(before)
   })
 })

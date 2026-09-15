@@ -23,7 +23,10 @@ import { GIT_STATUS_ARGS, parseGitStatusZ } from './git-status-parse'
 import { AI_TAB_META, isRemoteProject, isShellCommandProject } from '../shared/types'
 import {
   NOTEBOOK_ERROR_REMOTE,
-  NOTEBOOK_ERROR_SHELL_PROJECT
+  NOTEBOOK_ERROR_SHELL_PROJECT,
+  condaEnvInfoForNotebookSpawn,
+  notebookKernelCondaSelection,
+  type NotebookKernelCondaOverride
 } from '../shared/notebook'
 import { notebookAllowedCwdRoots, resolveNotebookKernelCwd } from './notebook-cwd'
 import { agentCommandOverride, conptySpawnArgv, isAiAgentCommand, resolveAgentCommand } from './resolve-agent-command'
@@ -944,8 +947,14 @@ export class AppRuntime {
 
     ipcMain.handle(
       'notebook-kernel-start',
-      (_event, tabId: string, projectId: string, cwd: string): { error?: string; code?: string } => {
-        return this.startNotebookKernel(tabId, projectId, cwd)
+      (
+        _event,
+        tabId: string,
+        projectId: string,
+        cwd: string,
+        condaOverride?: NotebookKernelCondaOverride | null
+      ): { error?: string; code?: string } => {
+        return this.startNotebookKernel(tabId, projectId, cwd, condaOverride)
       }
     )
     ipcMain.handle(
@@ -960,9 +969,15 @@ export class AppRuntime {
     })
     ipcMain.handle(
       'notebook-kernel-restart',
-      (_event, tabId: string, projectId: string, cwd: string): { error?: string; code?: string } => {
+      (
+        _event,
+        tabId: string,
+        projectId: string,
+        cwd: string,
+        condaOverride?: NotebookKernelCondaOverride | null
+      ): { error?: string; code?: string } => {
         this.notebookKernels.shutdown(tabId)
-        return this.startNotebookKernel(tabId, projectId, cwd)
+        return this.startNotebookKernel(tabId, projectId, cwd, condaOverride)
       }
     )
     ipcMain.handle('notebook-kernel-shutdown', (_event, tabId: string) => {
@@ -1455,7 +1470,8 @@ export class AppRuntime {
   private startNotebookKernel(
     tabId: string,
     projectId: string,
-    cwd: string
+    cwd: string,
+    condaOverride?: NotebookKernelCondaOverride | null
   ): { error?: string; code?: string } {
     const project = this.projectsStore.peek().projects.find((item) => item.id === projectId)
     if (!project) return { error: 'Project not found.', code: 'no-project' }
@@ -1484,8 +1500,16 @@ export class AppRuntime {
       })
       return { error: cwdResult.error, code: 'cwd' }
     }
-    const condaEnv = this.condaEnvForLocalProject(projectId)
-    this.logDebug(`notebookKernelStart tabId=${tabId} projectId=${projectId} cwd=${cwdResult.cwd}`)
+    const selection = notebookKernelCondaSelection(
+      condaOverride
+        ? { condaEnvName: condaOverride.name, condaEnvPrefix: condaOverride.prefix }
+        : null,
+      project
+    )
+    const condaEnv = condaEnvInfoForNotebookSpawn(selection, resolveProjectCondaEnv(selection)) ?? undefined
+    this.logDebug(
+      `notebookKernelStart tabId=${tabId} projectId=${projectId} cwd=${cwdResult.cwd} conda=${condaEnv?.name ?? ''} prefix=${condaEnv?.prefix ?? ''}`
+    )
     return this.notebookKernels.start(tabId, condaEnv, cwdResult.cwd)
   }
 

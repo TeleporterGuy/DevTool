@@ -177,6 +177,6 @@ Highest-leverage remaining engineering pass: **unsigned Windows folder** / Phase
 
 Roadmap phases (conda, native notebooks, then packaging) add more child processes (an ipykernel per notebook tab) and an installer/updater. They do not remove anything above. Do not declare Phase 3–5 “company ready” without revisiting this file.
 
-Parking-lot ideas that would *increase* surface if pulled in: Windows OpenSSH as a second remote stack, language servers talking stdio as the same user. Native notebook kernels (Phase 4) spawn `python` from the project conda env as the logged-in user — same trust as a terminal running that env.
+Parking-lot ideas that would *increase* surface if pulled in: Windows OpenSSH as a second remote stack, language servers talking stdio as the same user. Native notebook kernels (Phase 4) spawn `python` from the project default conda env (optional per-notebook override) as the logged-in user — same trust as a terminal running that env.
 
 This audit started as a snapshot at `0.3.0`. **Phase 1.3 (`0.3.1`):** Electron 43.6.0, `about:blank` new tabs, guest webview Node locked off. **Phase 1.4 (`0.3.2`):** Windows shortcut labels only. **Phase 2 (`0.3.2`, no minor bump):** hook shared secret + 64 KiB body cap; remote Pi extension under `$HOME/.devtool-remote/` (`0700`); SSH uses `~/.ssh/known_hosts` and `accept-new` (no DevTool `UserKnownHostsFile` / `IdentitiesOnly`); remote directory required; control-socket dir `0700`. Still open: unsigned Windows folder, no CSP, first-connect TOFU, wide IPC, plaintext `~/.devtool`.

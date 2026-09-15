@@ -20,7 +20,7 @@ Built with Electron, React, and TypeScript.
 
 **Editor Tabs** -- Monaco editor with syntax highlighting, configurable fonts, line numbers, minimap, word wrap, and auto-save.
 
-**Notebook Tabs** -- Native `.ipynb` editor (markdown + code cells in Monaco). Run cells against ipykernel in the project's conda env (`jupyter_client`). Stream text, plain/text, PNG, and errors. Local projects only.
+**Notebook Tabs** -- Native `.ipynb` editor (markdown + code cells in Monaco). Run cells against ipykernel in the project's default conda env, or a per-notebook override (`jupyter_client`). Stream text, plain/text, PNG, and errors. Local projects only.
 
 **Diff Viewer** -- Git diff visualization with side-by-side rendering and whitespace options.
 

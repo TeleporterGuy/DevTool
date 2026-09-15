@@ -24,7 +24,7 @@ import type {
   WindowViewState
 } from '../shared/types'
 import type { CondaListResult } from '../shared/conda'
-import type { NotebookKernelEvent } from '../shared/notebook'
+import type { NotebookKernelCondaOverride, NotebookKernelEvent } from '../shared/notebook'
 
 const api = {
   // Projects
@@ -321,8 +321,13 @@ const api = {
     ipcRenderer.invoke('workspace-delete', request),
 
   // Native notebooks (Phase 4). One jupyter_client helper per tab, local conda env only.
-  notebookKernelStart: (tabId: string, projectId: string, cwd: string): Promise<{ error?: string; code?: string }> =>
-    ipcRenderer.invoke('notebook-kernel-start', tabId, projectId, cwd),
+  notebookKernelStart: (
+    tabId: string,
+    projectId: string,
+    cwd: string,
+    condaOverride?: NotebookKernelCondaOverride | null
+  ): Promise<{ error?: string; code?: string }> =>
+    ipcRenderer.invoke('notebook-kernel-start', tabId, projectId, cwd, condaOverride),
   notebookKernelExecute: (
     tabId: string,
     requestId: string,
@@ -332,8 +337,13 @@ const api = {
     ipcRenderer.invoke('notebook-kernel-execute', tabId, requestId, code, cellId),
   notebookKernelInterrupt: (tabId: string): Promise<void> =>
     ipcRenderer.invoke('notebook-kernel-interrupt', tabId),
-  notebookKernelRestart: (tabId: string, projectId: string, cwd: string): Promise<{ error?: string; code?: string }> =>
-    ipcRenderer.invoke('notebook-kernel-restart', tabId, projectId, cwd),
+  notebookKernelRestart: (
+    tabId: string,
+    projectId: string,
+    cwd: string,
+    condaOverride?: NotebookKernelCondaOverride | null
+  ): Promise<{ error?: string; code?: string }> =>
+    ipcRenderer.invoke('notebook-kernel-restart', tabId, projectId, cwd, condaOverride),
   notebookKernelShutdown: (tabId: string): Promise<void> =>
     ipcRenderer.invoke('notebook-kernel-shutdown', tabId),
   onNotebookKernelEvent: (callback: (tabId: string, event: NotebookKernelEvent) => void): (() => void) => {

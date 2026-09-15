@@ -3,6 +3,8 @@
  * Parse/serialize stay in shared so renderer, main, and tests use one shape.
  */
 
+import { lastPathSegment, type CondaEnvInfo, type ProjectCondaSelection } from './conda'
+
 export const NOTEBOOK_NBFORMAT = 4
 export const NOTEBOOK_NBFORMAT_MINOR = 5
 
@@ -59,10 +61,10 @@ export const NOTEBOOK_PNG_OMITTED = '[truncated: image/png omitted (too large)]'
 export type NotebookKernelStatus = 'starting' | 'idle' | 'busy' | 'dead' | 'error'
 
 export const NOTEBOOK_ERROR_NO_CONDA =
-  'Pick a conda environment in Project Settings. Notebooks run Python from that env.'
+  'Pick a conda environment in the notebook toolbar, or in Project Settings. Notebooks run Python from that env.'
 
 export const NOTEBOOK_ERROR_NO_PYTHON =
-  'The project conda env has no python executable. Pick another env, or repair this one.'
+  'That conda env has no python executable. Pick another env, or repair this one.'
 
 export const NOTEBOOK_ERROR_REMOTE =
   'Native notebooks are local-only in this version. Open the .ipynb on a local project.'
@@ -75,6 +77,91 @@ export const NOTEBOOK_ERROR_MISSING_JUPYTER =
 
 export const NOTEBOOK_ERROR_CWD =
   'Notebook kernel cwd is outside this project.'
+
+/** Optional per-notebook conda override sent on kernel start/restart. */
+export type NotebookKernelCondaOverride = { name?: string; prefix?: string }
+
+export function notebookCondaEnvFromMetadata(
+  metadata: Record<string, unknown> | undefined
+): ProjectCondaSelection | null {
+  const devtool = asRecord(metadata?.devtool)
+  if (!devtool) return null
+  const conda = asRecord(devtool.condaEnv)
+  if (!conda) return null
+  const name = typeof conda.name === 'string' ? conda.name.trim() : ''
+  const prefix = typeof conda.prefix === 'string' ? conda.prefix.trim() : ''
+  if (!name && !prefix) return null
+  return { condaEnvName: name || undefined, condaEnvPrefix: prefix || undefined }
+}
+
+/** Write or clear `metadata.devtool.condaEnv` `{ name, prefix }`. */
+export function setNotebookCondaEnvMetadata(
+  doc: NotebookDocument,
+  env: ProjectCondaSelection | null
+): NotebookDocument {
+  const metadata = { ...doc.metadata }
+  const devtool = { ...(asRecord(metadata.devtool) ?? {}) }
+  const name = env?.condaEnvName?.trim() ?? ''
+  const prefix = env?.condaEnvPrefix?.trim() ?? ''
+  if (!name && !prefix) {
+    delete devtool.condaEnv
+    if (Object.keys(devtool).length === 0) delete metadata.devtool
+    else metadata.devtool = devtool
+    return { ...doc, metadata }
+  }
+  metadata.devtool = {
+    ...devtool,
+    condaEnv: {
+      ...(name ? { name } : {}),
+      ...(prefix ? { prefix } : {})
+    }
+  }
+  return { ...doc, metadata }
+}
+
+/** Override wins; otherwise the project env (notebook default). */
+export function notebookKernelCondaSelection(
+  override: ProjectCondaSelection | null | undefined,
+  project: ProjectCondaSelection
+): ProjectCondaSelection {
+  if (override?.condaEnvName?.trim() || override?.condaEnvPrefix?.trim()) {
+    return {
+      condaEnvName: override.condaEnvName?.trim() || undefined,
+      condaEnvPrefix: override.condaEnvPrefix?.trim() || undefined
+    }
+  }
+  return {
+    condaEnvName: project.condaEnvName?.trim() || undefined,
+    condaEnvPrefix: project.condaEnvPrefix?.trim() || undefined
+  }
+}
+
+export function notebookCondaOverridePayload(
+  override: ProjectCondaSelection | null | undefined
+): NotebookKernelCondaOverride | undefined {
+  const name = override?.condaEnvName?.trim() ?? ''
+  const prefix = override?.condaEnvPrefix?.trim() ?? ''
+  if (!name && !prefix) return undefined
+  return {
+    ...(name ? { name } : {}),
+    ...(prefix ? { prefix } : {})
+  }
+}
+
+/**
+ * Live resolve result, or the saved name/prefix so spawn can fail closed
+ * (stale override must not fall back to the project env).
+ */
+export function condaEnvInfoForNotebookSpawn(
+  selection: ProjectCondaSelection,
+  resolved: CondaEnvInfo | null
+): CondaEnvInfo | null {
+  if (resolved) return resolved
+  const prefix = selection.condaEnvPrefix?.trim() ?? ''
+  const name = selection.condaEnvName?.trim() ?? ''
+  if (!prefix && !name) return null
+  return { name: name || lastPathSegment(prefix), prefix }
+}
 
 export function isNotebookFile(filePath?: string | null): boolean {
   if (!filePath) return false

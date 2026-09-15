@@ -16,6 +16,8 @@ import {
   parseKernelEventLine,
   parseNotebook,
   serializeNotebook,
+  setNotebookCondaEnvMetadata,
+  notebookCondaEnvFromMetadata,
   splitNotebookText,
   updateCellSource
 } from '../src/shared/notebook'
@@ -107,6 +109,21 @@ describe('parseNotebook / serializeNotebook', () => {
     expect(again.cells.map((cell) => cell.id)).toEqual(['md-1', 'code-1'])
     expect(again.cells[1].source).toBe('print(1)\n2 + 2')
     expect(again.cells[1].outputs).toEqual(doc.cells[1].outputs)
+  })
+
+  it('round-trips metadata.devtool.condaEnv', () => {
+    const withEnv = setNotebookCondaEnvMetadata(parseNotebook(sample), {
+      condaEnvName: 'ml',
+      condaEnvPrefix: 'C:\\Users\\me\\miniconda3\\envs\\ml'
+    })
+    const again = parseNotebook(serializeNotebook(withEnv))
+    expect(notebookCondaEnvFromMetadata(again.metadata)).toEqual({
+      condaEnvName: 'ml',
+      condaEnvPrefix: 'C:\\Users\\me\\miniconda3\\envs\\ml'
+    })
+    const cleared = parseNotebook(serializeNotebook(setNotebookCondaEnvMetadata(again, null)))
+    expect(notebookCondaEnvFromMetadata(cleared.metadata)).toBeNull()
+    expect(cleared.metadata.devtool).toBeUndefined()
   })
 
   it('turns an empty file into a one-cell notebook', () => {

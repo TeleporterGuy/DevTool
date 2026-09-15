@@ -8,14 +8,27 @@ import {
   clearAllOutputs,
   deleteCellAt,
   moveCell,
+  notebookCondaEnvFromMetadata,
+  notebookCondaOverridePayload,
+  notebookKernelCondaSelection,
   parseNotebook,
   replaceCellOutputs,
   serializeNotebook,
+  setNotebookCondaEnvMetadata,
   updateCellSource,
   type NotebookCellType,
   type NotebookDocument,
   type NotebookKernelStatus
 } from '../../shared/notebook'
+import {
+  condaEnvFromSelection,
+  condaSavedOptionLabel,
+  condaSavedOptionVisible,
+  condaSelectValue,
+  lastPathSegment,
+  type CondaEnvInfo,
+  type ProjectCondaSelection
+} from '../../shared/conda'
 import {
   beginRunAll,
   beginSingleRun,
@@ -64,9 +77,14 @@ export default function NotebookTab({
   projectId,
   effectiveTheme
 }: Props): React.ReactElement {
-  const { config } = useApp()
+  const { config, projects } = useApp()
   const dirtyBuffers = useDirtyBufferStore()
   const monacoConfig = config ?? DEFAULT_CONFIG
+  const projectRecord = projects.find((item) => item.id === projectId)
+  const projectConda: ProjectCondaSelection = {
+    condaEnvName: projectRecord?.condaEnvName,
+    condaEnvPrefix: projectRecord?.condaEnvPrefix
+  }
 
   const [doc, setDoc] = useState<NotebookDocument | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -79,6 +97,9 @@ export default function NotebookTab({
   const [editingMarkdownId, setEditingMarkdownId] = useState<string | null>(null)
   const [everVisible, setEverVisible] = useState(visible)
   const [loadGeneration, setLoadGeneration] = useState(0)
+  const [kernelBootReady, setKernelBootReady] = useState(false)
+  const [condaEnvs, setCondaEnvs] = useState<CondaEnvInfo[]>([])
+  const [condaListError, setCondaListError] = useState<string | null>(null)
 
   const docRef = useRef<NotebookDocument | null>(null)
   const savedRef = useRef<string | null>(null)
@@ -87,6 +108,7 @@ export default function NotebookTab({
   const executeSeqRef = useRef(0)
   const runStateRef = useRef<NotebookRunQueueState>(idleRunQueue())
   const kernelStatusRef = useRef<NotebookKernelStatus>('starting')
+  const condaOverrideRef = useRef<ProjectCondaSelection | null>(null)
 
   const markDirty = useCallback((next: NotebookDocument) => {
     docRef.current = next
@@ -115,16 +137,22 @@ export default function NotebookTab({
         setDoc(parsed)
         setLoadGeneration((n) => n + 1)
         setActiveCellId((current) => current ?? parsed.cells[0]?.id ?? null)
+        condaOverrideRef.current = notebookCondaEnvFromMetadata(parsed.metadata)
+        setKernelBootReady(true)
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err)
         setError(message)
         setDoc(null)
+        condaOverrideRef.current = null
+        setKernelBootReady(true)
       }
     }).catch(() => {
       if (requestId !== requestIdRef.current) return
       if (!force && dirtyRef.current) return
       setError('Unable to read file.')
       setDoc(null)
+      condaOverrideRef.current = null
+      setKernelBootReady(true)
     })
   }, [filePath, projectDir])
 
@@ -136,6 +164,8 @@ export default function NotebookTab({
     docRef.current = null
     dirtyRef.current = false
     setDirty(false)
+    condaOverrideRef.current = null
+    setKernelBootReady(false)
     refreshContent(true)
     return () => {
       requestIdRef.current += 1
@@ -217,7 +247,8 @@ export default function NotebookTab({
     setKernelError(null)
     setKernelStatus('starting')
     kernelStatusRef.current = 'starting'
-    void window.api.notebookKernelStart(tabId, projectId, projectDir).then((result) => {
+    const override = notebookCondaOverridePayload(condaOverrideRef.current)
+    void window.api.notebookKernelStart(tabId, projectId, projectDir, override).then((result) => {
       if (result?.error) {
         setKernelError(result.error)
         setKernelStatus('error')
@@ -227,12 +258,26 @@ export default function NotebookTab({
   }, [projectDir, projectId, tabId])
 
   useEffect(() => {
-    if (!everVisible) return
+    if (!everVisible || !kernelBootReady) return
     startKernel()
     return () => {
       void window.api.notebookKernelShutdown(tabId)
     }
-  }, [startKernel, tabId, everVisible])
+  }, [startKernel, tabId, everVisible, kernelBootReady])
+
+  useEffect(() => {
+    if (!everVisible) return
+    let cancelled = false
+    window.api.condaListEnvs().then((result) => {
+      if (cancelled) return
+      setCondaEnvs(result.envs)
+      if (result.error && result.envs.length === 0) setCondaListError(result.error)
+      else setCondaListError(null)
+    }).catch((err: unknown) => {
+      if (!cancelled) setCondaListError(err instanceof Error ? err.message : 'Failed to list conda envs')
+    })
+    return () => { cancelled = true }
+  }, [everVisible])
 
   const clearRunQueue = useCallback(() => {
     runStateRef.current = idleRunQueue()
@@ -400,7 +445,8 @@ export default function NotebookTab({
     setKernelError(null)
     setKernelStatus('starting')
     kernelStatusRef.current = 'starting'
-    void window.api.notebookKernelRestart(tabId, projectId, projectDir).then((result) => {
+    const override = notebookCondaOverridePayload(condaOverrideRef.current)
+    void window.api.notebookKernelRestart(tabId, projectId, projectDir, override).then((result) => {
       if (result?.error) {
         setKernelError(result.error)
         setKernelStatus('error')
@@ -412,6 +458,32 @@ export default function NotebookTab({
   const interruptKernel = useCallback(() => {
     void window.api.notebookKernelInterrupt(tabId)
   }, [tabId])
+
+  const condaPlatform = typeof window !== 'undefined' ? window.api.platform : ''
+  const condaOverride = notebookCondaEnvFromMetadata(doc?.metadata)
+  const effectiveConda = notebookKernelCondaSelection(condaOverride, projectConda)
+  const condaValue = condaOverride
+    ? condaSelectValue(condaOverride, condaEnvs, condaPlatform)
+    : ''
+  const envLabel =
+    effectiveConda.condaEnvName?.trim()
+    || lastPathSegment(effectiveConda.condaEnvPrefix ?? '')
+    || null
+  const projectEnvLabel =
+    projectConda.condaEnvName?.trim()
+    || lastPathSegment(projectConda.condaEnvPrefix ?? '')
+    || null
+
+  const onCondaChange = useCallback((value: string) => {
+    const current = docRef.current
+    if (!current) return
+    const selected = value
+      ? condaEnvFromSelection(value, condaEnvs)
+      : null
+    condaOverrideRef.current = selected
+    markDirty(setNotebookCondaEnvMetadata(current, selected))
+    restartKernel()
+  }, [condaEnvs, markDirty, restartKernel])
 
   // Document-only: wipe cell outputs and execution counts. Kernel stays up.
   const clearOutputs = useCallback(() => {
@@ -474,10 +546,30 @@ export default function NotebookTab({
         >
           <span className="inline-flex items-center gap-1"><Eraser size={12} /> Clear outputs</span>
         </button>
-        <span className="flex items-center gap-1.5 ml-2 text-xs text-text-muted">
+        <span className="flex items-center gap-1.5 ml-2 text-xs text-text-muted shrink-0">
           <span className="w-1.5 h-1.5 rounded-full" style={{ background: statusColor }} />
-          Kernel {statusLabel(kernelStatus)}
+          Kernel {statusLabel(kernelStatus)}{envLabel ? ` · ${envLabel}` : ''}
         </span>
+        <select
+          className="h-(--ctl-h-sm) max-w-[10rem] min-w-[6.5rem] px-1 rounded-md bg-field border border-border text-2xs text-text cursor-pointer shrink-0 disabled:opacity-40"
+          value={condaValue}
+          onChange={(e) => onCondaChange(e.target.value)}
+          disabled={!doc}
+          aria-label="Notebook conda environment"
+          title={condaListError ?? 'Conda environment for this notebook'}
+        >
+          <option value="">
+            {projectEnvLabel ? `Project default (${projectEnvLabel})` : 'Project default'}
+          </option>
+          {condaSavedOptionVisible(condaValue, condaEnvs) && (
+            <option value={condaValue}>
+              {condaSavedOptionLabel(condaValue, condaOverride?.condaEnvName ?? envLabel ?? undefined)}
+            </option>
+          )}
+          {condaEnvs.map((env) => (
+            <option key={env.prefix} value={env.prefix}>{env.name}</option>
+          ))}
+        </select>
         <span className="ml-2 flex min-w-0 flex-1 items-center justify-end gap-1.5">
           <span className="min-w-0 truncate text-2xs text-text-subtle" title={filePath}>{filePath}</span>
           <span

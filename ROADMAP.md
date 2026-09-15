@@ -18,7 +18,7 @@ Company-deploy security snapshot (what this app actually is on a workstation): [
 - **Environments are spawn-time PATH/env**, not a conda GUI and not a Node version manager UI. Settings **Node directory** is a folder prepend, not a requirement for `DevTool.exe` to launch.
 - **Pi owns inference.** Models, API, and base URL stay in Pi’s config. Do not add those fields to DevTool.
 - **Monaco is enough for edit/view.** Deeper analysis belongs in Pi (and similar agent tools). Language servers are parked — optional sugar (hover, go-to, complete) only if Monaco-without-Pi becomes painful. Not a numbered phase; no minor reserved for them.
-- **Jupyter is a native notebook tab** (Monaco cells + `jupyter_client` / ipykernel in the project conda env). Opening JupyterLab in the in-app browser is **not** Phase 4 and was dropped (PR #9 closed unmerged). There is no later “native notebooks” parking-lot phase — this **is** Phase 4.
+- **Jupyter is a native notebook tab** (Monaco cells + `jupyter_client` / ipykernel in the project default conda env, optional per-notebook override). Opening JupyterLab in the in-app browser is **not** Phase 4 and was dropped (PR #9 closed unmerged). There is no later “native notebooks” parking-lot phase — this **is** Phase 4.
 
 ---
 
@@ -292,7 +292,7 @@ Work items:
 
 1. **Open / save** — clicking a `.ipynb` in the Files tree opens a `notebook` tab (same tab system as `editor`). Save writes nbformat 4. Empty new files become a one-cell notebook.
 2. **Cells** — markdown + code (raw kept). Edit in Monaco. Add / delete / change type / reorder.
-3. **Kernel** — `jupyter_client` + ipykernel in the **project conda env** (`getShellEnv` / `condaEnvPrefix`, same PATH as Pi/agent tabs). Run cell / run all. Stream text, `text/plain`, PNG, and errors. Kernel status (idle / busy / dead) + restart.
+3. **Kernel** — `jupyter_client` + ipykernel in the **project default conda env**, with an optional per-notebook override in `metadata.devtool.condaEnv` (`getShellEnv` / same PATH as Pi/agent tabs). Toolbar env picker. Run cell / run all. Stream text, `text/plain`, PNG, and errors. Kernel status (idle / busy / dead) + restart.
 4. **Clear errors** — no conda env, missing `python`, or missing `jupyter_client` / `ipykernel` fail with an install hint, not a blank tab.
 
 Stay out of: full VS Code notebook parity (debug, variable explorer, collaborative, ipywidgets), JupyterLab as a managed server, inference settings in DevTool, LSP, packaging.
