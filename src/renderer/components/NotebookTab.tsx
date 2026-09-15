@@ -478,8 +478,15 @@ export default function NotebookTab({
           <span className="w-1.5 h-1.5 rounded-full" style={{ background: statusColor }} />
           Kernel {statusLabel(kernelStatus)}
         </span>
-        <span className="flex-1" />
-        <span className="text-2xs text-text-subtle truncate" title={filePath}>{filePath}</span>
+        <span className="ml-2 flex min-w-0 flex-1 items-center justify-end gap-1.5">
+          <span className="min-w-0 truncate text-2xs text-text-subtle" title={filePath}>{filePath}</span>
+          <span
+            title={dirty ? 'Unsaved changes' : undefined}
+            className="w-2 h-2 shrink-0 rounded-full"
+            style={{ background: dirty ? 'var(--color-accent)' : 'transparent' }}
+            aria-hidden={!dirty}
+          />
+        </span>
       </div>
 
       {kernelError && (
@@ -562,12 +569,6 @@ export default function NotebookTab({
           <button className="text-accent cursor-pointer hover:underline" onClick={saveContent}>Retry</button>
           <button className="text-accent cursor-pointer hover:underline" onClick={() => setSaveError(null)}>Dismiss</button>
         </div>
-      )}
-      {dirty && (
-        <div
-          title="Unsaved changes"
-          style={{ position: 'absolute', top: 8, right: 12, width: 8, height: 8, borderRadius: '50%', background: 'var(--color-accent)', zIndex: 5 }}
-        />
       )}
     </div>
   )
