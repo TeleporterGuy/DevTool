@@ -6,9 +6,11 @@ import {
   clearAllOutputs,
   deleteCellAt,
   emptyNotebook,
+  isNotebookCellCollapsed,
   isNotebookFile,
   joinNotebookText,
   moveCell,
+  notebookCellSourcePreview,
   NOTEBOOK_MIME_CHAR_LIMIT,
   NOTEBOOK_PNG_OMITTED,
   NOTEBOOK_STREAM_CHAR_LIMIT,
@@ -16,6 +18,7 @@ import {
   parseKernelEventLine,
   parseNotebook,
   serializeNotebook,
+  setNotebookCellCollapsed,
   setNotebookCondaEnvMetadata,
   notebookCondaEnvFromMetadata,
   splitNotebookText,
@@ -213,6 +216,81 @@ describe('cell operations', () => {
     const doc = deleteCellAt(emptyNotebook(), 0)
     expect(doc.cells).toHaveLength(1)
     expect(doc.cells[0].cellType).toBe('code')
+  })
+})
+
+describe('notebook cell collapse', () => {
+  it('starts expanded and writes both Jupyter hide flags when collapsed', () => {
+    const doc = emptyNotebook()
+    const cell = doc.cells[0]
+    expect(isNotebookCellCollapsed(cell)).toBe(false)
+    expect(notebookCellSourcePreview(cell.source)).toBe('')
+
+    const collapsed = setNotebookCellCollapsed(doc, cell.id, true)
+    expect(isNotebookCellCollapsed(collapsed.cells[0])).toBe(true)
+    expect(collapsed.cells[0].metadata.jupyter).toEqual({
+      source_hidden: true,
+      outputs_hidden: true
+    })
+
+    const expanded = setNotebookCellCollapsed(collapsed, cell.id, false)
+    expect(isNotebookCellCollapsed(expanded.cells[0])).toBe(false)
+    expect(expanded.cells[0].metadata.jupyter).toBeUndefined()
+  })
+
+  it('round-trips collapse flags through serialize/parse', () => {
+    let doc = parseNotebook(sample)
+    doc = setNotebookCellCollapsed(doc, 'code-1', true)
+    const again = parseNotebook(serializeNotebook(doc))
+    expect(isNotebookCellCollapsed(again.cells[1])).toBe(true)
+    expect(isNotebookCellCollapsed(again.cells[0])).toBe(false)
+    expect(again.cells[1].metadata.jupyter).toEqual({
+      source_hidden: true,
+      outputs_hidden: true
+    })
+  })
+
+  it('does not wipe unrelated cell or jupyter metadata', () => {
+    const doc = parseNotebook(JSON.stringify({
+      nbformat: 4,
+      nbformat_minor: 5,
+      metadata: {},
+      cells: [{
+        id: 'c1',
+        cell_type: 'code',
+        metadata: {
+          tags: ['keep-me'],
+          jupyter: { slideshow: { slide_type: 'slide' } }
+        },
+        execution_count: null,
+        source: ['print(1)'],
+        outputs: []
+      }]
+    }))
+    const collapsed = setNotebookCellCollapsed(doc, 'c1', true)
+    expect(collapsed.cells[0].metadata.tags).toEqual(['keep-me'])
+    expect(collapsed.cells[0].metadata.jupyter).toEqual({
+      slideshow: { slide_type: 'slide' },
+      source_hidden: true,
+      outputs_hidden: true
+    })
+
+    const expanded = setNotebookCellCollapsed(collapsed, 'c1', false)
+    expect(expanded.cells[0].metadata.tags).toEqual(['keep-me'])
+    expect(expanded.cells[0].metadata.jupyter).toEqual({
+      slideshow: { slide_type: 'slide' }
+    })
+  })
+
+  it('uses the first non-empty source line as the header preview', () => {
+    expect(notebookCellSourcePreview('\n  \n  def foo():\n    return 1\n')).toBe('def foo():')
+    expect(notebookCellSourcePreview('')).toBe('')
+  })
+
+  it('treats a single hide flag as expanded', () => {
+    expect(isNotebookCellCollapsed({
+      metadata: { jupyter: { source_hidden: true } }
+    })).toBe(false)
   })
 })
 

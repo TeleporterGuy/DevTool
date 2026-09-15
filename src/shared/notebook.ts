@@ -199,6 +199,64 @@ export function emptyCell(cellType: NotebookCellType = 'code'): NotebookCell {
   }
 }
 
+/**
+ * JupyterLab collapse flags live under `cell.metadata.jupyter`.
+ * Collapsed in DevTool means both `source_hidden` and `outputs_hidden` are true.
+ * New cells omit these keys (expanded).
+ */
+export function isNotebookCellCollapsed(cell: Pick<NotebookCell, 'metadata'>): boolean {
+  const jupyter = asRecord(cell.metadata.jupyter)
+  if (!jupyter) return false
+  return jupyter.source_hidden === true && jupyter.outputs_hidden === true
+}
+
+/** First non-empty source line, for the collapsed-cell header preview. */
+export function notebookCellSourcePreview(source: string): string {
+  for (const line of source.split('\n')) {
+    const trimmed = line.trim()
+    if (trimmed) return trimmed
+  }
+  return ''
+}
+
+/**
+ * Set or clear Jupyter hide flags without dropping other `jupyter` / cell metadata keys.
+ * Expanded clears the two flags and removes an empty `jupyter` object.
+ */
+export function setCellCollapsedMetadata(
+  metadata: Record<string, unknown>,
+  collapsed: boolean
+): Record<string, unknown> {
+  const next = { ...metadata }
+  const jupyter = { ...(asRecord(next.jupyter) ?? {}) }
+  if (collapsed) {
+    jupyter.source_hidden = true
+    jupyter.outputs_hidden = true
+    next.jupyter = jupyter
+    return next
+  }
+  delete jupyter.source_hidden
+  delete jupyter.outputs_hidden
+  if (Object.keys(jupyter).length === 0) delete next.jupyter
+  else next.jupyter = jupyter
+  return next
+}
+
+export function setNotebookCellCollapsed(
+  doc: NotebookDocument,
+  cellId: string,
+  collapsed: boolean
+): NotebookDocument {
+  return {
+    ...doc,
+    cells: doc.cells.map((cell) => (
+      cell.id === cellId
+        ? { ...cell, metadata: setCellCollapsedMetadata(cell.metadata, collapsed) }
+        : cell
+    ))
+  }
+}
+
 function asRecord(value: unknown): Record<string, unknown> | null {
   if (value && typeof value === 'object' && !Array.isArray(value)) {
     return value as Record<string, unknown>

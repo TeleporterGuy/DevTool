@@ -7,6 +7,7 @@ import {
   changeCellTypeAt,
   clearAllOutputs,
   deleteCellAt,
+  isNotebookCellCollapsed,
   moveCell,
   notebookCondaEnvFromMetadata,
   notebookCondaOverridePayload,
@@ -14,6 +15,7 @@ import {
   parseNotebook,
   replaceCellOutputs,
   serializeNotebook,
+  setNotebookCellCollapsed,
   setNotebookCondaEnvMetadata,
   updateCellSource,
   type NotebookCellType,
@@ -644,6 +646,13 @@ export default function NotebookTab({
               onStartMarkdownEdit={() => {
                 setActiveCellId(cell.id)
                 setEditingMarkdownId(cell.id)
+              }}
+              onToggleCollapsed={() => {
+                const current = docRef.current
+                if (!current) return
+                const live = current.cells.find((item) => item.id === cell.id)
+                if (!live) return
+                markDirty(setNotebookCellCollapsed(current, live.id, !isNotebookCellCollapsed(live)))
               }}
               resetKey={loadGeneration}
             />

@@ -1,9 +1,14 @@
 import React, { useEffect, useRef, useState } from 'react'
 import Editor from '@monaco-editor/react'
 import type { editor } from 'monaco-editor'
-import { ChevronDown, ChevronUp, Play, Plus, Trash2 } from 'lucide-react'
+import { ChevronDown, ChevronRight, ChevronUp, Play, Plus, Trash2 } from 'lucide-react'
 import type { AppConfig } from '../../shared/types'
-import type { NotebookCell, NotebookCellType } from '../../shared/notebook'
+import {
+  isNotebookCellCollapsed,
+  notebookCellSourcePreview,
+  type NotebookCell,
+  type NotebookCellType
+} from '../../shared/notebook'
 import { buildMonacoNotebookCellOptions, notebookCellEditorHeight } from './monacoOptions'
 import { defineMonacoThemes, monacoThemeFor } from './monacoTheme'
 import MarkdownPreview from './MarkdownPreview'
@@ -27,6 +32,7 @@ interface Props {
   onDelete: () => void
   onMove: (direction: -1 | 1) => void
   onStartMarkdownEdit: () => void
+  onToggleCollapsed: () => void
   resetKey: number
 }
 
@@ -51,12 +57,15 @@ export default function NotebookCellView({
   onDelete,
   onMove,
   onStartMarkdownEdit,
+  onToggleCollapsed,
   resetKey
 }: Props): React.ReactElement {
   const [height, setHeight] = useState(64)
   const editorRef = useRef<editor.IStandaloneCodeEditor | null>(null)
   const onRunRef = useRef(onRun)
   const onRunAndNextRef = useRef(onRunAndNext)
+  const collapsed = isNotebookCellCollapsed(cell)
+  const sourcePreview = notebookCellSourcePreview(cell.source)
   const showMarkdownPreview = cell.cellType === 'markdown' && !isEditingMarkdown
   const language = cell.cellType === 'code' ? 'python' : 'markdown'
 
@@ -89,7 +98,17 @@ export default function NotebookCellView({
       className={`mx-2 mb-2 rounded-md border ${isActive ? 'border-border-focus' : 'border-border'}`}
       onMouseDown={onFocus}
     >
-      <div className="flex items-center gap-1 px-1.5 py-0.5 bg-surface-2 border-b border-hair">
+      <div className={`flex items-center gap-1 px-1.5 py-0.5 bg-surface-2 ${collapsed ? '' : 'border-b border-hair'}`}>
+        <button
+          type="button"
+          className={btnCls}
+          onClick={onToggleCollapsed}
+          aria-expanded={!collapsed}
+          aria-label={collapsed ? 'Expand cell' : 'Collapse cell'}
+          title={collapsed ? 'Expand cell' : 'Collapse cell'}
+        >
+          {collapsed ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
+        </button>
         <span className="text-2xs text-text-subtle w-8 shrink-0 text-right font-mono">
           {cell.cellType === 'code' && cell.executionCount != null ? `[${cell.executionCount}]` : `[ ]`}
         </span>
@@ -115,7 +134,13 @@ export default function NotebookCellView({
           </button>
         )}
         {isRunning && <span className="text-2xs text-accent">running…</span>}
-        <span className="flex-1" />
+        {collapsed ? (
+          <span className="min-w-0 flex-1 truncate text-2xs text-text-muted" title={sourcePreview || undefined}>
+            {sourcePreview}
+          </span>
+        ) : (
+          <span className="flex-1" />
+        )}
         <button type="button" className={btnCls} onClick={onAddBelow} title="Add cell below">
           <Plus size={14} />
         </button>
@@ -142,41 +167,45 @@ export default function NotebookCellView({
         </button>
       </div>
 
-      {showMarkdownPreview ? (
-        <button
-          type="button"
-          className="block w-full text-left bg-transparent border-0 p-0 cursor-text"
-          onClick={onStartMarkdownEdit}
-        >
-          {cell.source.trim()
-            ? (
-              <MarkdownPreview
-                content={cell.source}
-                effectiveTheme={effectiveTheme}
-                variant="notebook"
-                fontSize={config.editorFontSize}
+      {!collapsed && (
+        <>
+          {showMarkdownPreview ? (
+            <button
+              type="button"
+              className="block w-full text-left bg-transparent border-0 p-0 cursor-text"
+              onClick={onStartMarkdownEdit}
+            >
+              {cell.source.trim()
+                ? (
+                  <MarkdownPreview
+                    content={cell.source}
+                    effectiveTheme={effectiveTheme}
+                    variant="notebook"
+                    fontSize={config.editorFontSize}
+                  />
+                )
+                : <div className="px-3 py-4 text-sm text-text-muted italic">Empty markdown cell — click to edit</div>}
+            </button>
+          ) : (
+            <div style={{ height }}>
+              <Editor
+                key={`${cell.id}-${cell.cellType}-${resetKey}`}
+                path={`${cell.id}.${cell.cellType === 'code' ? 'py' : 'md'}`}
+                height={height}
+                defaultValue={cell.source}
+                language={language}
+                theme={monacoThemeFor(effectiveTheme)}
+                beforeMount={defineMonacoThemes}
+                options={buildMonacoNotebookCellOptions(config)}
+                onMount={handleMount}
+                onChange={(value) => onChangeSource(value ?? '')}
               />
-            )
-            : <div className="px-3 py-4 text-sm text-text-muted italic">Empty markdown cell — click to edit</div>}
-        </button>
-      ) : (
-        <div style={{ height }}>
-          <Editor
-            key={`${cell.id}-${cell.cellType}-${resetKey}`}
-            path={`${cell.id}.${cell.cellType === 'code' ? 'py' : 'md'}`}
-            height={height}
-            defaultValue={cell.source}
-            language={language}
-            theme={monacoThemeFor(effectiveTheme)}
-            beforeMount={defineMonacoThemes}
-            options={buildMonacoNotebookCellOptions(config)}
-            onMount={handleMount}
-            onChange={(value) => onChangeSource(value ?? '')}
-          />
-        </div>
-      )}
+            </div>
+          )}
 
-      {cell.cellType === 'code' && <NotebookOutputs outputs={cell.outputs} />}
+          {cell.cellType === 'code' && <NotebookOutputs outputs={cell.outputs} />}
+        </>
+      )}
     </div>
   )
 }
