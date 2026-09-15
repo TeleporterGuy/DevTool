@@ -78,7 +78,15 @@ export function buildMonacoDiffOptions(config: AppConfig): editor.IStandaloneDif
   }
 }
 
-/** Compact Monaco options for one notebook cell (no minimap, grow with content). */
+/** Compact Monaco options for one notebook cell (no minimap). Height tracks content; the notebook pane scrolls. */
+export const NOTEBOOK_CELL_EDITOR_MIN_HEIGHT = 48
+
+/** Grow with Monaco content. No max — the outer notebook list is overflow-y-auto. */
+export function notebookCellEditorHeight(contentHeight: number): number {
+  const padded = (Number.isFinite(contentHeight) ? contentHeight : 0) + 4
+  return Math.max(NOTEBOOK_CELL_EDITOR_MIN_HEIGHT, padded)
+}
+
 export function buildMonacoNotebookCellOptions(config: AppConfig): editor.IStandaloneEditorConstructionOptions {
   return {
     ...buildMonacoEditorOptions(config),

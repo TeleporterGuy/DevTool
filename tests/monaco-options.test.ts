@@ -4,7 +4,8 @@ import {
   buildMonacoDiffOptions,
   buildMonacoEditorOptions,
   buildMonacoNotebookCellOptions,
-  getLanguageFromPath
+  getLanguageFromPath,
+  notebookCellEditorHeight
 } from '../src/renderer/components/monacoOptions'
 
 describe('monacoOptions', () => {
@@ -64,5 +65,12 @@ describe('monacoOptions', () => {
     expect(options.scrollBeyondLastLine).toBe(false)
     expect(options.fontFamily).toBe('JetBrains Mono')
     expect(options.wordWrap).toBe('on')
+    expect(options.scrollbar).toMatchObject({ vertical: 'hidden' })
+  })
+
+  it('grows notebook cell height with content and does not cap at 520', () => {
+    expect(notebookCellEditorHeight(20)).toBe(48)
+    expect(notebookCellEditorHeight(100)).toBe(104)
+    expect(notebookCellEditorHeight(800)).toBe(804)
   })
 })

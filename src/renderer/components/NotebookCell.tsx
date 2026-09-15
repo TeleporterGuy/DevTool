@@ -4,7 +4,7 @@ import type { editor } from 'monaco-editor'
 import { ChevronDown, ChevronUp, Play, Plus, Trash2 } from 'lucide-react'
 import type { AppConfig } from '../../shared/types'
 import type { NotebookCell, NotebookCellType } from '../../shared/notebook'
-import { buildMonacoNotebookCellOptions } from './monacoOptions'
+import { buildMonacoNotebookCellOptions, notebookCellEditorHeight } from './monacoOptions'
 import { defineMonacoThemes, monacoThemeFor } from './monacoTheme'
 import MarkdownPreview from './MarkdownPreview'
 import NotebookOutputs from './NotebookOutputs'
@@ -75,8 +75,7 @@ export default function NotebookCellView({
     ed.addCommand(RUN_KEY, () => onRunRef.current())
     ed.addCommand(RUN_AND_NEXT_KEY, () => onRunAndNextRef.current())
     const applyHeight = () => {
-      const next = Math.max(48, Math.min(520, ed.getContentHeight() + 4))
-      setHeight(next)
+      setHeight(notebookCellEditorHeight(ed.getContentHeight()))
     }
     ed.onDidContentSizeChange(applyHeight)
     applyHeight()
