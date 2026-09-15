@@ -10,6 +10,7 @@ import {
   isNotebookFile,
   joinNotebookText,
   moveCell,
+  moveCellById,
   notebookCellSourcePreview,
   NOTEBOOK_MIME_CHAR_LIMIT,
   NOTEBOOK_PNG_OMITTED,
@@ -248,6 +249,31 @@ describe('cell operations', () => {
     const doc = deleteCellAt(emptyNotebook(), 0)
     expect(doc.cells).toHaveLength(1)
     expect(doc.cells[0].cellType).toBe('code')
+  })
+
+  it('reorders by id without dropping cells or changing identity', () => {
+    let doc = emptyNotebook()
+    const a = doc.cells[0].id
+    doc = addCellAt(doc, 1, 'code')
+    doc = addCellAt(doc, 2, 'markdown')
+    const b = doc.cells[1].id
+    const c = doc.cells[2].id
+    expect(doc.cells.map((cell) => cell.id)).toEqual([a, b, c])
+
+    doc = moveCellById(doc, a, 1)
+    expect(doc.cells.map((cell) => cell.id)).toEqual([b, a, c])
+    expect(doc.cells).toHaveLength(3)
+
+    doc = moveCellById(doc, a, 1)
+    expect(doc.cells.map((cell) => cell.id)).toEqual([b, c, a])
+    expect(parseNotebook(serializeNotebook(doc)).cells.map((cell) => cell.id)).toEqual([b, c, a])
+
+    const same = moveCellById(doc, a, 1)
+    expect(same).toBe(doc)
+    expect(moveCellById(doc, 'missing', 1)).toBe(doc)
+    expect(moveCell(doc, 0, 0)).toBe(doc)
+    expect(moveCell(doc, -1, 0)).toBe(doc)
+    expect(moveCell(doc, 0, 99)).toBe(doc)
   })
 })
 

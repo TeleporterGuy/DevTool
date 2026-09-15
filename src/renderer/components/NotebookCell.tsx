@@ -62,8 +62,10 @@ export default function NotebookCellView({
 }: Props): React.ReactElement {
   const [height, setHeight] = useState(64)
   const editorRef = useRef<editor.IStandaloneCodeEditor | null>(null)
+  const sizeSubRef = useRef<{ dispose: () => void } | null>(null)
   const onRunRef = useRef(onRun)
   const onRunAndNextRef = useRef(onRunAndNext)
+  const onChangeSourceRef = useRef(onChangeSource)
   const collapsed = isNotebookCellCollapsed(cell)
   const sourcePreview = notebookCellSourcePreview(cell.source)
   const showMarkdownPreview = cell.cellType === 'markdown' && !isEditingMarkdown
@@ -72,21 +74,39 @@ export default function NotebookCellView({
   useEffect(() => {
     onRunRef.current = onRun
     onRunAndNextRef.current = onRunAndNext
-  }, [onRun, onRunAndNext])
+    onChangeSourceRef.current = onChangeSource
+  }, [onChangeSource, onRun, onRunAndNext])
 
   useEffect(() => {
     editorRef.current?.updateOptions(buildMonacoNotebookCellOptions(config))
     editorRef.current?.layout()
   }, [config])
 
+  useEffect(() => {
+    editorRef.current?.layout()
+  }, [height])
+
+  useEffect(() => () => {
+    sizeSubRef.current?.dispose()
+    sizeSubRef.current = null
+    editorRef.current = null
+  }, [])
+
   const handleMount = (ed: editor.IStandaloneCodeEditor) => {
     editorRef.current = ed
     ed.addCommand(RUN_KEY, () => onRunRef.current())
     ed.addCommand(RUN_AND_NEXT_KEY, () => onRunAndNextRef.current())
     const applyHeight = () => {
-      setHeight(notebookCellEditorHeight(ed.getContentHeight()))
+      // Content-size events can fire while Monaco is disposing during a cell reorder.
+      try {
+        if (editorRef.current !== ed) return
+        setHeight(notebookCellEditorHeight(ed.getContentHeight()))
+      } catch {
+        /* ignore disposed editor */
+      }
     }
-    ed.onDidContentSizeChange(applyHeight)
+    sizeSubRef.current?.dispose()
+    sizeSubRef.current = ed.onDidContentSizeChange(applyHeight)
     applyHeight()
   }
 
@@ -189,7 +209,7 @@ export default function NotebookCellView({
           ) : (
             <div style={{ height }}>
               <Editor
-                key={`${cell.id}-${cell.cellType}-${resetKey}`}
+                key={`${cell.cellType}-${resetKey}`}
                 path={`${cell.id}.${cell.cellType === 'code' ? 'py' : 'md'}`}
                 height={height}
                 defaultValue={cell.source}
@@ -198,7 +218,9 @@ export default function NotebookCellView({
                 beforeMount={defineMonacoThemes}
                 options={buildMonacoNotebookCellOptions(config)}
                 onMount={handleMount}
-                onChange={(value) => onChangeSource(value ?? '')}
+                onChange={(value) => {
+                  if (editorRef.current) onChangeSourceRef.current(value ?? '')
+                }}
               />
             </div>
           )}

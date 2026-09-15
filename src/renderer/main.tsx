@@ -1,5 +1,6 @@
 import React from 'react'
 import ReactDOM from 'react-dom/client'
+import { isIgnorableRendererError } from './renderer-errors'
 import './styles.css'
 
 interface CrashDetails {
@@ -83,6 +84,10 @@ function renderCrash(details: CrashDetails): void {
 }
 
 window.addEventListener('error', (event) => {
+  if (isIgnorableRendererError(event.error, event.message)) {
+    event.preventDefault()
+    return
+  }
   const details = normalizeError(event.error ?? event.message, 'Unhandled renderer error')
   console.error('window.error', event.error ?? event.message)
   renderCrash(details)

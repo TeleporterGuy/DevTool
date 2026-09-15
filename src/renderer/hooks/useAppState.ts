@@ -314,13 +314,15 @@ export function useAppState() {
   }, [settleDirtyPrompt])
 
   useEffect(() => {
+    const api = window.api
+    if (!api) return undefined
     let cancelled = false
 
     Promise.all([
-      window.api.loadProjects(),
-      window.api.loadConfig(),
-      window.api.loadWindowState(),
-      window.api.notesLoad()
+      api.loadProjects(),
+      api.loadConfig(),
+      api.loadWindowState(),
+      api.notesLoad()
     ]).then(([loadedProjects, loadedConfig, loadedWindowViewState, loadedNotesEnvelope]) => {
       if (cancelled) return
 
@@ -364,13 +366,13 @@ export function useAppState() {
       if (notesSync.hasPending()) notesSync.requestSave(loadedNotes)
     })
 
-    void window.api.getNativeTheme().then(setTheme)
-    window.api.onThemeChanged(setTheme)
+    void api.getNativeTheme().then(setTheme)
+    api.onThemeChanged(setTheme)
 
     // Canonical state, not a mutation: it is adopted rather than pushed through
     // `mutateProjects`. Anything of ours that main has not acknowledged yet is
     // replayed on top so another window's save cannot swallow it.
-    const cleanupProjects = window.api.onProjectsUpdated((envelope) => {
+    const cleanupProjects = api.onProjectsUpdated((envelope) => {
       if (cancelled) return
       const projectsWithLifetime = envelope.data.projects.map(p =>
         backfillLifetimeStats(p, notesRef.current)
@@ -394,7 +396,7 @@ export function useAppState() {
       if (projectsSync.hasPending()) projectsSync.requestSave(next)
     })
 
-    const cleanupNotes = window.api.onNotesUpdated((envelope) => {
+    const cleanupNotes = api.onNotesUpdated((envelope) => {
       if (cancelled) return
       const next = notesSync.applyBroadcast(envelope.revision, envelope.data)
       if (next === null) return
@@ -402,7 +404,7 @@ export function useAppState() {
       setNotes(next)
     })
 
-    const cleanupConfig = window.api.onConfigUpdated((updatedConfig) => {
+    const cleanupConfig = api.onConfigUpdated((updatedConfig) => {
       if (cancelled) return
       const serialized = JSON.stringify(updatedConfig)
       if (serialized === lastSavedConfigJsonRef.current) return
@@ -430,7 +432,7 @@ export function useAppState() {
       const serialized = JSON.stringify(tabIds)
       if (serialized === lastReported) return
       lastReported = serialized
-      void window.api.reportDirtyTabs(tabIds).catch(() => {})
+      void window.api?.reportDirtyTabs(tabIds).catch(() => {})
     }
     report()
     return dirtyBuffers.subscribe(report)

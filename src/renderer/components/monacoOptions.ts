@@ -97,7 +97,9 @@ export function buildMonacoNotebookCellOptions(config: AppConfig): editor.IStand
     folding: false,
     renderLineHighlight: 'none',
     wordWrap: 'on',
-    automaticLayout: true,
+    // Manual height from contentHeight. automaticLayout uses ResizeObserver and
+    // can throw when several cell editors move in the DOM (move up/down).
+    automaticLayout: false,
     scrollbar: {
       vertical: 'hidden',
       horizontal: 'auto',

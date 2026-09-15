@@ -513,8 +513,20 @@ export function moveCell(doc: NotebookDocument, from: number, to: number): Noteb
   if (to < 0 || to >= doc.cells.length) return doc
   const cells = [...doc.cells]
   const [cell] = cells.splice(from, 1)
+  if (!cell) return doc
   cells.splice(to, 0, cell)
   return { ...doc, cells }
+}
+
+/** Toolbar up/down: resolve the live index so a stale row index cannot splice holes. */
+export function moveCellById(
+  doc: NotebookDocument,
+  cellId: string,
+  direction: -1 | 1
+): NotebookDocument {
+  const from = doc.cells.findIndex((cell) => cell.id === cellId)
+  if (from < 0) return doc
+  return moveCell(doc, from, from + direction)
 }
 
 export function updateCellSource(doc: NotebookDocument, cellId: string, source: string): NotebookDocument {

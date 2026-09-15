@@ -65,6 +65,7 @@ describe('monacoOptions', () => {
     expect(options.scrollBeyondLastLine).toBe(false)
     expect(options.fontFamily).toBe('JetBrains Mono')
     expect(options.wordWrap).toBe('on')
+    expect(options.automaticLayout).toBe(false)
     expect(options.scrollbar).toMatchObject({ vertical: 'hidden' })
   })
 

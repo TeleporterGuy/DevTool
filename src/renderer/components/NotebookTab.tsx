@@ -8,7 +8,7 @@ import {
   clearAllOutputs,
   deleteCellAt,
   isNotebookCellCollapsed,
-  moveCell,
+  moveCellById,
   notebookCondaEnvFromMetadata,
   notebookCondaOverridePayload,
   notebookKernelCondaSelection,
@@ -456,7 +456,7 @@ export default function NotebookTab({
     void window.api.notebookKernelInterrupt(tabId)
   }, [tabId])
 
-  const condaPlatform = typeof window !== 'undefined' ? window.api.platform : ''
+  const condaPlatform = window.api?.platform ?? ''
   const condaOverride = notebookCondaEnvFromMetadata(doc?.metadata)
   const effectiveConda = notebookKernelCondaSelection(condaOverride, projectConda)
   const condaValue = condaOverride
@@ -644,7 +644,7 @@ export default function NotebookTab({
               onMove={(direction) => {
                 const current = docRef.current
                 if (!current) return
-                markDirty(moveCell(current, index, index + direction))
+                markDirty(moveCellById(current, cell.id, direction))
               }}
               onStartMarkdownEdit={() => {
                 setActiveCellId(cell.id)
