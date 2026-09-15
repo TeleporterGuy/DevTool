@@ -1,5 +1,6 @@
-import React, { useState, useRef, useCallback } from 'react'
+import React, { useState, useRef, useCallback, useEffect } from 'react'
 import Editor from '@monaco-editor/react'
+import type { editor } from 'monaco-editor'
 import { DEFAULT_CONFIG } from '../../shared/types'
 import { useApp } from '../context/AppContext'
 import { buildMonacoEditorOptions } from './monacoOptions'
@@ -18,7 +19,12 @@ export default function NoteTab({ noteId, projectId, taskId, visible, effectiveT
   const note = notes[projectId]?.find(n => n.id === noteId) ?? null
   const [viewMode, setViewMode] = useState<'source' | 'preview'>('source')
   const currentContentRef = useRef<string>(note?.content ?? '')
+  const editorRef = useRef<editor.IStandaloneCodeEditor | null>(null)
   const monacoConfig = config ?? DEFAULT_CONFIG
+
+  useEffect(() => {
+    editorRef.current?.updateOptions(buildMonacoEditorOptions(monacoConfig))
+  }, [monacoConfig])
 
   const handleToggleView = useCallback(() => {
     setViewMode(prev => prev === 'source' ? 'preview' : 'source')
@@ -53,6 +59,7 @@ export default function NoteTab({ noteId, projectId, taskId, visible, effectiveT
             language="markdown"
             theme={effectiveTheme === 'dark' ? 'vs-dark' : 'vs'}
             options={buildMonacoEditorOptions(monacoConfig)}
+            onMount={(ed) => { editorRef.current = ed }}
             onChange={handleChange}
           />
         </div>

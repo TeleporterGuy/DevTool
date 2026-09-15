@@ -280,7 +280,7 @@ export default function Settings({ onClose }: Props): React.ReactElement {
           <>
             <GrpHead>Editor & Diff</GrpHead>
             <FormGroup>
-              <HelperText>Applies to Monaco-backed file editor and diff tabs.</HelperText>
+              <HelperText>Applies to Monaco-backed file editor, notebook cells, and diff tabs.</HelperText>
               <SetBlock label="Font family" divider>
                 <Field
                   value={config.editorFontFamily}
