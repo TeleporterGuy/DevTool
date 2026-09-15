@@ -4,6 +4,7 @@ import { resolveShellEnv } from './shell-env'
 import { listCondaEnvs } from './conda-env'
 import { AppRuntime } from './app-runtime'
 import type { WindowGeometry, WindowViewState } from '../shared/types'
+import { isMenuZoomInKey } from '../shared/shortcut-label'
 
 if (process.env.DEVTOOL_CDP_PORT) {
   app.commandLine.appendSwitch('remote-debugging-port', process.env.DEVTOOL_CDP_PORT)
@@ -135,6 +136,16 @@ function buildAppMenu(): void {
           accelerator: 'CmdOrCtrl+=',
           click: () => sendToRenderer('menu-zoom-in')
         },
+        // Mac keyboards type + as Shift+=. Cmd+= is registered above; this
+        // hidden duplicate catches Cmd+Plus so Zoom In fires without Shift
+        // *or* with it. Windows/Linux register the accelerator even when hidden.
+        {
+          label: 'Zoom In',
+          accelerator: 'CmdOrCtrl+Plus',
+          visible: false,
+          acceleratorWorksWhenHidden: true,
+          click: () => sendToRenderer('menu-zoom-in')
+        },
         {
           label: 'Zoom Out',
           accelerator: 'CmdOrCtrl+-',
@@ -211,6 +222,13 @@ function createWindow(initialViewState?: WindowViewState | null, geometry?: Wind
 
       const key = input.key.toLowerCase()
 
+      // Zoom In: Ctrl+=, Ctrl++, and Ctrl+Shift+= (key is often '+' or '=').
+      // Check before the Shift split so Shift+= is not swallowed unused.
+      if (!input.alt && isMenuZoomInKey(key)) {
+        send('menu-zoom-in')
+        return
+      }
+
       if (input.shift) {
         if (key === 'n') send('menu-new-window')
         else if (key === 't') send('menu-reopen-closed-tab')
@@ -226,7 +244,6 @@ function createWindow(initialViewState?: WindowViewState | null, geometry?: Wind
         else if (key === 'p') send('menu-project-switcher')
         else if (key === 'b') send('menu-toggle-sidebar')
         else if (key === 'r') send('menu-reload-tab')
-        else if (key === '=') send('menu-zoom-in')
         else if (key === '-') send('menu-zoom-out')
         else if (key === '0') send('menu-zoom-reset')
         else if (key === 'q') { app.quit() }

@@ -5,7 +5,7 @@ import { EDITOR_FONT_SIZE_MAX, EDITOR_FONT_SIZE_MIN } from './monacoOptions'
 export type ZoomTarget = 'terminal' | 'browser' | 'editor'
 
 /**
- * Menu Ctrl+=/−/0 follows the focused tab: browser page zoom, Monaco editor
+ * Menu Ctrl+= / Ctrl++ / Ctrl+− / Ctrl+0 follows the focused tab: browser page zoom, Monaco editor
  * font, or terminal zoom delta. Notes and diffs share the editor font.
  */
 export function zoomTargetForTabType(tabType: TabType | null | undefined): ZoomTarget {
