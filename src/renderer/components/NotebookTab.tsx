@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react'
+import { flushSync } from 'react-dom'
 import { Eraser, Play, RotateCw, Square } from 'lucide-react'
 import { DEFAULT_CONFIG } from '../../shared/types'
 import {
@@ -47,6 +48,7 @@ import { useApp } from '../context/AppContext'
 import { useDirtyBufferStore } from '../context/DirtyBufferContext'
 import { FILE_BROWSER_REFRESH_MS } from '../hooks/fileBrowserRefresh'
 import NotebookCellView from './NotebookCell'
+import { scheduleResumeAfterNotebookReorder } from './notebookCellEditor'
 import { formatShortcutForApp } from '../../shared/shortcut-label'
 
 interface Props {
@@ -97,6 +99,8 @@ export default function NotebookTab({
   const [kernelBootReady, setKernelBootReady] = useState(false)
   const [condaEnvs, setCondaEnvs] = useState<CondaEnvInfo[]>([])
   const [condaListError, setCondaListError] = useState<string | null>(null)
+  const [suspendEditors, setSuspendEditors] = useState(false)
+  const [editorEpoch, setEditorEpoch] = useState(0)
 
   const docRef = useRef<NotebookDocument | null>(null)
   const savedRef = useRef<string | null>(null)
@@ -106,6 +110,7 @@ export default function NotebookTab({
   const runStateRef = useRef<NotebookRunQueueState>(idleRunQueue())
   const kernelStatusRef = useRef<NotebookKernelStatus>('starting')
   const condaOverrideRef = useRef<ProjectCondaSelection | null>(null)
+  const cancelEditorResumeRef = useRef<(() => void) | null>(null)
 
   const markDirty = useCallback((next: NotebookDocument) => {
     docRef.current = next
@@ -115,6 +120,33 @@ export default function NotebookTab({
     setDirty(isDirty)
     setDoc(next)
   }, [])
+
+  const cancelEditorResume = useCallback(() => {
+    cancelEditorResumeRef.current?.()
+    cancelEditorResumeRef.current = null
+  }, [])
+
+  useEffect(() => () => cancelEditorResume(), [cancelEditorResume])
+
+  /**
+   * Unmount every Monaco host, commit that tree, then run `mutate`.
+   * monaco-react's InstantiationService dies if <Editor> is still mounted
+   * while the cell list is spliced (move/add/delete).
+   */
+  const withEditorsSuspended = useCallback((mutate: () => string | null) => {
+    cancelEditorResume()
+    flushSync(() => {
+      setSuspendEditors(true)
+      setActiveCellId(null)
+    })
+    const focusId = mutate()
+    cancelEditorResumeRef.current = scheduleResumeAfterNotebookReorder(() => {
+      cancelEditorResumeRef.current = null
+      setSuspendEditors(false)
+      setEditorEpoch((n) => n + 1)
+      if (focusId) setActiveCellId(focusId)
+    })
+  }, [cancelEditorResume])
 
   const refreshContent = useCallback((force = false) => {
     const requestId = requestIdRef.current + 1
@@ -607,6 +639,7 @@ export default function NotebookTab({
               isRunning={runningIds.has(cell.id)}
               config={monacoConfig}
               effectiveTheme={effectiveTheme}
+              suspendEditors={suspendEditors}
               onFocus={() => setActiveCellId(cell.id)}
               onChangeSource={(source) => {
                 const current = docRef.current
@@ -630,21 +663,30 @@ export default function NotebookTab({
               onAddBelow={() => {
                 const current = docRef.current
                 if (!current) return
-                const next = addCellAt(current, index + 1, 'code')
-                markDirty(next)
-                setActiveCellId(next.cells[index + 1]?.id ?? null)
+                withEditorsSuspended(() => {
+                  const next = addCellAt(current, index + 1, 'code')
+                  markDirty(next)
+                  return next.cells[index + 1]?.id ?? null
+                })
               }}
               onDelete={() => {
                 const current = docRef.current
                 if (!current) return
-                const next = deleteCellAt(current, index)
-                markDirty(next)
-                setActiveCellId(next.cells[Math.min(index, next.cells.length - 1)]?.id ?? null)
+                withEditorsSuspended(() => {
+                  const next = deleteCellAt(current, index)
+                  markDirty(next)
+                  return next.cells[Math.min(index, next.cells.length - 1)]?.id ?? null
+                })
               }}
               onMove={(direction) => {
                 const current = docRef.current
                 if (!current) return
-                markDirty(moveCellById(current, cell.id, direction))
+                const next = moveCellById(current, cell.id, direction)
+                if (next === current) return
+                withEditorsSuspended(() => {
+                  markDirty(next)
+                  return cell.id
+                })
               }}
               onStartMarkdownEdit={() => {
                 setActiveCellId(cell.id)
@@ -657,7 +699,7 @@ export default function NotebookTab({
                 if (!live) return
                 markDirty(setNotebookCellCollapsed(current, live.id, !isNotebookCellCollapsed(live)))
               }}
-              resetKey={loadGeneration}
+              resetKey={loadGeneration + editorEpoch}
             />
           ))}
         </div>

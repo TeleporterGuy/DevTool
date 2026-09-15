@@ -31,7 +31,8 @@ export function isIgnorableRendererError(error: unknown, message?: string): bool
   if (!text.trim()) return false
   if (/ResizeObserver loop/i.test(text)) return true
   if (/\bCanceled\b/i.test(text)) return true
-  if (/disposed/i.test(text) && /(model|editor|textmodel|monaco)/i.test(text)) return true
+  if (/InstantiationService has been disposed/i.test(text)) return true
+  if (/disposed/i.test(text) && /(model|editor|textmodel|monaco|instantiation)/i.test(text)) return true
   if (/monaco/i.test(text)) return true
   return false
 }

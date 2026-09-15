@@ -1,6 +1,6 @@
 import React from 'react'
 import ReactDOM from 'react-dom/client'
-import { shouldSkipRendererCrashScreen } from './renderer-errors'
+import { isIgnorableRendererError, shouldSkipRendererCrashScreen } from './renderer-errors'
 import './styles.css'
 
 interface CrashDetails {
@@ -55,11 +55,20 @@ function CrashScreen({ title, message, stack }: CrashDetails): React.ReactElemen
 class RendererErrorBoundary extends React.Component<{ children: React.ReactNode }, { crash: CrashDetails | null }> {
   state: { crash: CrashDetails | null } = { crash: null }
 
-  static getDerivedStateFromError(error: unknown): { crash: CrashDetails } {
+  static getDerivedStateFromError(error: unknown): { crash: CrashDetails | null } {
+    // Monaco dispose-during-reorder throws in render. Replacing the tree is
+    // worse than ignoring — NotebookTab unmounts editors before the splice.
+    if (isIgnorableRendererError(error)) {
+      return { crash: null }
+    }
     return { crash: normalizeError(error, 'Renderer crashed while rendering') }
   }
 
   componentDidCatch(error: unknown): void {
+    if (isIgnorableRendererError(error)) {
+      console.warn('Ignoring renderer noise', error)
+      return
+    }
     console.error('Renderer error boundary caught an error', error)
   }
 

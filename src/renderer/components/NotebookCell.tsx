@@ -9,6 +9,7 @@ import {
   type NotebookCell,
   type NotebookCellType
 } from '../../shared/notebook'
+import { isIgnorableRendererError } from '../renderer-errors'
 import { buildMonacoNotebookCellOptions, notebookCellEditorHeight } from './monacoOptions'
 import { notebookCellMountsMonaco } from './notebookCellEditor'
 import { defineMonacoThemes, monacoThemeFor } from './monacoTheme'
@@ -35,6 +36,7 @@ interface Props {
   onStartMarkdownEdit: () => void
   onToggleCollapsed: () => void
   resetKey: number
+  suspendEditors?: boolean
 }
 
 const RUN_KEY = 2048 | 3
@@ -46,6 +48,53 @@ function safeMonacoCall(fn: () => void): void {
   } catch {
     /* layout/dispose can throw if Monaco already tore down during a cell move */
   }
+}
+
+class CellEditorBoundary extends React.Component<
+  { fallback: React.ReactNode; children: React.ReactNode },
+  { failed: boolean }
+> {
+  state = { failed: false }
+
+  static getDerivedStateFromError(): { failed: boolean } {
+    return { failed: true }
+  }
+
+  componentDidCatch(error: unknown): void {
+    if (isIgnorableRendererError(error)) {
+      console.warn('Ignoring notebook Monaco noise', error)
+      return
+    }
+    console.error('Notebook cell editor crashed', error)
+  }
+
+  render(): React.ReactNode {
+    if (this.state.failed) return this.props.fallback
+    return this.props.children
+  }
+}
+
+function NotebookCellSourcePre({
+  source,
+  fontFamily,
+  fontSize
+}: {
+  source: string
+  fontFamily?: string
+  fontSize?: number
+}): React.ReactElement {
+  return (
+    <pre
+      data-testid="notebook-cell-source-pre"
+      className="m-0 px-3 py-2 text-sm text-text whitespace-pre-wrap break-words cursor-text min-h-[48px]"
+      style={{
+        fontFamily: fontFamily || 'var(--font-mono)',
+        fontSize
+      }}
+    >
+      {source || ' '}
+    </pre>
+  )
 }
 
 export default function NotebookCellView({
@@ -67,7 +116,8 @@ export default function NotebookCellView({
   onMove,
   onStartMarkdownEdit,
   onToggleCollapsed,
-  resetKey
+  resetKey,
+  suspendEditors = false
 }: Props): React.ReactElement {
   const [height, setHeight] = useState(64)
   const editorRef = useRef<editor.IStandaloneCodeEditor | null>(null)
@@ -82,7 +132,8 @@ export default function NotebookCellView({
     isActive,
     collapsed,
     cellType: cell.cellType,
-    isEditingMarkdown
+    isEditingMarkdown,
+    suspendEditors
   })
   const language = cell.cellType === 'code' ? 'python' : 'markdown'
 
@@ -239,33 +290,38 @@ export default function NotebookCellView({
                 : <div className="px-3 py-4 text-sm text-text-muted italic">Empty markdown cell — click to edit</div>}
             </button>
           ) : mountMonaco ? (
-            <div style={{ height }} data-testid="notebook-cell-monaco">
-              <Editor
-                key={`${cell.cellType}-${resetKey}`}
-                path={`${cell.id}.${cell.cellType === 'code' ? 'py' : 'md'}`}
-                height={height}
-                defaultValue={cell.source}
-                language={language}
-                theme={monacoThemeFor(effectiveTheme)}
-                beforeMount={defineMonacoThemes}
-                options={buildMonacoNotebookCellOptions(config)}
-                onMount={handleMount}
-                onChange={(value) => {
-                  if (editorRef.current) onChangeSourceRef.current(value ?? '')
-                }}
-              />
-            </div>
-          ) : (
-            <pre
-              data-testid="notebook-cell-source-pre"
-              className="m-0 px-3 py-2 text-sm text-text whitespace-pre-wrap break-words cursor-text min-h-[48px]"
-              style={{
-                fontFamily: config.editorFontFamily || 'var(--font-mono)',
-                fontSize: config.editorFontSize
-              }}
+            <CellEditorBoundary
+              key={`${cell.id}-${resetKey}`}
+              fallback={(
+                <NotebookCellSourcePre
+                  source={cell.source}
+                  fontFamily={config.editorFontFamily}
+                  fontSize={config.editorFontSize}
+                />
+              )}
             >
-              {cell.source || ' '}
-            </pre>
+              <div style={{ height }} data-testid="notebook-cell-monaco">
+                <Editor
+                  key={`${cell.cellType}-${resetKey}`}
+                  height={height}
+                  defaultValue={cell.source}
+                  language={language}
+                  theme={monacoThemeFor(effectiveTheme)}
+                  beforeMount={defineMonacoThemes}
+                  options={buildMonacoNotebookCellOptions(config)}
+                  onMount={handleMount}
+                  onChange={(value) => {
+                    if (editorRef.current) onChangeSourceRef.current(value ?? '')
+                  }}
+                />
+              </div>
+            </CellEditorBoundary>
+          ) : (
+            <NotebookCellSourcePre
+              source={cell.source}
+              fontFamily={config.editorFontFamily}
+              fontSize={config.editorFontSize}
+            />
           )}
 
           {cell.cellType === 'code' && <NotebookOutputs outputs={cell.outputs} />}

@@ -35,7 +35,12 @@ function cell(overrides: Partial<NotebookCell> = {}): NotebookCell {
 
 const noop = () => {}
 
-function renderCell(props: { isActive: boolean; isEditingMarkdown?: boolean; cell?: NotebookCell }) {
+function renderCell(props: {
+  isActive: boolean
+  isEditingMarkdown?: boolean
+  suspendEditors?: boolean
+  cell?: NotebookCell
+}) {
   return render(
     <NotebookCellView
       cell={props.cell ?? cell()}
@@ -57,6 +62,7 @@ function renderCell(props: { isActive: boolean; isEditingMarkdown?: boolean; cel
       onStartMarkdownEdit={noop}
       onToggleCollapsed={noop}
       resetKey={0}
+      suspendEditors={props.suspendEditors}
     />
   )
 }
@@ -96,5 +102,36 @@ describe('NotebookCell Monaco mount', () => {
     )
     expect(screen.queryByTestId('notebook-cell-monaco')).toBeNull()
     expect(screen.getByTestId('notebook-cell-source-pre').textContent).toContain('print(1)')
+  })
+
+  it('unmounts Monaco when editors are suspended, even if the cell is active', () => {
+    const { rerender } = renderCell({ isActive: true })
+    expect(screen.getByTestId('notebook-cell-monaco')).toBeTruthy()
+    rerender(
+      <NotebookCellView
+        cell={cell()}
+        index={0}
+        cellCount={2}
+        isActive={true}
+        isEditingMarkdown={false}
+        isRunning={false}
+        config={DEFAULT_CONFIG}
+        effectiveTheme="dark"
+        onFocus={noop}
+        onChangeSource={noop}
+        onRun={noop}
+        onRunAndNext={noop}
+        onChangeType={noop}
+        onAddBelow={noop}
+        onDelete={noop}
+        onMove={noop}
+        onStartMarkdownEdit={noop}
+        onToggleCollapsed={noop}
+        resetKey={0}
+        suspendEditors
+      />
+    )
+    expect(screen.queryByTestId('notebook-cell-monaco')).toBeNull()
+    expect(screen.getByTestId('notebook-cell-source-pre')).toBeTruthy()
   })
 })

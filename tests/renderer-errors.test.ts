@@ -23,6 +23,7 @@ describe('isIgnorableRendererError', () => {
     expect(isIgnorableRendererError(new Error('Model is disposed'))).toBe(true)
     expect(isIgnorableRendererError(new Error('TextModel got disposed'))).toBe(true)
     expect(isIgnorableRendererError(new Error('Attempting to use a disposed editor'))).toBe(true)
+    expect(isIgnorableRendererError(new Error('InstantiationService has been disposed'))).toBe(true)
     expect(isIgnorableRendererError(undefined, 'Error: monaco.editor.create failed')).toBe(true)
     expect(
       isIgnorableRendererError(
@@ -42,6 +43,7 @@ describe('isIgnorableRendererError', () => {
 describe('shouldSkipRendererCrashScreen', () => {
   it('skips CrashScreen for ignorable errors and non-Error Monaco events', () => {
     expect(shouldSkipRendererCrashScreen(new Error('Canceled'))).toBe(true)
+    expect(shouldSkipRendererCrashScreen(new Error('InstantiationService has been disposed'))).toBe(true)
     expect(shouldSkipRendererCrashScreen(undefined, 'ResizeObserver loop limit exceeded')).toBe(true)
     expect(shouldSkipRendererCrashScreen(undefined, 'Script error.')).toBe(true)
     expect(shouldSkipRendererCrashScreen({ type: 'error' }, 'monaco')).toBe(true)
