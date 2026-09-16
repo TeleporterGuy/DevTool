@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react'
 import Editor from '@monaco-editor/react'
 import type { editor } from 'monaco-editor'
-import { ChevronDown, ChevronRight, ChevronUp, Play, Plus, Trash2 } from 'lucide-react'
+import { Check, ChevronDown, ChevronRight, ChevronUp, Play, Plus, Trash2 } from 'lucide-react'
 import type { AppConfig } from '../../shared/types'
 import {
   isNotebookCellCollapsed,
@@ -34,6 +34,7 @@ interface Props {
   onDelete: () => void
   onMove: (direction: -1 | 1) => void
   onStartMarkdownEdit: () => void
+  onFinishMarkdownEdit: () => void
   onToggleCollapsed: () => void
   resetKey: number
   suspendEditors?: boolean
@@ -41,6 +42,7 @@ interface Props {
 
 const RUN_KEY = 2048 | 3
 const RUN_AND_NEXT_KEY = 2048 | 1024 | 3
+const ESCAPE_KEY = 9 // Monaco KeyCode.Escape
 
 function safeMonacoCall(fn: () => void): void {
   try {
@@ -115,6 +117,7 @@ export default function NotebookCellView({
   onDelete,
   onMove,
   onStartMarkdownEdit,
+  onFinishMarkdownEdit,
   onToggleCollapsed,
   resetKey,
   suspendEditors = false
@@ -125,6 +128,8 @@ export default function NotebookCellView({
   const onRunRef = useRef(onRun)
   const onRunAndNextRef = useRef(onRunAndNext)
   const onChangeSourceRef = useRef(onChangeSource)
+  const onFinishMarkdownEditRef = useRef(onFinishMarkdownEdit)
+  const cellTypeRef = useRef(cell.cellType)
   const collapsed = isNotebookCellCollapsed(cell)
   const sourcePreview = notebookCellSourcePreview(cell.source)
   const showMarkdownPreview = cell.cellType === 'markdown' && !isEditingMarkdown
@@ -141,7 +146,9 @@ export default function NotebookCellView({
     onRunRef.current = onRun
     onRunAndNextRef.current = onRunAndNext
     onChangeSourceRef.current = onChangeSource
-  }, [onChangeSource, onRun, onRunAndNext])
+    onFinishMarkdownEditRef.current = onFinishMarkdownEdit
+    cellTypeRef.current = cell.cellType
+  }, [cell.cellType, onChangeSource, onFinishMarkdownEdit, onRun, onRunAndNext])
 
   useEffect(() => {
     const ed = editorRef.current
@@ -175,6 +182,9 @@ export default function NotebookCellView({
     editorRef.current = ed
     ed.addCommand(RUN_KEY, () => onRunRef.current())
     ed.addCommand(RUN_AND_NEXT_KEY, () => onRunAndNextRef.current())
+    ed.addCommand(ESCAPE_KEY, () => {
+      if (cellTypeRef.current === 'markdown') onFinishMarkdownEditRef.current()
+    })
     const applyHeight = () => {
       // Content-size events can fire while Monaco is disposing during a cell reorder.
       try {
@@ -234,6 +244,17 @@ export default function NotebookCellView({
             disabled={isRunning}
           >
             <Play size={14} />
+          </button>
+        )}
+        {cell.cellType === 'markdown' && isEditingMarkdown && (
+          <button
+            type="button"
+            className={btnCls}
+            onClick={onFinishMarkdownEdit}
+            title="Preview markdown"
+            aria-label="Preview markdown"
+          >
+            <Check size={14} />
           </button>
         )}
         {isRunning && <span className="text-2xs text-accent">running…</span>}

@@ -692,6 +692,7 @@ export default function NotebookTab({
                 setActiveCellId(cell.id)
                 setEditingMarkdownId(cell.id)
               }}
+              onFinishMarkdownEdit={() => setEditingMarkdownId(null)}
               onToggleCollapsed={() => {
                 const current = docRef.current
                 if (!current) return
