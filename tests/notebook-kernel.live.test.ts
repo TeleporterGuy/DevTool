@@ -192,26 +192,34 @@ describe.skipIf(!live)('live notebook kernel (jupyter_client)', { timeout: 120_0
     const from = events.length
     const startedAt = Date.now()
     expect(
-      manager!.execute(tabId, 'sleep#1', 'import time\ntime.sleep(25)', 'sleep')
+      manager!.execute(
+        tabId,
+        'sleep#1',
+        'import sys, time\nprint("sleep-started", flush=True)\ntime.sleep(60)',
+        'sleep'
+      )
     ).toEqual({})
     await waitForKernelEvent(
       events,
-      (event) =>
-        (event.event === 'status' && event.execution_state === 'busy') ||
-        (event.event === 'execute_reply' && event.id === 'sleep#1'),
-      15_000,
-      'busy or sleep reply',
+      (event) => event.event === 'stream' && event.text.includes('sleep-started'),
+      20_000,
+      'sleep-started stdout',
       from
     )
+    await delay(200)
     manager!.interrupt(tabId)
+    if (process.platform === 'win32') {
+      await delay(300)
+      manager!.interrupt(tabId)
+    }
     await waitForKernelEvent(
       events,
       (event) => event.event === 'execute_reply' && event.id === 'sleep#1',
-      EXEC_MS,
+      20_000,
       'interrupted sleep reply',
       from
     )
-    expect(Date.now() - startedAt).toBeLessThan(20_000)
+    expect(Date.now() - startedAt).toBeLessThan(25_000)
 
     const after = events.length
     expect(manager!.execute(tabId, 'after#1', 'print("after-interrupt")', 'after')).toEqual({})

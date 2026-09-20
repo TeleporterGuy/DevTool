@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import { WorkspaceManager } from '../src/main/workspace-manager'
+import { WorkspaceManager, canonicalFilePath } from '../src/main/workspace-manager'
 import { execFileSync } from 'child_process'
 import fs from 'fs'
 import path from 'path'
@@ -19,7 +19,7 @@ describe('WorkspaceManager', () => {
   let repoDir: string
 
   beforeEach(() => {
-    repoDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'ws-test-')))
+    repoDir = canonicalFilePath(fs.mkdtempSync(path.join(os.tmpdir(), 'ws-test-')))
     initGitRepo(repoDir)
     manager = new WorkspaceManager()
   })
@@ -63,6 +63,7 @@ describe('WorkspaceManager', () => {
       const result = await manager.create(repoDir, 'my-workspace', 'master')
       expect(result.branchName).toBe('my-workspace')
       expect(result.relativeProjectPath).toBe('')
+      expect(canonicalFilePath(result.worktreePath)).toBe(canonicalFilePath(path.join(repoDir, '.worktrees', 'my-workspace')))
       expect(fs.existsSync(result.worktreePath)).toBe(true)
       // Verify the branch was created
       const branches = await manager.listBranches(repoDir)
@@ -71,7 +72,9 @@ describe('WorkspaceManager', () => {
 
     it('places worktree under .worktrees/', async () => {
       const result = await manager.create(repoDir, 'test-ws', 'master')
-      expect(result.worktreePath).toBe(path.join(repoDir, '.worktrees', 'test-ws'))
+      expect(canonicalFilePath(result.worktreePath)).toBe(
+        canonicalFilePath(path.join(repoDir, '.worktrees', 'test-ws'))
+      )
     })
 
     it('computes relativeProjectPath for subdirectory projects', async () => {
@@ -79,7 +82,9 @@ describe('WorkspaceManager', () => {
       fs.mkdirSync(subDir, { recursive: true })
       const result = await manager.create(subDir, 'sub-ws', 'master')
       expect(result.relativeProjectPath).toBe('apps/web')
-      expect(result.worktreePath).toBe(path.join(repoDir, '.worktrees', 'sub-ws'))
+      expect(canonicalFilePath(result.worktreePath)).toBe(
+        canonicalFilePath(path.join(repoDir, '.worktrees', 'sub-ws'))
+      )
     })
 
     it('rejects invalid branch names', async () => {

@@ -20,10 +20,23 @@ function realpathOrSelf(target: string): string {
   }
 }
 
+/**
+ * Same folder, one spelling. On Windows Git may print 8.3 (`RUNNER~1`) while
+ * Node `mkdtemp`/`realpathSync` keep `runneradmin`; `path.relative` then walks
+ * out and back. Prefer the native realpath (long path) on both sides.
+ */
+export function canonicalFilePath(target: string): string {
+  try {
+    return fs.realpathSync.native(target)
+  } catch {
+    return realpathOrSelf(target)
+  }
+}
+
 export class WorkspaceManager {
   private async getRepoRoot(projectDir: string): Promise<string> {
     const { stdout } = await execFileAsync('git', ['rev-parse', '--show-toplevel'], { cwd: projectDir, timeout: 5000 })
-    return fs.realpathSync(stdout.trim())
+    return canonicalFilePath(stdout.trim())
   }
 
   async listBranches(projectDir: string): Promise<string[]> {
@@ -56,9 +69,13 @@ export class WorkspaceManager {
     }
 
     // Compute relative project path
-    const rel = path.relative(repoRoot, fs.realpathSync(projectDir))
+    const rel = path.relative(repoRoot, canonicalFilePath(projectDir))
 
-    return { worktreePath, branchName: name, relativeProjectPath: rel.split(path.sep).join('/') }
+    return {
+      worktreePath: canonicalFilePath(worktreePath),
+      branchName: name,
+      relativeProjectPath: rel.split(path.sep).join('/')
+    }
   }
 
   /** Absolute paths of every worktree git currently has registered for this repo. */
