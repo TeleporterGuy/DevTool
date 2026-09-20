@@ -9,6 +9,7 @@ import json
 import signal
 import sys
 import threading
+import time
 import traceback
 
 STREAM_CHAR_LIMIT = 200_000
@@ -313,6 +314,30 @@ def handle_command(cmd):
         except Exception as exc:
             sys.stderr.write("interrupt_request failed: %s\n" % exc)
             sys.stderr.flush()
+        # Windows often returns the kernel to idle without execute_reply.
+        # Close leftover pending ids so DevTool is not stuck on "running".
+        time.sleep(0.2)
+        with lock:
+            leftover = list(pending.items())
+            pending.clear()
+        for _jupyter_id, req in leftover:
+            req_id = req.get("id")
+            cell_id = req.get("cellId")
+            if not req_id:
+                continue
+            err = {
+                "event": "error",
+                "id": req_id,
+                "ename": "KeyboardInterrupt",
+                "evalue": "Interrupted",
+                "traceback": [],
+            }
+            reply = {"event": "execute_reply", "id": req_id, "status": "abort"}
+            if cell_id:
+                err["cellId"] = cell_id
+                reply["cellId"] = cell_id
+            emit(err)
+            emit(reply)
     elif kind == "shutdown":
         shutdown()
         emit({"event": "dead", "message": "Kernel shut down."})
