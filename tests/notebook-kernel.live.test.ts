@@ -181,10 +181,20 @@ describe.skipIf(!live)('live notebook kernel (jupyter_client)', { timeout: 120_0
       'stdout run-above-2',
       from
     )
-    const replies = events.filter(
-      (event) => event.event === 'execute_reply' && (event.id === 'above#1' || event.id === 'above#2')
+    await waitForKernelEvent(
+      events,
+      (event) => event.event === 'execute_reply' && event.id === 'above#1',
+      EXEC_MS,
+      'execute_reply above#1',
+      from
     )
-    expect(replies).toHaveLength(2)
+    await waitForKernelEvent(
+      events,
+      (event) => event.event === 'execute_reply' && event.id === 'above#2',
+      EXEC_MS,
+      'execute_reply above#2',
+      from
+    )
   })
 
   it('interrupts a long cell then runs again', async () => {
@@ -208,10 +218,6 @@ describe.skipIf(!live)('live notebook kernel (jupyter_client)', { timeout: 120_0
     )
     await delay(200)
     manager!.interrupt(tabId)
-    if (process.platform === 'win32') {
-      await delay(300)
-      manager!.interrupt(tabId)
-    }
     await waitForKernelEvent(
       events,
       (event) => event.event === 'execute_reply' && event.id === 'sleep#1',

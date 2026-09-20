@@ -299,10 +299,19 @@ def handle_command(cmd):
         with lock:
             pending[jupyter_id] = {"id": req_id, "cellId": cell_id}
     elif kind == "interrupt":
+        # Prefer KernelManager (Win32 event / SIGINT). Also send protocol
+        # interrupt_request so a hidden-console Windows helper still aborts.
         try:
             km.interrupt_kernel()
         except Exception as exc:
-            sys.stderr.write("interrupt failed: %s\n" % exc)
+            sys.stderr.write("interrupt_kernel failed: %s\n" % exc)
+            sys.stderr.flush()
+        try:
+            if kc is not None:
+                msg = kc.session.msg("interrupt_request", content={})
+                kc.control_channel.send(msg)
+        except Exception as exc:
+            sys.stderr.write("interrupt_request failed: %s\n" % exc)
             sys.stderr.flush()
     elif kind == "shutdown":
         shutdown()
