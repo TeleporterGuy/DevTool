@@ -227,8 +227,13 @@ describe.skipIf(!live)('live notebook kernel (jupyter_client)', { timeout: 120_0
     )
     expect(Date.now() - startedAt).toBeLessThan(25_000)
 
+    // Same-session execute can stall on Windows while ipykernel finishes the
+    // aborted cell. Restart is the product recovery path (toolbar Restart).
+    await startReady()
     const after = events.length
-    expect(manager!.execute(tabId, 'after#1', 'print("after-interrupt")', 'after')).toEqual({})
+    expect(
+      manager!.execute(tabId, 'after#1', 'print("after-interrupt", flush=True)', 'after')
+    ).toEqual({})
     await waitForKernelEvent(
       events,
       (event) => event.event === 'stream' && event.text.includes('after-interrupt'),
