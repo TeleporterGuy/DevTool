@@ -9,6 +9,7 @@ import {
   findCondaExecutable,
   installRootFromCondaFile,
   listCondaEnvs,
+  listCondaEnvsForNotebookKernel,
   listCondaEnvsFromFilesystem,
   parseCondaEnvListJson,
   parseEnvironmentsTxt,
@@ -303,6 +304,19 @@ describe('listCondaEnvs', () => {
       { force: true }
     )
     expect(result.envs).toEqual([{ name: 'ml', prefix: 'C:\\Users\\me\\miniconda3\\envs\\ml' }])
+  })
+})
+
+describe('listCondaEnvsForNotebookKernel', () => {
+  it('always passes force: true so kernel start does not use the startup cache', async () => {
+    const calls: Array<{ force?: boolean } | undefined> = []
+    const list = async (_deps?: unknown, options?: { force?: boolean }) => {
+      calls.push(options)
+      return { executable: null, envs: [{ name: 'fresh', prefix: '/fresh' }] }
+    }
+    const envs = await listCondaEnvsForNotebookKernel(list)
+    expect(calls).toEqual([{ force: true }])
+    expect(envs).toEqual([{ name: 'fresh', prefix: '/fresh' }])
   })
 })
 

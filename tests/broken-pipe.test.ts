@@ -42,13 +42,37 @@ describe('writeIgnoringBrokenPipe', () => {
 })
 
 describe('installBrokenPipeUncaughtHandler', () => {
-  it('swallows EIO/EPIPE and rethrows anything else', () => {
+  it('swallows EIO/EPIPE and does not throw other errors', () => {
     const target = new EventEmitter()
-    installBrokenPipeUncaughtHandler(target)
+    const other: unknown[] = []
+    installBrokenPipeUncaughtHandler(target, (err) => {
+      other.push(err)
+    })
     expect(() =>
       target.emit('uncaughtException', Object.assign(new Error('write EIO'), { code: 'EIO' }))
     ).not.toThrow()
-    expect(() => target.emit('uncaughtException', new Error('real bug'))).toThrow(/real bug/)
+    expect(other).toEqual([])
+
+    const boom = new Error('real bug')
+    expect(() => target.emit('uncaughtException', boom)).not.toThrow()
+    expect(other).toEqual([boom])
+  })
+
+  it('forwards other errors to existing listeners and skips broken pipes', () => {
+    const target = new EventEmitter()
+    const seen: unknown[] = []
+    target.on('uncaughtException', (err) => {
+      seen.push(err)
+    })
+    installBrokenPipeUncaughtHandler(target)
+
+    const eio = Object.assign(new Error('write EIO'), { code: 'EIO' })
+    expect(() => target.emit('uncaughtException', eio)).not.toThrow()
+    expect(seen).toEqual([])
+
+    const boom = new Error('real bug')
+    expect(() => target.emit('uncaughtException', boom)).not.toThrow()
+    expect(seen).toEqual([boom])
   })
 })
 

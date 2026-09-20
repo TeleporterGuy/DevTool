@@ -4,6 +4,9 @@ import React from 'react'
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { DEFAULT_CONFIG } from '../src/shared/types'
 import type { NotebookCell } from '../src/shared/notebook'
+import {
+  NOTEBOOK_RUN_QUEUE_BUSY_TITLE
+} from '../src/shared/notebook-execute'
 import NotebookCellView from '../src/renderer/components/NotebookCell'
 
 void React
@@ -62,6 +65,7 @@ function renderCell(props: {
   onFinishMarkdownEdit?: () => void
   onRunAbove?: () => void
   canRunAbove?: boolean
+  runAboveTitle?: string
 }) {
   return render(
     <NotebookCellView
@@ -78,6 +82,7 @@ function renderCell(props: {
       onRun={noop}
       onRunAbove={props.onRunAbove}
       canRunAbove={props.canRunAbove}
+      runAboveTitle={props.runAboveTitle}
       onRunAndNext={noop}
       onChangeType={noop}
       onAddBelow={noop}
@@ -251,5 +256,20 @@ describe('NotebookCell run above', () => {
     renderCell({ isActive: true, canRunAbove: true, onRunAbove })
     fireEvent.click(screen.getByRole('button', { name: 'Run all above' }))
     expect(onRunAbove).toHaveBeenCalledTimes(1)
+  })
+
+  it('disables Run all above while a run queue is busy and explains why', () => {
+    const onRunAbove = vi.fn()
+    renderCell({
+      isActive: true,
+      canRunAbove: false,
+      runAboveTitle: NOTEBOOK_RUN_QUEUE_BUSY_TITLE,
+      onRunAbove
+    })
+    const button = screen.getByRole('button', { name: 'Run all above' }) as HTMLButtonElement
+    expect(button.disabled).toBe(true)
+    expect(button.title).toBe(NOTEBOOK_RUN_QUEUE_BUSY_TITLE)
+    fireEvent.click(button)
+    expect(onRunAbove).not.toHaveBeenCalled()
   })
 })

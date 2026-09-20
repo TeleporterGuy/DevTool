@@ -2,7 +2,7 @@ import { execFile, spawn, type ChildProcessWithoutNullStreams, type ExecFileExce
 import fs from 'fs'
 import path from 'path'
 import type { CondaEnvInfo } from '../shared/conda'
-import { NotebookExecuteGate } from '../shared/notebook-execute'
+import { NotebookExecuteGate, parseNotebookExecuteIpc } from '../shared/notebook-execute'
 import {
   NOTEBOOK_ERROR_NO_CONDA,
   NOTEBOOK_ERROR_NO_PYTHON,
@@ -301,22 +301,25 @@ export class NotebookKernelManager {
   }
 
   execute(
-    tabId: string,
-    requestId: string,
-    code: string,
-    cellId?: string
+    tabId: unknown,
+    requestId: unknown,
+    code: unknown,
+    cellId?: unknown
   ): { error?: string } {
-    if (notebookExecuteTooLarge(code)) {
-      return { error: notebookExecuteTooLargeMessage(code.length) }
+    const parsed = parseNotebookExecuteIpc(tabId, requestId, code, cellId)
+    if (!parsed.ok) return { error: parsed.error }
+    const { tabId: id, requestId: rid, code: src, cellId: cid } = parsed.value
+    if (notebookExecuteTooLarge(src)) {
+      return { error: notebookExecuteTooLargeMessage(src.length) }
     }
-    const session = this.sessions.get(tabId)
+    const session = this.sessions.get(id)
     if (!session) return { error: 'Kernel is not running. Click Restart kernel.' }
     const action = session.executeGate.submit({
-      requestId,
-      code,
-      cellId: cellId ?? ''
+      requestId: rid,
+      code: src,
+      cellId: cid ?? ''
     })
-    if (action === 'start') this.writeExecute(session, requestId, code, cellId)
+    if (action === 'start') this.writeExecute(session, rid, src, cid)
     return {}
   }
 

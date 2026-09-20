@@ -378,6 +378,49 @@ describe('notebook cell collapse', () => {
     const collapsed = setNotebookCellCollapsed(doc, 'c1', true)
     expect(collapsed.cells[0].metadata.jupyter).toEqual({ source_hidden: true })
   })
+
+  it('strips leftover outputs_hidden on parse so a save does not hide outputs', () => {
+    const doc = parseNotebook(JSON.stringify({
+      nbformat: 4,
+      nbformat_minor: 5,
+      metadata: {},
+      cells: [
+        {
+          id: 'c1',
+          cell_type: 'code',
+          metadata: { jupyter: { source_hidden: true, outputs_hidden: true } },
+          execution_count: null,
+          source: ['print(1)'],
+          outputs: []
+        },
+        {
+          id: 'c2',
+          cell_type: 'code',
+          metadata: { jupyter: { outputs_hidden: true } },
+          execution_count: null,
+          source: ['print(2)'],
+          outputs: []
+        }
+      ]
+    }))
+    expect(doc.cells[0].metadata.jupyter).toEqual({ source_hidden: true })
+    expect(doc.cells[1].metadata.jupyter).toBeUndefined()
+    const raw = JSON.parse(serializeNotebook(doc)) as {
+      cells: Array<{ metadata: { jupyter?: Record<string, unknown> } }>
+    }
+    expect(raw.cells[0].metadata.jupyter).toEqual({ source_hidden: true })
+    expect(raw.cells[1].metadata.jupyter).toBeUndefined()
+    expect(JSON.stringify(raw)).not.toContain('outputs_hidden')
+  })
+
+  it('does not reintroduce outputs_hidden on serialize', () => {
+    const doc = emptyNotebook()
+    doc.cells[0].metadata = { jupyter: { source_hidden: true, outputs_hidden: true } }
+    const raw = JSON.parse(serializeNotebook(doc)) as {
+      cells: Array<{ metadata: { jupyter?: Record<string, unknown> } }>
+    }
+    expect(raw.cells[0].metadata.jupyter).toEqual({ source_hidden: true })
+  })
 })
 
 describe('kernel message handling', () => {

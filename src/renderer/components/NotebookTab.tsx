@@ -43,6 +43,11 @@ import {
   completeRun,
   idleRunQueue,
   makeExecuteRequestId,
+  notebookRunAboveEnabled,
+  notebookRunAboveTitle,
+  notebookRunAllEnabled,
+  notebookRunAllTitle,
+  notebookRunQueueBusy,
   type NotebookRunQueueState
 } from '../../shared/notebook-execute'
 import { useApp } from '../context/AppContext'
@@ -547,6 +552,7 @@ export default function NotebookTab({
   const envControlLabel = notebookKernelEnvControlLabel(usingOverride, envLabel, projectEnvLabel)
   const envControlTitle = notebookKernelEnvControlTitle(kernelStatus, envControlLabel)
   const envControlHint = condaListError ? `${envControlTitle} ${condaListError}` : envControlTitle
+  const runQueueBusy = notebookRunQueueBusy(runningIds.size)
 
   return (
     <div style={{ position: 'absolute', inset: 0, display: visible ? 'flex' : 'none', flexDirection: 'column' }}>
@@ -561,9 +567,10 @@ export default function NotebookTab({
         </button>
         <button
           type="button"
-          className="bg-transparent border-0 text-text-muted cursor-pointer px-1.5 py-1 rounded-md text-xs hover:bg-surface-3 hover:text-text"
+          className="bg-transparent border-0 text-text-muted cursor-pointer px-1.5 py-1 rounded-md text-xs hover:bg-surface-3 hover:text-text disabled:opacity-40"
           onClick={runAll}
-          title="Run all code cells"
+          disabled={!notebookRunAllEnabled(runQueueBusy)}
+          title={notebookRunAllTitle(runQueueBusy)}
         >
           Run all
         </button>
@@ -670,7 +677,11 @@ export default function NotebookTab({
                 requestSingleRun(cell.id)
               }}
               onRunAbove={() => runAbove(cell.id)}
-              canRunAbove={codeCellIdsAbove(doc.cells, index).length > 0}
+              canRunAbove={notebookRunAboveEnabled(
+                runQueueBusy,
+                codeCellIdsAbove(doc.cells, index).length > 0
+              )}
+              runAboveTitle={notebookRunAboveTitle(runQueueBusy)}
               onRunAndNext={runAndNext}
               onChangeType={(type: NotebookCellType) => {
                 const current = docRef.current

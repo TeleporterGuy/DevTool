@@ -317,6 +317,26 @@ export function notebookCellSourcePreview(source: string): string {
 }
 
 /**
+ * Drop leftover `outputs_hidden` (and an empty `jupyter` object).
+ * DevTool collapse is `source_hidden` only; the UI always shows outputs.
+ * Old notebooks may still have `outputs_hidden: true` on disk — strip on
+ * parse/serialize so a save without toggling collapse does not hide
+ * outputs in VS Code / JupyterLab.
+ */
+export function stripOutputsHiddenMetadata(
+  metadata: Record<string, unknown>
+): Record<string, unknown> {
+  const jupyter = asRecord(metadata.jupyter)
+  if (!jupyter || !('outputs_hidden' in jupyter)) return metadata
+  const nextJupyter = { ...jupyter }
+  delete nextJupyter.outputs_hidden
+  const next = { ...metadata }
+  if (Object.keys(nextJupyter).length === 0) delete next.jupyter
+  else next.jupyter = nextJupyter
+  return next
+}
+
+/**
  * Set or clear Jupyter hide flags without dropping other `jupyter` / cell metadata keys.
  * Collapse sets `source_hidden` and clears `outputs_hidden` so outputs stay shown.
  * Expand clears both flags and removes an empty `jupyter` object.
@@ -477,7 +497,7 @@ function parseCell(raw: unknown, index: number): NotebookCell {
       ? record.outputs.map(parseOutput)
       : [],
     executionCount: cellType === 'code' ? executionCount : null,
-    metadata: asRecord(record.metadata) ?? {}
+    metadata: stripOutputsHiddenMetadata(asRecord(record.metadata) ?? {})
   }
 }
 
@@ -519,7 +539,7 @@ export function serializeNotebook(doc: NotebookDocument): string {
     const raw: Record<string, unknown> = {
       id: cell.id,
       cell_type: cell.cellType,
-      metadata: cell.metadata,
+      metadata: stripOutputsHiddenMetadata(cell.metadata),
       source: splitNotebookText(cell.source)
     }
     if (cell.cellType === 'code') {

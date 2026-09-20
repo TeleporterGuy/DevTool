@@ -34,6 +34,8 @@ interface Props {
   onRun: () => void
   onRunAbove?: () => void
   canRunAbove?: boolean
+  /** Tooltip when Run-above is disabled because a run queue is already active. */
+  runAboveTitle?: string
   onRunAndNext: () => void
   onChangeType: (type: NotebookCellType) => void
   onAddBelow: () => void
@@ -155,6 +157,7 @@ export default function NotebookCellView({
   onRun,
   onRunAbove = () => {},
   canRunAbove = false,
+  runAboveTitle = 'Run all above',
   onRunAndNext,
   onChangeType,
   onAddBelow,
@@ -294,7 +297,7 @@ export default function NotebookCellView({
               type="button"
               className={btnCls}
               onClick={onRunAbove}
-              title="Run all above"
+              title={runAboveTitle}
               aria-label="Run all above"
               disabled={!canRunAbove}
             >

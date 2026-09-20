@@ -3,6 +3,63 @@
  * Cell id alone is not unique across overlapping Run / Run all.
  */
 
+export const NOTEBOOK_ERROR_EXECUTE_INVALID =
+  'Invalid execute request: tabId, requestId, and code must be strings.'
+
+export const NOTEBOOK_RUN_QUEUE_BUSY_TITLE = 'Wait for the current run to finish'
+
+export type NotebookExecuteIpcArgs = {
+  tabId: string
+  requestId: string
+  code: string
+  cellId?: string
+}
+
+/**
+ * IPC / execute boundary: reject non-strings before `code.length` or a spawn write.
+ * Empty `code` is allowed (empty cell). `tabId` and `requestId` must be non-empty.
+ */
+export function parseNotebookExecuteIpc(
+  tabId: unknown,
+  requestId: unknown,
+  code: unknown,
+  cellId?: unknown
+): { ok: true; value: NotebookExecuteIpcArgs } | { ok: false; error: string } {
+  if (typeof tabId !== 'string' || tabId.length === 0) {
+    return { ok: false, error: NOTEBOOK_ERROR_EXECUTE_INVALID }
+  }
+  if (typeof requestId !== 'string' || requestId.length === 0) {
+    return { ok: false, error: NOTEBOOK_ERROR_EXECUTE_INVALID }
+  }
+  if (typeof code !== 'string') {
+    return { ok: false, error: NOTEBOOK_ERROR_EXECUTE_INVALID }
+  }
+  const value: NotebookExecuteIpcArgs = { tabId, requestId, code }
+  if (typeof cellId === 'string' && cellId.length > 0) value.cellId = cellId
+  return { ok: true, value }
+}
+
+/** True when Run all / Run-above must not start a new queue. */
+export function notebookRunQueueBusy(runningCount: number): boolean {
+  return runningCount > 0
+}
+
+export function notebookRunAllEnabled(busy: boolean): boolean {
+  return !busy
+}
+
+export function notebookRunAboveEnabled(busy: boolean, hasCodeCellsAbove: boolean): boolean {
+  return hasCodeCellsAbove && !busy
+}
+
+export function notebookRunAllTitle(busy: boolean): string {
+  return busy ? NOTEBOOK_RUN_QUEUE_BUSY_TITLE : 'Run all code cells'
+}
+
+export function notebookRunAboveTitle(busy: boolean): string {
+  return busy ? NOTEBOOK_RUN_QUEUE_BUSY_TITLE : 'Run all above'
+}
+
 export type NotebookRunOwner = 'idle' | 'single' | 'all'
 
 export interface NotebookRunQueueState {

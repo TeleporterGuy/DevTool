@@ -7,7 +7,15 @@ import {
   completeRun,
   idleRunQueue,
   makeExecuteRequestId,
-  NotebookExecuteGate
+  notebookRunAboveEnabled,
+  notebookRunAboveTitle,
+  notebookRunAllEnabled,
+  notebookRunAllTitle,
+  notebookRunQueueBusy,
+  NOTEBOOK_ERROR_EXECUTE_INVALID,
+  NOTEBOOK_RUN_QUEUE_BUSY_TITLE,
+  NotebookExecuteGate,
+  parseNotebookExecuteIpc
 } from '../src/shared/notebook-execute'
 import {
   NOTEBOOK_EXECUTE_CHAR_LIMIT,
@@ -129,5 +137,53 @@ describe('execute payload cap', () => {
     expect(NOTEBOOK_EXECUTE_CHAR_LIMIT).toBe(1_000_000)
     expect(notebookExecuteTooLarge('x'.repeat(NOTEBOOK_EXECUTE_CHAR_LIMIT))).toBe(false)
     expect(notebookExecuteTooLarge('x'.repeat(NOTEBOOK_EXECUTE_CHAR_LIMIT + 1))).toBe(true)
+  })
+})
+
+describe('parseNotebookExecuteIpc', () => {
+  it('accepts string tabId, requestId, and code', () => {
+    expect(parseNotebookExecuteIpc('tab-1', 'a#1', 'print(1)', 'a')).toEqual({
+      ok: true,
+      value: { tabId: 'tab-1', requestId: 'a#1', code: 'print(1)', cellId: 'a' }
+    })
+    expect(parseNotebookExecuteIpc('tab-1', 'a#1', '')).toEqual({
+      ok: true,
+      value: { tabId: 'tab-1', requestId: 'a#1', code: '' }
+    })
+  })
+
+  it('rejects non-string code, requestId, or tabId', () => {
+    expect(parseNotebookExecuteIpc('tab-1', 'a#1', { length: 1 })).toEqual({
+      ok: false,
+      error: NOTEBOOK_ERROR_EXECUTE_INVALID
+    })
+    expect(parseNotebookExecuteIpc('tab-1', 12, 'print(1)')).toEqual({
+      ok: false,
+      error: NOTEBOOK_ERROR_EXECUTE_INVALID
+    })
+    expect(parseNotebookExecuteIpc(null, 'a#1', 'print(1)')).toEqual({
+      ok: false,
+      error: NOTEBOOK_ERROR_EXECUTE_INVALID
+    })
+    expect(parseNotebookExecuteIpc('', 'a#1', 'print(1)')).toEqual({
+      ok: false,
+      error: NOTEBOOK_ERROR_EXECUTE_INVALID
+    })
+  })
+})
+
+describe('run-all / run-above busy', () => {
+  it('disables Run all and Run-above while a queue is in flight', () => {
+    expect(notebookRunQueueBusy(0)).toBe(false)
+    expect(notebookRunQueueBusy(1)).toBe(true)
+    expect(notebookRunAllEnabled(false)).toBe(true)
+    expect(notebookRunAllEnabled(true)).toBe(false)
+    expect(notebookRunAboveEnabled(false, true)).toBe(true)
+    expect(notebookRunAboveEnabled(true, true)).toBe(false)
+    expect(notebookRunAboveEnabled(false, false)).toBe(false)
+    expect(notebookRunAllTitle(false)).toBe('Run all code cells')
+    expect(notebookRunAllTitle(true)).toBe(NOTEBOOK_RUN_QUEUE_BUSY_TITLE)
+    expect(notebookRunAboveTitle(true)).toBe(NOTEBOOK_RUN_QUEUE_BUSY_TITLE)
+    expect(notebookRunAboveTitle(false)).toBe('Run all above')
   })
 })

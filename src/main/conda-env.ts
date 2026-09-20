@@ -497,6 +497,22 @@ export async function listCondaEnvs(
 }
 
 /**
+ * Kernel start/restart must not use the startup cache.
+ * Same `{ force: true }` as the toolbar picker (`conda-list-envs`).
+ * Newly created envs appear; deleted envs fail closed.
+ */
+export async function listCondaEnvsForNotebookKernel(
+  listEnvs: (
+    deps?: CondaEnvDeps,
+    options?: { force?: boolean }
+  ) => Promise<CondaListResult> = listCondaEnvs,
+  deps: CondaEnvDeps = {}
+): Promise<CondaEnvInfo[]> {
+  const result = await listEnvs(deps, { force: true })
+  return result.envs
+}
+
+/**
  * Unique live prefix for a saved env name.
  * A cache hit is used only when that folder still looks like a conda env.
  * Duplicate names (two prefixes, same name) return null — save `condaEnvPrefix` instead.

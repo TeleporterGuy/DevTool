@@ -8,7 +8,8 @@ import type { WindowGeometry, WindowViewState } from '../shared/types'
 import { isMenuZoomInKey } from '../shared/shortcut-label'
 
 // Closed-pipe EIO/EPIPE after helper teardown must not show Electron's
-// "Uncaught Exception" modal. Unrelated exceptions are rethrown.
+// "Uncaught Exception" modal. Other errors still go to Electron's handler
+// (do not rethrow — that aborts instead of the recoverable dialog).
 installBrokenPipeUncaughtHandler()
 
 if (process.env.DEVTOOL_CDP_PORT) {

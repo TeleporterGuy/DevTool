@@ -32,8 +32,9 @@ import { agentCommandOverride, conptySpawnArgv, isAiAgentCommand, resolveAgentCo
 import { detectExternalEditors, openFolderInEditor } from './external-ide'
 import { isLocalInteractiveTerminal, resolveLocalTerminalSpawn } from './resolve-local-terminal'
 import { findGitBashExe, setPortableNodeDir } from './shell-env'
-import { listCondaEnvs, resolveProjectCondaEnv, wrapInteractiveShellWithCondaActivate } from './conda-env'
+import { listCondaEnvs, listCondaEnvsForNotebookKernel, resolveProjectCondaEnv, wrapInteractiveShellWithCondaActivate } from './conda-env'
 import { NotebookKernelManager } from './notebook-kernel'
+import { parseNotebookExecuteIpc } from '../shared/notebook-execute'
 import { safeWebContentsSend } from './safe-ipc-send'
 import type { CondaEnvInfo } from '../shared/conda'
 import { resolveSafeProjectPath } from './project-fs-path'
@@ -959,8 +960,15 @@ export class AppRuntime {
     )
     ipcMain.handle(
       'notebook-kernel-execute',
-      (_event, tabId: string, requestId: string, code: string, cellId?: string): { error?: string } => {
-        return this.notebookKernels.execute(tabId, requestId, code, cellId)
+      (_event, tabId: unknown, requestId: unknown, code: unknown, cellId?: unknown): { error?: string } => {
+        const parsed = parseNotebookExecuteIpc(tabId, requestId, code, cellId)
+        if (!parsed.ok) return { error: parsed.error }
+        return this.notebookKernels.execute(
+          parsed.value.tabId,
+          parsed.value.requestId,
+          parsed.value.code,
+          parsed.value.cellId
+        )
       }
     )
     ipcMain.handle('notebook-kernel-interrupt', (_event, tabId: string) => {
@@ -1505,7 +1513,7 @@ export class AppRuntime {
       : null
     const hasOverride = !!(override?.condaEnvName?.trim() || override?.condaEnvPrefix?.trim())
     // Override: live conda list only. No override: existing project-default resolve.
-    const listedEnvs = hasOverride ? (await listCondaEnvs()).envs : []
+    const listedEnvs = hasOverride ? await listCondaEnvsForNotebookKernel() : []
     const projectResolved = hasOverride ? null : resolveProjectCondaEnv(project)
     const resolved = resolveNotebookKernelCondaEnv(
       override,

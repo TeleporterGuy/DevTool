@@ -44,15 +44,31 @@ export function writeIgnoringBrokenPipe(
   }
 }
 
+type UncaughtListener = (err: unknown) => void
+
 /**
- * Swallow only EIO/EPIPE in main. Anything else is rethrown so it still
- * surfaces (Electron dialog / process exit). Call once at bootstrap.
+ * Swallow only EIO/EPIPE in main. Do not rethrow other errors — a throw
+ * from this listener aborts instead of Electron's recoverable dialog.
+ *
+ * Existing `uncaughtException` listeners (Electron's dialog) are wrapped
+ * so they still run for everything except broken pipes. Call once at bootstrap.
+ *
+ * Tests can pass `onOther` to observe non-pipe errors without Electron.
  */
 export function installBrokenPipeUncaughtHandler(
-  target: NodeJS.EventEmitter = process
+  target: NodeJS.EventEmitter = process,
+  onOther?: (err: unknown) => void
 ): void {
+  const previous = target.listeners('uncaughtException').slice() as UncaughtListener[]
+  target.removeAllListeners('uncaughtException')
   target.on('uncaughtException', (err: unknown) => {
     if (isBrokenPipeError(err)) return
-    throw err
+    if (onOther) {
+      onOther(err)
+      return
+    }
+    for (const listener of previous) {
+      listener(err)
+    }
   })
 }

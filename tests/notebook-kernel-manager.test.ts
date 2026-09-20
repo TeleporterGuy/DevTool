@@ -11,6 +11,7 @@ import {
   notebookExecuteTooLargeMessage,
   type NotebookKernelEvent
 } from '../src/shared/notebook'
+import { NOTEBOOK_ERROR_EXECUTE_INVALID } from '../src/shared/notebook-execute'
 
 class FakeStdin extends EventEmitter {
   writes: string[] = []
@@ -176,6 +177,20 @@ describe('NotebookKernelManager execute gate', () => {
     // Gate must stay free for a normal cell.
     expect(manager.execute('tab-1', 'ok#1', 'print(1)', 'ok')).toEqual({})
     expect(child.stdinWrites.some((line) => line.includes('"ok#1"'))).toBe(true)
+    manager.shutdown('tab-1')
+  })
+
+  it('rejects non-string code without throwing or writing to the helper', () => {
+    const child = new FakeChild(91009)
+    const manager = makeManager([child])
+    manager.start('tab-1', { name: 'ml', prefix: '/envs/ml' }, '/proj')
+    expect(manager.execute('tab-1', 'a#1', { length: 1 })).toEqual({
+      error: NOTEBOOK_ERROR_EXECUTE_INVALID
+    })
+    expect(manager.execute('tab-1', 12, 'print(1)')).toEqual({
+      error: NOTEBOOK_ERROR_EXECUTE_INVALID
+    })
+    expect(child.stdinWrites.some((line) => line.includes('"cmd":"execute"'))).toBe(false)
     manager.shutdown('tab-1')
   })
 })
