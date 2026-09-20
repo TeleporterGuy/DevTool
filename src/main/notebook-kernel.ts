@@ -11,6 +11,7 @@ import {
   parseKernelEventLine,
   type NotebookKernelEvent
 } from '../shared/notebook'
+import { ignoreStreamErrors, writeIgnoringBrokenPipe } from './broken-pipe'
 import { condaPythonExecutable, type CondaEnvDeps } from './conda-env'
 import { getShellEnv, type ShellEnvDeps } from './shell-env'
 
@@ -238,6 +239,10 @@ export class NotebookKernelManager {
 
     child.stdout.setEncoding('utf8')
     child.stderr.setEncoding('utf8')
+    // Async EPIPE/EIO after interrupt/kill is uncaught without these listeners.
+    ignoreStreamErrors(child.stdin)
+    ignoreStreamErrors(child.stdout)
+    ignoreStreamErrors(child.stderr)
 
     child.stdout.on('data', (chunk: string) => {
       if (!this.isActiveKernelChild(tabId, child)) return
@@ -319,11 +324,7 @@ export class NotebookKernelManager {
     const session = this.sessions.get(tabId)
     if (!session) return
     session.executeGate.clear()
-    try {
-      session.child.stdin.write(`${JSON.stringify({ cmd: 'interrupt' })}\n`)
-    } catch {
-      // Process already gone.
-    }
+    writeIgnoringBrokenPipe(session.child.stdin, `${JSON.stringify({ cmd: 'interrupt' })}\n`)
   }
 
   shutdown(tabId: string): void {
@@ -354,11 +355,7 @@ export class NotebookKernelManager {
       killProcessTree({ helperPid, kernelPid })
     }
 
-    try {
-      session.child.stdin.write(`${JSON.stringify({ cmd: 'shutdown' })}\n`)
-    } catch {
-      // Ignore.
-    }
+    writeIgnoringBrokenPipe(session.child.stdin, `${JSON.stringify({ cmd: 'shutdown' })}\n`)
 
     const timer = setTimeout(finishKill, 2000)
     session.child.once('exit', () => {
@@ -378,12 +375,9 @@ export class NotebookKernelManager {
     code: string,
     cellId?: string
   ): void {
-    try {
-      session.child.stdin.write(
-        `${JSON.stringify({ cmd: 'execute', id: requestId, cellId, code })}\n`
-      )
-    } catch {
-      // Process already gone.
-    }
+    writeIgnoringBrokenPipe(
+      session.child.stdin,
+      `${JSON.stringify({ cmd: 'execute', id: requestId, cellId, code })}\n`
+    )
   }
 }

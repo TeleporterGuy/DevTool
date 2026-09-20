@@ -1,10 +1,15 @@
 import { app, BrowserWindow, Menu, systemPreferences } from 'electron'
 import { join } from 'path'
+import { installBrokenPipeUncaughtHandler } from './broken-pipe'
 import { resolveShellEnv } from './shell-env'
 import { listCondaEnvs } from './conda-env'
 import { AppRuntime } from './app-runtime'
 import type { WindowGeometry, WindowViewState } from '../shared/types'
 import { isMenuZoomInKey } from '../shared/shortcut-label'
+
+// Closed-pipe EIO/EPIPE after helper teardown must not show Electron's
+// "Uncaught Exception" modal. Unrelated exceptions are rethrown.
+installBrokenPipeUncaughtHandler()
 
 if (process.env.DEVTOOL_CDP_PORT) {
   app.commandLine.appendSwitch('remote-debugging-port', process.env.DEVTOOL_CDP_PORT)

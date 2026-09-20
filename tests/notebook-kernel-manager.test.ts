@@ -12,24 +12,41 @@ import {
   type NotebookKernelEvent
 } from '../src/shared/notebook'
 
+class FakeStdin extends EventEmitter {
+  writes: string[] = []
+  private onShutdown: () => void
+
+  constructor(onShutdown: () => void) {
+    super()
+    this.onShutdown = onShutdown
+  }
+
+  write(chunk: string, cb?: (err?: Error | null) => void): boolean {
+    this.writes.push(chunk)
+    if (chunk.includes('"shutdown"')) {
+      queueMicrotask(() => this.onShutdown())
+    }
+    if (cb) queueMicrotask(() => cb(null))
+    return true
+  }
+}
+
 class FakeChild extends EventEmitter {
   pid: number
-  stdinWrites: string[] = []
+  stdin: FakeStdin
   stdout = Object.assign(new EventEmitter(), { setEncoding(): void { /* utf8 */ } })
   stderr = Object.assign(new EventEmitter(), { setEncoding(): void { /* utf8 */ } })
-  stdin = {
-    write: (chunk: string): boolean => {
-      this.stdinWrites.push(chunk)
-      if (chunk.includes('"shutdown"')) {
-        queueMicrotask(() => this.emit('exit', 0, null))
-      }
-      return true
-    }
-  }
 
   constructor(pid: number) {
     super()
     this.pid = pid
+    this.stdin = new FakeStdin(() => {
+      this.emit('exit', 0, null)
+    })
+  }
+
+  get stdinWrites(): string[] {
+    return this.stdin.writes
   }
 }
 
@@ -159,6 +176,21 @@ describe('NotebookKernelManager execute gate', () => {
     // Gate must stay free for a normal cell.
     expect(manager.execute('tab-1', 'ok#1', 'print(1)', 'ok')).toEqual({})
     expect(child.stdinWrites.some((line) => line.includes('"ok#1"'))).toBe(true)
+    manager.shutdown('tab-1')
+  })
+})
+
+describe('NotebookKernelManager stream errors', () => {
+  it('does not throw when helper stdin emits write EIO after teardown', () => {
+    const child = new FakeChild(91008)
+    const manager = makeManager([child])
+    manager.start('tab-1', { name: 'ml', prefix: '/envs/ml' }, '/proj')
+    const err = Object.assign(new Error('write EIO'), { code: 'EIO' })
+    expect(() => child.stdin.emit('error', err)).not.toThrow()
+    expect(() =>
+      child.stdout.emit('error', Object.assign(new Error('write EPIPE'), { code: 'EPIPE' }))
+    ).not.toThrow()
+    expect(() => child.stderr.emit('error', err)).not.toThrow()
     manager.shutdown('tab-1')
   })
 })

@@ -34,6 +34,7 @@ import { isLocalInteractiveTerminal, resolveLocalTerminalSpawn } from './resolve
 import { findGitBashExe, setPortableNodeDir } from './shell-env'
 import { listCondaEnvs, resolveProjectCondaEnv, wrapInteractiveShellWithCondaActivate } from './conda-env'
 import { NotebookKernelManager } from './notebook-kernel'
+import { safeWebContentsSend } from './safe-ipc-send'
 import type { CondaEnvInfo } from '../shared/conda'
 import { resolveSafeProjectPath } from './project-fs-path'
 import {
@@ -1581,9 +1582,7 @@ export class AppRuntime {
 
   private broadcastToAllWindows(channel: string, ...args: unknown[]): void {
     for (const window of this.windows.values()) {
-      if (!window.isDestroyed()) {
-        window.webContents.send(channel, ...args)
-      }
+      safeWebContentsSend(window, channel, ...args)
     }
   }
 
@@ -1596,9 +1595,7 @@ export class AppRuntime {
     if (!runtime) return
     for (const windowId of runtime.attachedWindowIds) {
       const window = this.windows.get(windowId)
-      if (window && !window.isDestroyed()) {
-        window.webContents.send(channel, ...args)
-      }
+      if (window) safeWebContentsSend(window, channel, ...args)
     }
   }
 }
