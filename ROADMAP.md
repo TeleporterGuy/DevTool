@@ -295,13 +295,13 @@ Work items:
 3. **Kernel** — `jupyter_client` + ipykernel in the **project default conda env**, with an optional per-notebook override in `metadata.devtool.condaEnv` (`getShellEnv` / same PATH as Pi/agent tabs). Toolbar env picker. Run cell / run all. Stream text, `text/plain`, PNG, and errors. Kernel status (idle / busy / dead) + restart.
 4. **Clear errors** — no conda env, missing `python`, or missing `jupyter_client` / `ipykernel` fail with an install hint, not a blank tab.
 
-Stay out of: full VS Code notebook parity (debug, variable explorer, collaborative, ipywidgets), JupyterLab as a managed server, inference settings in DevTool, LSP, packaging.
+Stay out of: full VS Code notebook parity (debug, variable explorer, collaborative, ipywidgets), JupyterLab as a managed server, inference settings in DevTool, LSP, packaging, agent context links (Ctrl+K/L-style — parking lot, not this closeout).
 
 **Remote SSH notebooks** are out of this PR (local projects only). Say so in the tab if you open an `.ipynb` on a remote project.
 
 **Verify:** unit tests for parse/serialize, kernel message handling (mocked), and conda python wiring. `npm test` + typecheck. Human check on Windows: conda env with `ipykernel` and `jupyter_client`, open a notebook, run a cell.
 
-**Closeout:** `package.json` is **0.5.0**. Next is Phase 5 (packaging). LSP stays parked.
+**Closeout:** `package.json` is **0.5.0**. Next is Phase 5 (packaging). LSP stays parked. Agent context links from editor/notebook stay parked (not a Phase 4 leftover).
 
 **Effort:** a focused pass on the existing Electron/React/Monaco tab patterns. Ships as **`0.5.0`**.
 
@@ -342,6 +342,7 @@ Parking lot. Do not start these instead of the numbered phases. Several items al
 | JupyterLab in a browser tab | Dropped. PR #9 closed unmerged. Not Phase 4. |
 | Language servers (Python, Markdown) | Parked. Monaco covers edit/view; analysis belongs in Pi. Optional sugar only if Monaco-without-Pi is painful. No minor reserved. |
 | Native notebook cells + kernel | Phase 4 (`0.5.0`) |
+| Agent context links from editor/notebook (Ctrl+K/L-style) | Parking lot. After Phase 4. No phase reserved. |
 | Windows installer + Authenticode + auto-update + app icon | Phase 5 |
 | Open workspace in VS Code / Cursor | Phase 1.2 |
 | Spyder as an external IDE | after Phase 3 |
@@ -352,6 +353,8 @@ Parking lot. Do not start these instead of the numbered phases. Several items al
 **Language servers (Python and Markdown).** Parked, not a numbered phase. Monaco already highlights and saves. Hover / go-to / complete would be sugar; diagnostics and deeper analysis belong in Pi extensions. A spike (`monaco-languageclient` + JSON-RPC stdio, `pylsp` or `pyright` in the same conda env, Windows paths that round-trip) is only worth it if people are living in Monaco without a Pi tab. Out of scope even then: every language, debugger, refactor-rename-across-repo, duplicating Pi-quality diagnostics. No minor is reserved for this. Phase 5 is packaging, not LSP.
 
 **Native `.ipynb` cells in a tab** (kernel via `jupyter_client` in the conda env). This **is** Phase 4 (`0.5.0`). Browser JupyterLab is not a substitute and was dropped.
+
+**Agent context links from editor/notebook** (Ctrl+K / Ctrl+L–style). Parking lot, later version — **not** Phase 4 / `0.5.0`. Builds on native notebooks + Monaco + Pi/Codex/Claude tabs. Selected lines, cells, or files would be added to the **active agent terminal as compact links** (path + line range, or notebook cell id), not pasted in full, so the agent (or DevTool) can resolve context without flooding the PTY. No phase number reserved. Do not start this instead of Phase 5 packaging.
 
 **TypeScript/JavaScript LSP** if the Node zip is the runtime. Same parking lot as Python/Markdown LSP, not a follow-on phase.
 
@@ -383,7 +386,7 @@ Keep upstream `master` as a remote (`upstream`) and rebase or merge periodically
 8. Hook authentication + SSH trust (Phase 2). **Done** in `0.3.2` (no minor bump).
 9. Conda env picker on spawn (Phase 3). **Done** in `0.4.0`.
 10. Native in-app `.ipynb` notebooks (Phase 4). **Done** in `0.5.0`. Not a JupyterLab browser launcher.
-11. Packaging (Phase 5): keep portable `dist/win-unpacked`, then per-user NSIS Setup.exe + Start Menu, then Authenticode, then auto-update, app icon. Ships as `0.6.0`+. Do not insert LSP between 10 and 11. Do not revive browser JupyterLab.
+11. Packaging (Phase 5): keep portable `dist/win-unpacked`, then per-user NSIS Setup.exe + Start Menu, then Authenticode, then auto-update, app icon. Ships as `0.6.0`+. Do not insert LSP or agent context links between 10 and 11. Do not revive browser JupyterLab.
 
 Skip a step only if the previous phase already includes it by accident (e.g. PATH work that makes conda trivial).
 
@@ -426,6 +429,6 @@ Work machine constraints to re-test every phase: Git Bash, portable Node zip, Pi
 | 4 | `0.5.0` (this phase) | Native `.ipynb` tabs (Monaco cells + conda kernel) | a focused pass |
 | 5 | `0.6.0`+ | Portable folder kept; per-user NSIS Setup.exe; then Authenticode; then auto-update; app icon | installer in days–weeks; signing/updater depend on the cert |
 
-Language servers stay in the parking lot. They are not a numbered phase. There is no Phase 6 until something else earns one.
+Language servers stay in the parking lot. They are not a numbered phase. Agent context links from editor/notebook (Ctrl+K/L-style) are the same kind of parked later-maybe. There is no Phase 6 until something else earns one.
 
 A year of evenings can yield a personal orchestrator. It will not become Cursor. That is success.
