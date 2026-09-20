@@ -1,5 +1,6 @@
 import React from 'react'
 import ReactDOM from 'react-dom/client'
+import { isIgnorableRendererError, shouldSkipRendererCrashScreen } from './renderer-errors'
 import './styles.css'
 
 interface CrashDetails {
@@ -54,11 +55,20 @@ function CrashScreen({ title, message, stack }: CrashDetails): React.ReactElemen
 class RendererErrorBoundary extends React.Component<{ children: React.ReactNode }, { crash: CrashDetails | null }> {
   state: { crash: CrashDetails | null } = { crash: null }
 
-  static getDerivedStateFromError(error: unknown): { crash: CrashDetails } {
+  static getDerivedStateFromError(error: unknown): { crash: CrashDetails | null } {
+    // Monaco dispose-during-reorder throws in render. Replacing the tree is
+    // worse than ignoring — NotebookTab unmounts editors before the splice.
+    if (isIgnorableRendererError(error)) {
+      return { crash: null }
+    }
     return { crash: normalizeError(error, 'Renderer crashed while rendering') }
   }
 
   componentDidCatch(error: unknown): void {
+    if (isIgnorableRendererError(error)) {
+      console.warn('Ignoring renderer noise', error)
+      return
+    }
     console.error('Renderer error boundary caught an error', error)
   }
 
@@ -83,12 +93,24 @@ function renderCrash(details: CrashDetails): void {
 }
 
 window.addEventListener('error', (event) => {
+  // Do not replace the React tree for Monaco/ResizeObserver noise. root.render(CrashScreen)
+  // unmounts AppProvider; the next mount can run with window.api undefined.
+  if (shouldSkipRendererCrashScreen(event.error, event.message)) {
+    event.preventDefault()
+    console.warn('Ignoring renderer noise', event.error ?? event.message)
+    return
+  }
   const details = normalizeError(event.error ?? event.message, 'Unhandled renderer error')
   console.error('window.error', event.error ?? event.message)
   renderCrash(details)
 })
 
 window.addEventListener('unhandledrejection', (event) => {
+  if (shouldSkipRendererCrashScreen(event.reason)) {
+    event.preventDefault()
+    console.warn('Ignoring renderer rejection noise', event.reason)
+    return
+  }
   const details = normalizeError(event.reason, 'Unhandled promise rejection')
   console.error('window.unhandledrejection', event.reason)
   renderCrash(details)

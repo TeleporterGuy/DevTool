@@ -20,12 +20,22 @@ import { tearDownTaskTabs } from './task-teardown'
 import { PaletteFrecencyStorage, type FrecencyFile } from './palette-frecency-storage'
 import { parseNumstat } from './git-diff-summary'
 import { GIT_STATUS_ARGS, parseGitStatusZ } from './git-status-parse'
-import { AI_TAB_META } from '../shared/types'
+import { AI_TAB_META, isRemoteProject, isShellCommandProject } from '../shared/types'
+import {
+  NOTEBOOK_ERROR_REMOTE,
+  NOTEBOOK_ERROR_SHELL_PROJECT,
+  resolveNotebookKernelCondaEnv,
+  type NotebookKernelCondaOverride
+} from '../shared/notebook'
+import { notebookAllowedCwdRoots, resolveNotebookKernelCwd } from './notebook-cwd'
 import { agentCommandOverride, conptySpawnArgv, isAiAgentCommand, resolveAgentCommand } from './resolve-agent-command'
 import { detectExternalEditors, openFolderInEditor } from './external-ide'
 import { isLocalInteractiveTerminal, resolveLocalTerminalSpawn } from './resolve-local-terminal'
 import { findGitBashExe, setPortableNodeDir } from './shell-env'
-import { listCondaEnvs, resolveProjectCondaEnv, wrapInteractiveShellWithCondaActivate } from './conda-env'
+import { listCondaEnvs, listCondaEnvsForNotebookKernel, resolveProjectCondaEnv, wrapInteractiveShellWithCondaActivate } from './conda-env'
+import { NotebookKernelManager } from './notebook-kernel'
+import { parseNotebookExecuteIpc } from '../shared/notebook-execute'
+import { safeWebContentsSend } from './safe-ipc-send'
 import type { CondaEnvInfo } from '../shared/conda'
 import { resolveSafeProjectPath } from './project-fs-path'
 import {
@@ -172,6 +182,7 @@ export class AppRuntime {
   private readonly notesStorage = new NotesStorage(CONFIG_DIR)
   private readonly paletteFrecencyStorage = new PaletteFrecencyStorage(CONFIG_DIR)
   private readonly ptyManager = new PtyManager()
+  private readonly notebookKernels = new NotebookKernelManager()
   private readonly hookServer = new HookServer((message) => this.logDebug(message))
   private readonly codexSessionManager = new CodexSessionManager()
   private readonly workspaceManager = new WorkspaceManager()
@@ -242,6 +253,9 @@ export class AppRuntime {
     this.logDebug(`start hookPort=${this.hookServer.getPort()}`)
     this.hookInjector = new HookInjector(this.hookServer.getPort(), this.hookServer.getToken())
     this.sshManager = new SshConnectionManager(path.join(CONFIG_DIR, 'ssh'), this.hookServer.getPort())
+    this.notebookKernels.onEvent((tabId, event) => {
+      this.broadcastToAllWindows('notebook-kernel-event', tabId, event)
+    })
     this.registerEventForwarders()
     this.registerIpcHandlers()
   }
@@ -464,6 +478,7 @@ export class AppRuntime {
       this.scrollbackStorage.save(tabId, runtime.scrollback)
     }
     this.ptyManager.killAll()
+    this.notebookKernels.shutdownAll()
     this.hookInjector.cleanupAll()
     await this.hookServer.stop()
     await this.sshManager.disconnectAll().catch(() => {})
@@ -929,6 +944,53 @@ export class AppRuntime {
 
     ipcMain.on('pty-kill', (_event, id: string) => {
       this.killPty(id)
+    })
+
+    ipcMain.handle(
+      'notebook-kernel-start',
+      (
+        _event,
+        tabId: string,
+        projectId: string,
+        cwd: string,
+        condaOverride?: NotebookKernelCondaOverride | null
+      ): Promise<{ error?: string; code?: string }> => {
+        return this.startNotebookKernel(tabId, projectId, cwd, condaOverride)
+      }
+    )
+    ipcMain.handle(
+      'notebook-kernel-execute',
+      (_event, tabId: unknown, requestId: unknown, code: unknown, cellId?: unknown): { error?: string } => {
+        const parsed = parseNotebookExecuteIpc(tabId, requestId, code, cellId)
+        if (!parsed.ok) return { error: parsed.error }
+        return this.notebookKernels.execute(
+          parsed.value.tabId,
+          parsed.value.requestId,
+          parsed.value.code,
+          parsed.value.cellId
+        )
+      }
+    )
+    ipcMain.handle('notebook-kernel-interrupt', (_event, tabId: string) => {
+      this.notebookKernels.interrupt(tabId)
+      return undefined
+    })
+    ipcMain.handle(
+      'notebook-kernel-restart',
+      (
+        _event,
+        tabId: string,
+        projectId: string,
+        cwd: string,
+        condaOverride?: NotebookKernelCondaOverride | null
+      ): Promise<{ error?: string; code?: string }> => {
+        this.notebookKernels.shutdown(tabId)
+        return this.startNotebookKernel(tabId, projectId, cwd, condaOverride)
+      }
+    )
+    ipcMain.handle('notebook-kernel-shutdown', (_event, tabId: string) => {
+      this.notebookKernels.shutdown(tabId)
+      return undefined
     })
 
     ipcMain.handle('workspace-list-branches', async (_event, request: WorkspaceListBranchesRequest) => {
@@ -1413,6 +1475,68 @@ export class AppRuntime {
     return resolved
   }
 
+  private async startNotebookKernel(
+    tabId: string,
+    projectId: string,
+    cwd: string,
+    condaOverride?: NotebookKernelCondaOverride | null
+  ): Promise<{ error?: string; code?: string }> {
+    const project = this.projectsStore.peek().projects.find((item) => item.id === projectId)
+    if (!project) return { error: 'Project not found.', code: 'no-project' }
+    if (isRemoteProject(project)) {
+      this.broadcastToAllWindows('notebook-kernel-event', tabId, {
+        event: 'fail',
+        code: 'remote',
+        message: NOTEBOOK_ERROR_REMOTE
+      })
+      return { error: NOTEBOOK_ERROR_REMOTE, code: 'remote' }
+    }
+    if (isShellCommandProject(project)) {
+      this.broadcastToAllWindows('notebook-kernel-event', tabId, {
+        event: 'fail',
+        code: 'shell-project',
+        message: NOTEBOOK_ERROR_SHELL_PROJECT
+      })
+      return { error: NOTEBOOK_ERROR_SHELL_PROJECT, code: 'shell-project' }
+    }
+    const cwdResult = resolveNotebookKernelCwd(cwd, notebookAllowedCwdRoots(project))
+    if (!cwdResult.ok) {
+      this.broadcastToAllWindows('notebook-kernel-event', tabId, {
+        event: 'fail',
+        code: 'cwd',
+        message: cwdResult.error
+      })
+      return { error: cwdResult.error, code: 'cwd' }
+    }
+    const override = condaOverride
+      ? { condaEnvName: condaOverride.name, condaEnvPrefix: condaOverride.prefix }
+      : null
+    const hasOverride = !!(override?.condaEnvName?.trim() || override?.condaEnvPrefix?.trim())
+    // Override: live conda list only. No override: existing project-default resolve.
+    const listedEnvs = hasOverride ? await listCondaEnvsForNotebookKernel() : []
+    const projectResolved = hasOverride ? null : resolveProjectCondaEnv(project)
+    const resolved = resolveNotebookKernelCondaEnv(
+      override,
+      project,
+      listedEnvs,
+      projectResolved,
+      process.platform
+    )
+    if (!resolved.ok) {
+      this.broadcastToAllWindows('notebook-kernel-event', tabId, {
+        event: 'fail',
+        code: resolved.code,
+        message: resolved.error
+      })
+      return { error: resolved.error, code: resolved.code }
+    }
+    const condaEnv = resolved.env ?? undefined
+    this.logDebug(
+      `notebookKernelStart tabId=${tabId} projectId=${projectId} cwd=${cwdResult.cwd} conda=${condaEnv?.name ?? ''} prefix=${condaEnv?.prefix ?? ''}`
+    )
+    return this.notebookKernels.start(tabId, condaEnv, cwdResult.cwd)
+  }
+
   private killPty(id: string): void {
     this.logDebug(`ptyKill id=${id}`)
     const runtime = this.ptyRuntimes.get(id)
@@ -1421,6 +1545,7 @@ export class AppRuntime {
     }
     this.ptyManager.kill(id)
     this.ptyRuntimes.delete(id)
+    this.notebookKernels.shutdown(id)
     // No process, no activity: a status left at 'working' here would protect the
     // task from cleanup for the rest of the session.
     this.activityRegistry.remove(id)
@@ -1465,9 +1590,7 @@ export class AppRuntime {
 
   private broadcastToAllWindows(channel: string, ...args: unknown[]): void {
     for (const window of this.windows.values()) {
-      if (!window.isDestroyed()) {
-        window.webContents.send(channel, ...args)
-      }
+      safeWebContentsSend(window, channel, ...args)
     }
   }
 
@@ -1480,9 +1603,7 @@ export class AppRuntime {
     if (!runtime) return
     for (const windowId of runtime.attachedWindowIds) {
       const window = this.windows.get(windowId)
-      if (window && !window.isDestroyed()) {
-        window.webContents.send(channel, ...args)
-      }
+      if (window) safeWebContentsSend(window, channel, ...args)
     }
   }
 }

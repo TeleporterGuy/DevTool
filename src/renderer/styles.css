@@ -78,6 +78,7 @@
 }
 
 .theme-light {
+  color-scheme: light;
   --color-bg: #faf8f3;
   --color-surface: #f6f4ef;
   --color-surface-2: #efece5;
@@ -121,6 +122,9 @@
 
     --motion-fast: 120ms;
     --motion-med: 150ms;
+
+    /* Native form chrome (Windows <select> popup) follows this when Chromium honors it. */
+    color-scheme: dark;
   }
 
   * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -200,6 +204,37 @@
   .note-preview img { max-width: 100%; height: auto; border-radius: 4px; }
 
   .note-preview input[type="checkbox"] { margin-right: 6px; }
+
+  /* Notebook cells: denser than the Notes / editor markdown pane. */
+  .notebook-preview h1, .notebook-preview h2, .notebook-preview h3,
+  .notebook-preview h4, .notebook-preview h5, .notebook-preview h6 {
+    margin-top: 0.55em; margin-bottom: 0.3em;
+  }
+  .notebook-preview > *:first-child { margin-top: 0; }
+  .notebook-preview h1 { font-size: 1.25em; padding-bottom: 0; border-bottom: none; }
+  .notebook-preview h2 { font-size: 1.12em; padding-bottom: 0; border-bottom: none; }
+  .notebook-preview h3 { font-size: 1.05em; }
+  .notebook-preview h4 { font-size: 1em; }
+  .notebook-preview h5 { font-size: 0.95em; }
+  .notebook-preview h6 { font-size: 0.9em; }
+  .notebook-preview p, .notebook-preview ul, .notebook-preview ol { margin-bottom: 0.45em; }
+  .notebook-preview ul, .notebook-preview ol { padding-left: 1.25em; }
+  .notebook-preview blockquote { margin-bottom: 0.45em; padding: 4px 10px; }
+  .notebook-preview pre { margin-bottom: 0.5em; padding: 8px 10px; }
+  .notebook-preview pre code { font-size: 0.9em; }
+  .notebook-preview table { font-size: 0.9em; margin-bottom: 0.5em; }
+  .notebook-preview th, .notebook-preview td { padding: 4px 8px; }
+  .notebook-preview hr { margin: 8px 0; }
+
+  /* Idle notebook code cells reuse .note-preview hljs colors without a nested fence box. */
+  pre.notebook-code-preview > code {
+    padding: 0;
+    background: none;
+    border-radius: 0;
+    font-size: inherit;
+    font-family: inherit;
+    line-height: 1.5;
+  }
 
   /* highlight.js — dark theme */
   .note-preview .hljs-keyword, .note-preview .hljs-selector-tag, .note-preview .hljs-built_in { color: #c586c0; }

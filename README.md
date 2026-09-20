@@ -4,7 +4,7 @@ A desktop application for managing development workspaces. Organize projects, ta
 
 Built with Electron, React, and TypeScript.
 
-**This repository** is a fork of [join3r/claude-project](https://github.com/join3r/claude-project). join3r has said it may be forked and modified freely. All work stays on **this** repo ([TeleporterGuy/DevTool](https://github.com/TeleporterGuy/DevTool)); do not open PRs against upstream. Direction: Pi as the primary agent, primarily on Windows (Git Bash, portable Node, conda, Jupyter in an in-app browser tab). Language servers are parked. How to progress is in [ROADMAP.md](./ROADMAP.md). Company-deploy security snapshot: [SECURITY.md](./SECURITY.md).
+**This repository** is a fork of [join3r/claude-project](https://github.com/join3r/claude-project). join3r has said it may be forked and modified freely. All work stays on **this** repo ([TeleporterGuy/DevTool](https://github.com/TeleporterGuy/DevTool)); do not open PRs against upstream. Direction: Pi as the primary agent, primarily on Windows (Git Bash, portable Node, conda, native in-app `.ipynb` notebooks). Language servers are parked. How to progress is in [ROADMAP.md](./ROADMAP.md). Company-deploy security snapshot: [SECURITY.md](./SECURITY.md).
 
 ## Features
 
@@ -20,11 +20,13 @@ Built with Electron, React, and TypeScript.
 
 **Editor Tabs** -- Monaco editor with syntax highlighting, configurable fonts, line numbers, minimap, word wrap, and auto-save.
 
+**Notebook Tabs** -- Native `.ipynb` editor. Only the focused cell mounts Monaco; idle code cells are syntax-highlighted read-only previews (not live editors). Run cells against ipykernel in the project's default conda env, or a per-notebook override (`jupyter_client`). Stream text, plain/text, PNG, and errors. Local projects only.
+
 **Diff Viewer** -- Git diff visualization with side-by-side rendering and whitespace options.
 
 **AI Tool Integration** -- Dedicated tabs for Pi (primary), Claude Code, and Codex. Hook server enables bidirectional communication with AI tools running in terminals.
 
-**Conda environments** -- Pick a conda or micromamba env per local project (Project Settings). New Pi/Claude/Codex tabs prepend that env onto PATH (plus install `condabin`). New interactive terminals run a login shell, then `conda activate` for the project env (Windows Git Bash uses `--rcfile` so conda init in `.bash_profile` is not dropped). Already-open tabs keep their old env. DevTool does not create or delete envs.
+**Conda environments** -- Pick a conda or micromamba env per local project (Project Settings). New Pi/Claude/Codex tabs prepend that env onto PATH (plus install `condabin`). New interactive terminals run a login shell, then `conda activate` for the project env (Windows Git Bash uses `--rcfile` so conda init in `.bash_profile` is not dropped). Notebook tabs start ipykernel with the same env. Already-open tabs keep their old env. DevTool does not create or delete envs.
 
 **Remote SSH Projects** -- Connect to remote machines via SSH with port forwarding, SOCKS proxy tunneling, key authentication, health checks, and auto-reconnection.
 
@@ -141,7 +143,16 @@ npm run test:watch     # Run tests in watch mode
 npm run typecheck      # TypeScript (`tsc --noEmit`)
 ```
 
-Pull requests and pushes to `master` run those two commands on GitHub Actions (`ubuntu-latest`). That is unit/component coverage (Vitest), not a live Electron window or ConPTY. Live SSH (`DEMO_SSH=1`) is not enabled in CI. Windows-native rebuild of `node-pty` is not part of this job.
+Live notebook kernel smoke (real `jupyter_client` / ipykernel, no Electron window). Needs a conda env with those packages. Git Bash:
+
+```bash
+NOTEBOOK_LIVE=1 npm test -- tests/notebook-kernel.live.test.ts
+```
+
+Pull requests and pushes to `master` run typecheck + Vitest on GitHub Actions:
+
+- **ubuntu-latest** — unit/component coverage. Live kernel and live SSH (`DEMO_SSH=1`) stay skipped. Does not launch Electron or ConPTY.
+- **windows-latest** — same unit suite, plus live kernel smoke (`NOTEBOOK_LIVE_REQUIRED=1`) after Miniconda + `ipykernel` / `jupyter_client`. Skips Electron/`node-pty` native rebuild (`npm ci --ignore-scripts`). Toolbar clicks and Monaco stay a human check on a Windows box.
 
 ## License
 

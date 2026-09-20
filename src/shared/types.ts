@@ -1,4 +1,4 @@
-export type TabType = 'terminal' | 'browser' | 'claude' | 'codex' | 'pi' | 'diff' | 'editor' | 'note' | 'home'
+export type TabType = 'terminal' | 'browser' | 'claude' | 'codex' | 'pi' | 'diff' | 'editor' | 'notebook' | 'note' | 'home'
 
 export const AI_TAB_TYPES = ['claude', 'codex', 'pi'] as const
 export type AiTabType = typeof AI_TAB_TYPES[number]

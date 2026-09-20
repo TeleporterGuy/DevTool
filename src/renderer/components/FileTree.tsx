@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react'
 import type { DirectoryEntry, GitStatusResult, GitFileStatus } from '../../shared/types'
-import { ChevronRight, Folder, FileText } from 'lucide-react'
+import { ChevronRight, Folder, FileText, BookText } from 'lucide-react'
 import { FILE_BROWSER_REFRESH_MS } from '../hooks/fileBrowserRefresh'
 import { posixRelativeJoin } from '../../shared/workspace-path'
+import { isNotebookFile } from '../../shared/notebook'
 
 interface Props {
   projectDir: string
@@ -205,7 +206,9 @@ function TreeNode({
         </span>
         {isDirectory
           ? <Folder size={12} className="mr-1.5 text-text-muted shrink-0" />
-          : <FileText size={12} className="mr-1.5 text-text-muted shrink-0" />
+          : isNotebookFile(entry.name)
+            ? <BookText size={12} className="mr-1.5 text-text-muted shrink-0" />
+            : <FileText size={12} className="mr-1.5 text-text-muted shrink-0" />
         }
         {renaming ? (
           <DraftInput

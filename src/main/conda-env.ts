@@ -154,6 +154,18 @@ export function isCondaEnvPrefix(prefix: string, deps: CondaEnvDeps = {}): boole
   )
 }
 
+/** python.exe / python in the env prefix. Null when the env has no interpreter. */
+export function condaPythonExecutable(prefix: string, deps: CondaEnvDeps = {}): string | null {
+  const trimmed = prefix.trim()
+  if (!trimmed) return null
+  const pathMod = pathOf(deps)
+  const existsSync = existsOf(deps)
+  const candidates = platformOf(deps) === 'win32'
+    ? [pathMod.join(trimmed, 'python.exe'), pathMod.join(trimmed, 'Scripts', 'python.exe')]
+    : [pathMod.join(trimmed, 'bin', 'python'), pathMod.join(trimmed, 'bin', 'python3')]
+  return candidates.find((file) => existsSync(file)) ?? null
+}
+
 function readDirNames(dir: string, deps: CondaEnvDeps = {}): string[] {
   try {
     if (deps.readdirSync) return deps.readdirSync(dir)
@@ -208,6 +220,11 @@ export function extraCondaCandidateFiles(deps: CondaEnvDeps = {}): string[] {
       )
     }
     roots.push(
+      // Silent / GHA Miniconda often lands at C:\Miniconda (not Miniconda3).
+      'C:\\Miniconda',
+      'C:\\Miniconda3',
+      'C:\\Miniforge3',
+      'C:\\mambaforge',
       'C:\\ProgramData\\miniconda3',
       'C:\\ProgramData\\anaconda3',
       'C:\\ProgramData\\miniforge3',
@@ -482,6 +499,22 @@ export async function listCondaEnvs(
   }
   cachedList = result
   return result
+}
+
+/**
+ * Kernel start/restart must not use the startup cache.
+ * Same `{ force: true }` as the toolbar picker (`conda-list-envs`).
+ * Newly created envs appear; deleted envs fail closed.
+ */
+export async function listCondaEnvsForNotebookKernel(
+  listEnvs: (
+    deps?: CondaEnvDeps,
+    options?: { force?: boolean }
+  ) => Promise<CondaListResult> = listCondaEnvs,
+  deps: CondaEnvDeps = {}
+): Promise<CondaEnvInfo[]> {
+  const result = await listEnvs(deps, { force: true })
+  return result.envs
 }
 
 /**

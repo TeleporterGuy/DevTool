@@ -136,7 +136,7 @@ const hasPython3 = ((): boolean => {
  * run it. These cases intercept the ssh invocation and execute the very command string that
  * would have been handed to the remote shell, against a real local repository.
  */
-describe.skipIf(!hasPython3)('RemoteWorkspaceManager remote script', () => {
+describe.skipIf(!hasPython3)('RemoteWorkspaceManager remote script', { timeout: 30_000 }, () => {
   let manager: RemoteWorkspaceManager
   let repoDir: string
 

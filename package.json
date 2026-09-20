@@ -1,6 +1,6 @@
 {
   "name": "devtool",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "Development workspace manager",
   "main": "out/main/index.js",
   "private": true,
@@ -14,6 +14,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.typecheck.json",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:notebook-live": "vitest run tests/notebook-kernel.live.test.ts",
     "postinstall": "node scripts/ensure-electron.mjs && npx @electron/rebuild -m . && node scripts/patch-dev-electron-plist.mjs"
   },
   "build": {
@@ -29,6 +30,7 @@
     ],
     "asarUnpack": [
       "out/main/pi-status-extension.mjs",
+      "out/main/notebook-kernel.py",
       "node_modules/node-pty/**"
     ],
     "mac": {

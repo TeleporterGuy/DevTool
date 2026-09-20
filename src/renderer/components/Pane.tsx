@@ -6,9 +6,11 @@ import BrowserTab from './BrowserTab'
 import AiToolTab from './AiToolTab'
 import DiffTab from './DiffTab'
 import EditorTab from './EditorTab'
+import NotebookTab from './NotebookTab'
 import NoteTab from './NoteTab'
 import { ProjectHome } from './ProjectHome'
 import { AI_TAB_TYPES } from '../../shared/types'
+import { isNotebookFile } from '../../shared/notebook'
 import type { Tab, AiTabType, SshConfig, ShellCommandConfig } from '../../shared/types'
 import type { PaneSide } from './paneFocus'
 import type { TabDragState, TabDropTarget } from './tabDrag'
@@ -137,6 +139,19 @@ export default function Pane({
                 visible={taskVisible && tab.id === activeTabId}
                 filePath={tab.filePath}
                 projectDir={projectDir}
+                effectiveTheme={effectiveTheme}
+              />
+            )
+          }
+          if (tab.filePath && (tab.type === 'notebook' || (tab.type === 'editor' && isNotebookFile(tab.filePath)))) {
+            return (
+              <NotebookTab
+                key={tab.id}
+                tabId={tab.id}
+                visible={taskVisible && tab.id === activeTabId}
+                filePath={tab.filePath}
+                projectDir={projectDir}
+                projectId={projectId}
                 effectiveTheme={effectiveTheme}
               />
             )

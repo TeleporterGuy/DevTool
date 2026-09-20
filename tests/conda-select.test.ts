@@ -6,7 +6,8 @@ import {
   condaSavedOptionLabel,
   condaSavedOptionVisible,
   condaSelectValue,
-  lastPathSegment
+  lastPathSegment,
+  listedCondaEnvForSelection
 } from '../src/shared/conda'
 
 const envs = [
@@ -71,5 +72,35 @@ describe('conda select helpers', () => {
         'win32'
       )
     ).toEqual([])
+  })
+})
+
+describe('listedCondaEnvForSelection', () => {
+  it('matches a live prefix, including Windows case-insensitive unique prefix', () => {
+    expect(
+      listedCondaEnvForSelection(envs, { condaEnvName: 'ml', condaEnvPrefix: 'D:\\other\\envs\\ml' }, 'win32')
+    ).toEqual(envs[2])
+    expect(
+      listedCondaEnvForSelection(
+        [{ name: 'ml', prefix: 'D:\\envs\\ML' }],
+        { condaEnvPrefix: 'd:\\envs\\ml' },
+        'win32'
+      )
+    ).toEqual({ name: 'ml', prefix: 'D:\\envs\\ML' })
+  })
+
+  it('matches a unique name only when no prefix is saved', () => {
+    const unique = [envs[0], envs[1]]
+    expect(listedCondaEnvForSelection(unique, { condaEnvName: 'ml' }, 'win32')).toEqual(envs[1])
+  })
+
+  it('returns null for an unlisted prefix even if the name exists in the list', () => {
+    expect(
+      listedCondaEnvForSelection(
+        envs,
+        { condaEnvName: 'base', condaEnvPrefix: 'D:\\not-listed\\python-folder' },
+        'win32'
+      )
+    ).toBeNull()
   })
 })

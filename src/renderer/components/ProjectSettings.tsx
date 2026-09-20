@@ -10,7 +10,8 @@ import {
 } from '../../shared/conda'
 import { useApp } from '../context/AppContext'
 import TagPicker from './TagPicker'
-import { Modal, SetBlock, Field, Select, HelperText, PrimaryButton } from './ui'
+import { Modal, SetBlock, Field, HelperText, PrimaryButton } from './ui'
+import ThemedSelect from './ThemedSelect'
 import {
   dashboardIconUrl,
   fetchDashboardIconsMetadata,
@@ -172,23 +173,20 @@ export default function ProjectSettings({ project, onSave, onClose }: Props): Re
 
       {canPickConda && (
         <SetBlock label="Conda environment">
-          <Select
+          <ThemedSelect
             className="w-full"
             value={condaValue}
-            onChange={(e) => setCondaValue(e.target.value)}
+            onChange={setCondaValue}
             disabled={condaLoading}
             aria-label="Conda environment"
-          >
-            <option value="">None (default PATH)</option>
-            {condaSavedOptionVisible(condaValue, condaEnvs) && (
-              <option value={condaValue}>{condaSavedOptionLabel(condaValue, project.condaEnvName)}</option>
-            )}
-            {condaEnvs.map((env) => (
-              <option key={env.prefix} value={env.prefix}>
-                {env.name}
-              </option>
-            ))}
-          </Select>
+            options={[
+              { value: '', label: 'None (default PATH)' },
+              ...(condaSavedOptionVisible(condaValue, condaEnvs)
+                ? [{ value: condaValue, label: condaSavedOptionLabel(condaValue, project.condaEnvName) }]
+                : []),
+              ...condaEnvs.map((env) => ({ value: env.prefix, label: env.name }))
+            ]}
+          />
           <HelperText>
             {condaLoading
               ? 'Looking for conda envs…'

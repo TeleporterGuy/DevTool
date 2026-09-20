@@ -13,7 +13,8 @@ import {
   pinnedItemKey,
   pruneUnusedTags,
   reconcileTaskViewState,
-  reconcileWindowViewState
+  reconcileWindowViewState,
+  DEFAULT_CONFIG
 } from '../../shared/types'
 import type {
   NotesRecord,
@@ -37,6 +38,7 @@ import type {
   FileBrowserTab
 } from '../../shared/types'
 import { applyQueuedStateUpdates, persistSelectionState, type StateUpdater } from './stateHydration'
+import { isNotebookFile } from '../../shared/notebook'
 import { RevisionSyncClient } from './revisionSync'
 import { resolveLandingTaskId } from './taskNavigation'
 import { backfillLifetimeStats, incrementLifetimeStat } from './lifetimeStats'
@@ -49,6 +51,7 @@ import {
 import { createInteractionStampGate } from '../components/taskRecency'
 import { createTab, type CreateTabOptions } from '../components/newTaskTabs'
 import { useDirtyBufferStore, type DirtyBuffer } from '../context/DirtyBufferContext'
+import { nextEditorFontSize } from '../components/zoom'
 
 export type ProjectUpdate = Partial<Pick<Project, 'directory' | 'aiToolArgs' | 'condaEnvName' | 'condaEnvPrefix' | 'tunnel' | 'emoji' | 'icon' | 'tagIds'>>
 type AddTabOptions = CreateTabOptions
@@ -311,13 +314,15 @@ export function useAppState() {
   }, [settleDirtyPrompt])
 
   useEffect(() => {
+    const api = window.api
+    if (!api) return undefined
     let cancelled = false
 
     Promise.all([
-      window.api.loadProjects(),
-      window.api.loadConfig(),
-      window.api.loadWindowState(),
-      window.api.notesLoad()
+      api.loadProjects(),
+      api.loadConfig(),
+      api.loadWindowState(),
+      api.notesLoad()
     ]).then(([loadedProjects, loadedConfig, loadedWindowViewState, loadedNotesEnvelope]) => {
       if (cancelled) return
 
@@ -361,13 +366,13 @@ export function useAppState() {
       if (notesSync.hasPending()) notesSync.requestSave(loadedNotes)
     })
 
-    void window.api.getNativeTheme().then(setTheme)
-    window.api.onThemeChanged(setTheme)
+    void api.getNativeTheme().then(setTheme)
+    api.onThemeChanged(setTheme)
 
     // Canonical state, not a mutation: it is adopted rather than pushed through
     // `mutateProjects`. Anything of ours that main has not acknowledged yet is
     // replayed on top so another window's save cannot swallow it.
-    const cleanupProjects = window.api.onProjectsUpdated((envelope) => {
+    const cleanupProjects = api.onProjectsUpdated((envelope) => {
       if (cancelled) return
       const projectsWithLifetime = envelope.data.projects.map(p =>
         backfillLifetimeStats(p, notesRef.current)
@@ -391,7 +396,7 @@ export function useAppState() {
       if (projectsSync.hasPending()) projectsSync.requestSave(next)
     })
 
-    const cleanupNotes = window.api.onNotesUpdated((envelope) => {
+    const cleanupNotes = api.onNotesUpdated((envelope) => {
       if (cancelled) return
       const next = notesSync.applyBroadcast(envelope.revision, envelope.data)
       if (next === null) return
@@ -399,7 +404,7 @@ export function useAppState() {
       setNotes(next)
     })
 
-    const cleanupConfig = window.api.onConfigUpdated((updatedConfig) => {
+    const cleanupConfig = api.onConfigUpdated((updatedConfig) => {
       if (cancelled) return
       const serialized = JSON.stringify(updatedConfig)
       if (serialized === lastSavedConfigJsonRef.current) return
@@ -421,13 +426,15 @@ export function useAppState() {
    * safeguard rather than a prompt — and main cannot see one on its own.
    */
   useEffect(() => {
+    const api = window.api
+    if (!api) return undefined
     let lastReported = ''
     const report = () => {
       const tabIds = dirtyBuffers.getDirtyTabs().map(buffer => buffer.tabId).sort()
       const serialized = JSON.stringify(tabIds)
       if (serialized === lastReported) return
       lastReported = serialized
-      void window.api.reportDirtyTabs(tabIds).catch(() => {})
+      void api.reportDirtyTabs(tabIds).catch(() => {})
     }
     report()
     return dirtyBuffers.subscribe(report)
@@ -440,14 +447,16 @@ export function useAppState() {
    * tabs, and this window's own view state.
    */
   useEffect(() => {
-    return window.api.onTasksRemoved(({ taskId, tabIds }) => {
+    const api = window.api
+    if (!api) return undefined
+    return api.onTasksRemoved(({ taskId, tabIds }) => {
       for (const tabId of tabIds) {
         window.dispatchEvent(new CustomEvent('tab-removed', { detail: { tabId } }))
       }
       // Disposing a live xterm writes its buffer back synchronously, which would
       // put back the scrollback file main just deleted.
       for (const tabId of tabIds) {
-        void window.api.scrollbackDelete(tabId)
+        void api.scrollbackDelete(tabId)
       }
       updateWindowViewState(prev => {
         if (!(taskId in prev.taskStates) && prev.selectedTaskId !== taskId) return prev
@@ -484,23 +493,27 @@ export function useAppState() {
   }, [projectsData, projectsSync])
 
   useEffect(() => {
+    const api = window.api
+    if (!api) return
     if (!configLoadedRef.current || !config) return
 
     const serialized = JSON.stringify(config)
     if (serialized === lastSavedConfigJsonRef.current) return
 
     lastSavedConfigJsonRef.current = serialized
-    void window.api.saveConfig(config)
+    void api.saveConfig(config)
   }, [config])
 
   useEffect(() => {
+    const api = window.api
+    if (!api) return
     if (!windowStateLoadedRef.current) return
 
     const serialized = JSON.stringify(windowViewState)
     if (serialized === lastSavedWindowStateJsonRef.current) return
 
     lastSavedWindowStateJsonRef.current = serialized
-    void window.api.saveWindowState(windowViewState)
+    void api.saveWindowState(windowViewState)
   }, [windowViewState])
 
   useEffect(() => {
@@ -544,11 +557,13 @@ export function useAppState() {
   ])
 
   useEffect(() => {
+    const api = window.api
+    if (!api) return
     const selectedProjectId = windowViewState.selectedProjectId
     if (!selectedProjectId || projects.length === 0) return
     const project = projects.find(p => p.id === selectedProjectId)
     if (project && isRemoteProject(project) && project.ssh) {
-      window.api.sshStatus(selectedProjectId).then(status => {
+      api.sshStatus(selectedProjectId).then(status => {
         if (status !== 'connected' && status !== 'connecting') {
           connectSsh(selectedProjectId, project.ssh!).catch(() => {})
         }
@@ -1634,6 +1649,12 @@ export function useAppState() {
     })
   }, [])
 
+  const zoomEditor = useCallback((direction: 'in' | 'out' | 'reset') => {
+    updateConfig({
+      editorFontSize: nextEditorFontSize(config?.editorFontSize ?? DEFAULT_CONFIG.editorFontSize, direction)
+    })
+  }, [config?.editorFontSize, updateConfig])
+
   const writeSidebarToCurrentTask = useCallback((
     prev: WindowViewState,
     patch: { fileBrowserOpen?: boolean; fileBrowserActiveTab?: FileBrowserTab }
@@ -1726,7 +1747,7 @@ export function useAppState() {
     if (!task) return
 
     const existingTab = [...task.tabs.left, ...task.tabs.right].find(
-      t => t.type === 'editor' && t.filePath === filePath
+      t => (t.type === 'editor' || t.type === 'notebook') && t.filePath === filePath
     )
     if (existingTab) {
       const existingPane = task.tabs.left.includes(existingTab) ? 'left' : 'right'
@@ -1734,7 +1755,7 @@ export function useAppState() {
       return
     }
 
-    addTab(projectId, taskId, pane, 'editor', filePath)
+    addTab(projectId, taskId, pane, isNotebookFile(filePath) ? 'notebook' : 'editor', filePath)
   }, [addTab, setActiveTab])
 
   const createNote = useCallback((projectId: string, name: string): ProjectNote => {
@@ -2004,6 +2025,7 @@ export function useAppState() {
     browserZoomFactor,
     zoomTerminal,
     zoomBrowser,
+    zoomEditor,
     fileBrowserOpen: windowViewState.fileBrowserOpen,
     fileBrowserWidth: windowViewState.fileBrowserWidth,
     fileBrowserActiveTab: windowViewState.fileBrowserActiveTab,

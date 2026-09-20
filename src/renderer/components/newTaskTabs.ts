@@ -31,7 +31,9 @@ export function createTab(type: TabType, options: CreateTabOptions = {}): Tab {
     const folder = cwd.replace(/[\\/]+$/, '').split(/[\\/]/).pop() ?? 'Terminal'
     title = folder
   } else {
-    title = isAi ? AI_TAB_META[type as AiTabType].label : (type === 'terminal' ? 'Terminal' : 'Browser')
+    title = isAi
+      ? AI_TAB_META[type as AiTabType].label
+      : (type === 'terminal' ? 'Terminal' : type === 'notebook' ? 'Notebook' : 'Browser')
   }
   return {
     id: uuid(),
