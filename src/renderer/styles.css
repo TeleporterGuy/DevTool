@@ -78,6 +78,7 @@
 }
 
 .theme-light {
+  color-scheme: light;
   --color-bg: #faf8f3;
   --color-surface: #f6f4ef;
   --color-surface-2: #efece5;
@@ -121,6 +122,9 @@
 
     --motion-fast: 120ms;
     --motion-med: 150ms;
+
+    /* Native form chrome (Windows <select> popup) follows this when Chromium honors it. */
+    color-scheme: dark;
   }
 
   * { margin: 0; padding: 0; box-sizing: border-box; }

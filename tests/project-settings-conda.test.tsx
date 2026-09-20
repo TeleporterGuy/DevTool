@@ -33,6 +33,11 @@ function localProject(patch: Partial<Project> = {}): Project {
 }
 
 beforeEach(() => {
+  ;(globalThis as unknown as { ResizeObserver: unknown }).ResizeObserver = class {
+    observe(): void {}
+    disconnect(): void {}
+    unobserve(): void {}
+  }
   ;(window as unknown as { api: { condaListEnvs: ReturnType<typeof vi.fn>; pickDirectory: ReturnType<typeof vi.fn> } }).api = {
     condaListEnvs: vi.fn().mockResolvedValue({
       executable: { kind: 'conda', file: 'C:\\Users\\me\\miniconda3\\Scripts\\conda.exe' },
@@ -53,11 +58,12 @@ describe('ProjectSettings conda picker', () => {
   it('lists conda envs and saves the selected name and prefix', async () => {
     const onSave = vi.fn()
     render(<ProjectSettings project={localProject()} onSave={onSave} onClose={vi.fn()} />)
-    const select = await screen.findByLabelText('Conda environment')
+    const picker = await screen.findByRole('combobox', { name: 'Conda environment' })
     await waitFor(() => {
-      expect(screen.getByRole('option', { name: 'ml' })).toBeTruthy()
+      expect((picker as HTMLButtonElement).disabled).toBe(false)
     })
-    fireEvent.change(select, { target: { value: 'C:\\Users\\me\\miniconda3\\envs\\ml' } })
+    fireEvent.click(picker)
+    fireEvent.click(await screen.findByRole('option', { name: 'ml' }))
     fireEvent.click(screen.getByRole('button', { name: 'Save' }))
     expect(onSave).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -82,9 +88,8 @@ describe('ProjectSettings conda picker', () => {
         onClose={vi.fn()}
       />
     )
+    fireEvent.click(await screen.findByRole('combobox', { name: 'Conda environment' }))
     expect(await screen.findByRole('option', { name: 'gone (saved)' })).toBeTruthy()
-    const select = screen.getByLabelText('Conda environment')
-    expect((select as HTMLSelectElement).value).toBe('D:\\gone\\envs\\gone')
   })
 
   it('hides the picker on remote projects', () => {

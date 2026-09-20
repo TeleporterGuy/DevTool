@@ -49,6 +49,7 @@ import { useDirtyBufferStore } from '../context/DirtyBufferContext'
 import { FILE_BROWSER_REFRESH_MS } from '../hooks/fileBrowserRefresh'
 import NotebookCellView from './NotebookCell'
 import { scheduleResumeAfterNotebookReorder } from './notebookCellEditor'
+import ThemedSelect from './ThemedSelect'
 import { formatShortcutForApp } from '../../shared/shortcut-label'
 
 interface Props {
@@ -580,33 +581,35 @@ export default function NotebookTab({
         >
           <span className="inline-flex items-center gap-1"><Eraser size={12} /> Clear outputs</span>
         </button>
-        <label
-          className="ml-2 inline-flex items-center gap-1 h-(--ctl-h-sm) max-w-[18rem] min-w-[8rem] pl-1.5 pr-0.5 rounded-md bg-field border border-border shrink-0 cursor-pointer focus-within:border-border-focus"
+        <ThemedSelect
+          className="ml-2 max-w-[18rem] min-w-[8rem] shrink-0"
+          size="sm"
+          value={condaValue}
+          disabled={!doc}
+          aria-label={envControlTitle}
           title={envControlHint}
-        >
-          <span
-            className="w-1.5 h-1.5 rounded-full shrink-0"
-            style={{ background: statusColor }}
-            aria-hidden
-          />
-          <select
-            className="h-full min-w-0 flex-1 max-w-full px-0.5 border-0 bg-transparent text-2xs text-text cursor-pointer outline-none disabled:opacity-40"
-            value={condaValue}
-            onChange={(e) => onCondaChange(e.target.value)}
-            disabled={!doc}
-            aria-label={envControlTitle}
-          >
-            <option value="">{projectDefaultOptionLabel}</option>
-            {condaSavedOptionVisible(condaValue, condaEnvs) && (
-              <option value={condaValue}>
-                {condaSavedOptionLabel(condaValue, condaOverride?.condaEnvName ?? envLabel ?? undefined)}
-              </option>
-            )}
-            {condaEnvs.map((env) => (
-              <option key={env.prefix} value={env.prefix}>{env.name}</option>
-            ))}
-          </select>
-        </label>
+          onChange={onCondaChange}
+          leading={(
+            <span
+              className="w-1.5 h-1.5 rounded-full shrink-0"
+              style={{ background: statusColor }}
+              aria-hidden
+            />
+          )}
+          options={[
+            { value: '', label: projectDefaultOptionLabel },
+            ...(condaSavedOptionVisible(condaValue, condaEnvs)
+              ? [{
+                  value: condaValue,
+                  label: condaSavedOptionLabel(
+                    condaValue,
+                    condaOverride?.condaEnvName ?? envLabel ?? undefined
+                  )
+                }]
+              : []),
+            ...condaEnvs.map((env) => ({ value: env.prefix, label: env.name }))
+          ]}
+        />
         <span className="ml-2 flex min-w-0 flex-1 items-center justify-end gap-1.5">
           <span className="min-w-0 truncate text-2xs text-text-subtle" title={filePath}>{filePath}</span>
           <span
