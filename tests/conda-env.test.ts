@@ -227,6 +227,8 @@ describe('findCondaExecutable', () => {
     expect(files).toContain('c:\\users\\me\\miniconda3\\scripts\\conda.exe')
     expect(files).toContain('c:\\programdata\\anaconda3\\scripts\\conda.exe')
     expect(files).toContain('c:\\users\\me\\appdata\\local\\miniconda3\\scripts\\conda.exe')
+    expect(files).toContain('c:\\miniconda\\scripts\\conda.exe')
+    expect(files).toContain('c:\\miniconda3\\scripts\\conda.exe')
   })
 })
 

@@ -220,6 +220,11 @@ export function extraCondaCandidateFiles(deps: CondaEnvDeps = {}): string[] {
       )
     }
     roots.push(
+      // Silent / GHA Miniconda often lands at C:\Miniconda (not Miniconda3).
+      'C:\\Miniconda',
+      'C:\\Miniconda3',
+      'C:\\Miniforge3',
+      'C:\\mambaforge',
       'C:\\ProgramData\\miniconda3',
       'C:\\ProgramData\\anaconda3',
       'C:\\ProgramData\\miniforge3',

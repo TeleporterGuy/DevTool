@@ -21,6 +21,47 @@ jobs:
           cache: npm
       # Full install so esbuild's platform binary is present. Tests do not
       # import electron or node-pty; DEMO_SSH is unset so live SSH stays skipped.
+      # NOTEBOOK_LIVE is unset so live jupyter smoke stays skipped (Windows job).
       - run: npm ci
       - run: npm run typecheck
       - run: npm test
+
+  test-windows:
+    runs-on: windows-latest
+    timeout-minutes: 35
+    env:
+      # Fail this job if conda / ipykernel / jupyter_client cannot be resolved.
+      NOTEBOOK_LIVE_REQUIRED: '1'
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - uses: conda-incubator/setup-miniconda@v3
+        with:
+          miniforge-variant: Miniforge3
+          miniforge-version: latest
+          python-version: '3.12'
+          activate-environment: notebook-smoke
+          auto-activate-base: false
+          conda-forge: true
+      - name: Install ipykernel and jupyter_client
+        shell: bash -el {0}
+        run: python -m pip install ipykernel jupyter_client
+      - name: Check jupyter in the conda env
+        shell: bash -el {0}
+        run: python -c "import jupyter_client, ipykernel; print('jupyter ok')"
+      # Skip Electron postinstall / node-pty rebuild (needs Spectre MSVC libs).
+      # Tests do not import electron or node-pty. esbuild still needs its binary.
+      - name: Install JS deps without native Electron rebuild
+        run: npm ci --ignore-scripts
+      - name: Download esbuild binary
+        run: node node_modules/esbuild/install.js
+      - name: Show Node
+        run: |
+          node -v
+          npm -v
+      - run: npm run typecheck
+      - name: Run unit tests and live kernel smoke
+        run: npm test

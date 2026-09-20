@@ -143,7 +143,16 @@ npm run test:watch     # Run tests in watch mode
 npm run typecheck      # TypeScript (`tsc --noEmit`)
 ```
 
-Pull requests and pushes to `master` run those two commands on GitHub Actions (`ubuntu-latest`). That is unit/component coverage (Vitest), not a live Electron window or ConPTY. Live SSH (`DEMO_SSH=1`) is not enabled in CI. Windows-native rebuild of `node-pty` is not part of this job.
+Live notebook kernel smoke (real `jupyter_client` / ipykernel, no Electron window). Needs a conda env with those packages. Git Bash:
+
+```bash
+NOTEBOOK_LIVE=1 npm test -- tests/notebook-kernel.live.test.ts
+```
+
+Pull requests and pushes to `master` run typecheck + Vitest on GitHub Actions:
+
+- **ubuntu-latest** — unit/component coverage. Live kernel and live SSH (`DEMO_SSH=1`) stay skipped. Does not launch Electron or ConPTY.
+- **windows-latest** — same unit suite, plus live kernel smoke (`NOTEBOOK_LIVE_REQUIRED=1`) after Miniconda + `ipykernel` / `jupyter_client`. Skips Electron/`node-pty` native rebuild (`npm ci --ignore-scripts`). Toolbar clicks and Monaco stay a human check on a Windows box.
 
 ## License
 

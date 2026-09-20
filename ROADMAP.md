@@ -299,7 +299,7 @@ Stay out of: full VS Code notebook parity (debug, variable explorer, collaborati
 
 **Remote SSH notebooks** are out of this PR (local projects only). Say so in the tab if you open an `.ipynb` on a remote project.
 
-**Verify:** unit tests for parse/serialize, kernel message handling (mocked), and conda python wiring. `npm test` + typecheck. Human check on Windows: conda env with `ipykernel` and `jupyter_client`, open a notebook, run a cell.
+**Verify:** unit tests for parse/serialize, kernel message handling (mocked), conda python wiring, and execute/run-queue helpers. GitHub Actions `ubuntu-latest` runs typecheck + Vitest (live kernel skipped). `windows-latest` installs Miniconda + `ipykernel`/`jupyter_client` and runs the same suite plus live helper smoke (`NOTEBOOK_LIVE_REQUIRED=1`): conda/`python.exe` resolve, real `jupyter_client` spawn, execute stdout, queued second cell (Run all / Run-above at the kernel gate), interrupt, restart. Still **manual on a Windows box:** Electron UI — toolbar Run all / per-cell Run all above buttons and tooltips, Monaco, collapse, conda picker chrome. Local live smoke (Git Bash): `NOTEBOOK_LIVE=1 npm test -- tests/notebook-kernel.live.test.ts` with those packages in a conda env.
 
 **Closeout:** `package.json` is **0.5.0**. Next is Phase 5 (packaging). LSP stays parked. Agent context links from editor/notebook stay parked (not a Phase 4 leftover).
 
