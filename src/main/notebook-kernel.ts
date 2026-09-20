@@ -1,4 +1,4 @@
-import { execFile, spawn, type ChildProcessWithoutNullStreams, type ExecFileException } from 'child_process'
+import { execFile, spawn, type ChildProcessWithoutNullStreams, type ExecFileException, type SpawnOptions } from 'child_process'
 import fs from 'fs'
 import path from 'path'
 import type { CondaEnvInfo } from '../shared/conda'
@@ -6,6 +6,8 @@ import { NotebookExecuteGate } from '../shared/notebook-execute'
 import {
   NOTEBOOK_ERROR_NO_CONDA,
   NOTEBOOK_ERROR_NO_PYTHON,
+  notebookExecuteTooLarge,
+  notebookExecuteTooLargeMessage,
   parseKernelEventLine,
   type NotebookKernelEvent
 } from '../shared/notebook'
@@ -83,6 +85,18 @@ export function prepareNotebookKernelSpawn(
 }
 
 export type NotebookKernelListener = (tabId: string, event: NotebookKernelEvent) => void
+
+/** Injected in tests so we can replace a session without a real Python. */
+export type NotebookKernelSpawnFn = (
+  command: string,
+  args: string[],
+  options: SpawnOptions
+) => ChildProcessWithoutNullStreams
+
+export interface NotebookKernelManagerDeps {
+  spawn?: NotebookKernelSpawnFn
+  prepare?: typeof prepareNotebookKernelSpawn
+}
 
 interface KernelSession {
   child: ChildProcessWithoutNullStreams
@@ -167,6 +181,15 @@ export function killProcessTree(
 export class NotebookKernelManager {
   private sessions = new Map<string, KernelSession>()
   private listener: NotebookKernelListener | null = null
+  private readonly spawnFn: NotebookKernelSpawnFn
+  private readonly prepareFn: typeof prepareNotebookKernelSpawn
+
+  constructor(deps: NotebookKernelManagerDeps = {}) {
+    this.spawnFn =
+      deps.spawn ??
+      ((command, args, options) => spawn(command, args, options) as ChildProcessWithoutNullStreams)
+    this.prepareFn = deps.prepare ?? prepareNotebookKernelSpawn
+  }
 
   onEvent(listener: NotebookKernelListener): void {
     this.listener = listener
@@ -176,13 +199,18 @@ export class NotebookKernelManager {
     this.listener?.(tabId, event)
   }
 
+  /** Same child-identity guard as exit: ignore a replaced session's I/O. */
+  private isActiveKernelChild(tabId: string, child: ChildProcessWithoutNullStreams): boolean {
+    return this.sessions.get(tabId)?.child === child
+  }
+
   start(
     tabId: string,
     condaEnv: CondaEnvInfo | null | undefined,
     cwd: string
   ): { error?: string; code?: string } {
     this.shutdown(tabId)
-    const prepared = prepareNotebookKernelSpawn(condaEnv, cwd)
+    const prepared = this.prepareFn(condaEnv, cwd)
     if (!prepared.ok) {
       this.emit(tabId, { event: 'fail', code: prepared.code, message: prepared.error })
       return { error: prepared.error, code: prepared.code }
@@ -190,7 +218,7 @@ export class NotebookKernelManager {
 
     this.emit(tabId, { event: 'status', execution_state: 'starting' })
 
-    const child = spawn(prepared.python, prepared.args, {
+    const child = this.spawnFn(prepared.python, prepared.args, {
       cwd: prepared.cwd,
       env: prepared.env,
       stdio: ['pipe', 'pipe', 'pipe'],
@@ -212,6 +240,7 @@ export class NotebookKernelManager {
     child.stderr.setEncoding('utf8')
 
     child.stdout.on('data', (chunk: string) => {
+      if (!this.isActiveKernelChild(tabId, child)) return
       session.buffer += chunk
       const lines = session.buffer.split('\n')
       session.buffer = lines.pop() ?? ''
@@ -230,6 +259,7 @@ export class NotebookKernelManager {
     })
 
     child.stderr.on('data', (chunk: string) => {
+      if (!this.isActiveKernelChild(tabId, child)) return
       const text = chunk.trim()
       if (text) {
         // Keep stderr for debugging; do not surface as cell output.
@@ -238,7 +268,8 @@ export class NotebookKernelManager {
     })
 
     child.on('exit', (code, signal) => {
-      if (this.sessions.get(tabId)?.child !== child) return
+      if (!this.isActiveKernelChild(tabId, child)) return
+      session.executeGate.clear()
       const kernelPid = session.kernelPid
       const helperPid = child.pid ?? null
       this.sessions.delete(tabId)
@@ -254,7 +285,8 @@ export class NotebookKernelManager {
     })
 
     child.on('error', (err) => {
-      if (this.sessions.get(tabId)?.child !== child) return
+      if (!this.isActiveKernelChild(tabId, child)) return
+      session.executeGate.clear()
       this.sessions.delete(tabId)
       this.emit(tabId, { event: 'fail', code: 'spawn', message: err.message || 'Could not start Python.' })
       this.emit(tabId, { event: 'status', execution_state: 'dead' })
@@ -269,6 +301,9 @@ export class NotebookKernelManager {
     code: string,
     cellId?: string
   ): { error?: string } {
+    if (notebookExecuteTooLarge(code)) {
+      return { error: notebookExecuteTooLargeMessage(code.length) }
+    }
     const session = this.sessions.get(tabId)
     if (!session) return { error: 'Kernel is not running. Click Restart kernel.' }
     const action = session.executeGate.submit({
@@ -283,6 +318,7 @@ export class NotebookKernelManager {
   interrupt(tabId: string): void {
     const session = this.sessions.get(tabId)
     if (!session) return
+    session.executeGate.clear()
     try {
       session.child.stdin.write(`${JSON.stringify({ cmd: 'interrupt' })}\n`)
     } catch {
@@ -293,6 +329,7 @@ export class NotebookKernelManager {
   shutdown(tabId: string): void {
     const session = this.sessions.get(tabId)
     if (!session) return
+    session.executeGate.clear()
     this.sessions.delete(tabId)
     this.forceShutdownSession(session)
   }

@@ -83,7 +83,9 @@ export class NotebookExecuteGate {
   }
 
   complete(requestId: string): PendingNotebookExecute | null {
-    if (this.inFlightId !== null && this.inFlightId !== requestId) {
+    // Must match the in-flight id. After interrupt/restart/death, clear()
+    // nulls inFlightId so a late execute_reply cannot dequeue leftover work.
+    if (this.inFlightId !== requestId) {
       return null
     }
     this.busy = false

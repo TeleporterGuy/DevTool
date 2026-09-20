@@ -67,6 +67,32 @@ export function uniqueCondaEnvForName(
 }
 
 /**
+ * Match a saved name/prefix only against `envs` (the live conda list).
+ * Prefix identity wins. An unlisted prefix does not fall through to name,
+ * so a stale `.ipynb` path cannot spawn a different env — or any Python.
+ */
+export function listedCondaEnvForSelection(
+  envs: CondaEnvInfo[],
+  selection: ProjectCondaSelection,
+  platform: string
+): CondaEnvInfo | null {
+  const prefix = selection.condaEnvPrefix?.trim() ?? ''
+  if (prefix) {
+    const exact = envs.find((env) => env.prefix === prefix)
+    if (exact) return exact
+    if (platform === 'win32') {
+      const folded = prefix.toLowerCase()
+      const insensitive = envs.filter((env) => env.prefix.toLowerCase() === folded)
+      if (insensitive.length === 1) return insensitive[0]
+    }
+    return null
+  }
+  const name = selection.condaEnvName?.trim() ?? ''
+  if (!name) return null
+  return uniqueCondaEnvForName(envs, name, platform)
+}
+
+/**
  * Dropdown value: saved prefix when present (unique even if two envs share a name).
  * Name-only legacy projects map to a prefix when the name is unique in `envs`.
  */

@@ -3,7 +3,12 @@
  * Parse/serialize stay in shared so renderer, main, and tests use one shape.
  */
 
-import { lastPathSegment, type CondaEnvInfo, type ProjectCondaSelection } from './conda'
+import {
+  lastPathSegment,
+  listedCondaEnvForSelection,
+  type CondaEnvInfo,
+  type ProjectCondaSelection
+} from './conda'
 
 export const NOTEBOOK_NBFORMAT = 4
 export const NOTEBOOK_NBFORMAT_MINOR = 5
@@ -57,6 +62,12 @@ export const NOTEBOOK_STREAM_CHAR_LIMIT = 200_000
 export const NOTEBOOK_MIME_CHAR_LIMIT = 1_500_000
 export const NOTEBOOK_TRUNCATED_MARKER = '\n[truncated]\n'
 export const NOTEBOOK_PNG_OMITTED = '[truncated: image/png omitted (too large)]'
+/**
+ * Max cell source length JSON'd to the jupyter_client helper.
+ * 1_000_000 chars (~1 MB) is well above normal notebooks; oversize is
+ * rejected with an error, not truncated.
+ */
+export const NOTEBOOK_EXECUTE_CHAR_LIMIT = 1_000_000
 
 export type NotebookKernelStatus = 'starting' | 'idle' | 'busy' | 'dead' | 'error'
 
@@ -77,6 +88,21 @@ export const NOTEBOOK_ERROR_MISSING_JUPYTER =
 
 export const NOTEBOOK_ERROR_CWD =
   'Notebook kernel cwd is outside this project.'
+
+export const NOTEBOOK_ERROR_STALE_CONDA =
+  "This notebook's saved conda env is not in the current conda list. Pick a listed env, then Restart kernel."
+
+export const NOTEBOOK_ERROR_EXECUTE_TOO_LARGE =
+  `Cell is too large to execute (limit is ${NOTEBOOK_EXECUTE_CHAR_LIMIT} characters).`
+
+/** True when cell source must not be sent to the helper. */
+export function notebookExecuteTooLarge(code: string): boolean {
+  return code.length > NOTEBOOK_EXECUTE_CHAR_LIMIT
+}
+
+export function notebookExecuteTooLargeMessage(length: number): string {
+  return `Cell is too large to execute (${length} characters; limit is ${NOTEBOOK_EXECUTE_CHAR_LIMIT}).`
+}
 
 /** Optional per-notebook conda override sent on kernel start/restart. */
 export type NotebookKernelCondaOverride = { name?: string; prefix?: string }
@@ -188,6 +214,8 @@ export function notebookKernelEnvControlTitle(
 /**
  * Live resolve result, or the saved name/prefix so spawn can fail closed
  * (stale override must not fall back to the project env).
+ * Used for the project-default path only. Notebook overrides must go through
+ * `resolveNotebookKernelCondaEnv` so an unlisted prefix cannot spawn.
  */
 export function condaEnvInfoForNotebookSpawn(
   selection: ProjectCondaSelection,
@@ -198,6 +226,37 @@ export function condaEnvInfoForNotebookSpawn(
   const name = selection.condaEnvName?.trim() ?? ''
   if (!prefix && !name) return null
   return { name: name || lastPathSegment(prefix), prefix }
+}
+
+export type NotebookKernelCondaResolve =
+  | { ok: true; env: CondaEnvInfo | null }
+  | { ok: false; code: 'stale-conda'; error: string }
+
+/**
+ * Override: match the live conda list only. Unlisted name/prefix fails closed
+ * (do not spawn that folder's python.exe, do not fall back to the project env).
+ * No override: project default, including `condaEnvInfoForNotebookSpawn`.
+ */
+export function resolveNotebookKernelCondaEnv(
+  override: ProjectCondaSelection | null | undefined,
+  project: ProjectCondaSelection,
+  listedEnvs: CondaEnvInfo[],
+  projectResolved: CondaEnvInfo | null,
+  platform: string
+): NotebookKernelCondaResolve {
+  const hasOverride = !!(override?.condaEnvName?.trim() || override?.condaEnvPrefix?.trim())
+  if (hasOverride) {
+    const listed = listedCondaEnvForSelection(listedEnvs, {
+      condaEnvName: override?.condaEnvName,
+      condaEnvPrefix: override?.condaEnvPrefix
+    }, platform)
+    if (!listed) {
+      return { ok: false, code: 'stale-conda', error: NOTEBOOK_ERROR_STALE_CONDA }
+    }
+    return { ok: true, env: listed }
+  }
+  const selection = notebookKernelCondaSelection(null, project)
+  return { ok: true, env: condaEnvInfoForNotebookSpawn(selection, projectResolved) }
 }
 
 export function isNotebookFile(filePath?: string | null): boolean {

@@ -1,7 +1,7 @@
 # JSON-lines bridge: DevTool main process <-> jupyter_client / ipykernel.
 # stdin commands, stdout events. Keep prints as JSON; diagnostics go to stderr.
 #
-# Stream / mime caps must stay in sync with src/shared/notebook.ts.
+# Stream / mime / execute caps must stay in sync with src/shared/notebook.ts.
 from __future__ import annotations
 
 import atexit
@@ -13,6 +13,8 @@ import traceback
 
 STREAM_CHAR_LIMIT = 200_000
 MIME_CHAR_LIMIT = 1_500_000
+# Max cell source chars (NOTEBOOK_EXECUTE_CHAR_LIMIT). Oversize is rejected, not truncated.
+EXECUTE_CHAR_LIMIT = 1_000_000
 TRUNCATED_MARKER = "\n[truncated]\n"
 PNG_OMITTED = "[truncated: image/png omitted (too large)]"
 
@@ -271,6 +273,27 @@ def handle_command(cmd):
         code = cmd.get("code") or ""
         cell_id = cmd.get("cellId") or ""
         if not req_id:
+            return
+        if not isinstance(code, str):
+            code = str(code)
+        if len(code) > EXECUTE_CHAR_LIMIT:
+            message = (
+                "Cell is too large to execute (%d characters; limit is %d)."
+                % (len(code), EXECUTE_CHAR_LIMIT)
+            )
+            err = {
+                "event": "error",
+                "id": req_id,
+                "ename": "ExecuteTooLarge",
+                "evalue": message,
+                "traceback": [],
+            }
+            reply = {"event": "execute_reply", "id": req_id, "status": "error"}
+            if cell_id:
+                err["cellId"] = cell_id
+                reply["cellId"] = cell_id
+            emit(err)
+            emit(reply)
             return
         jupyter_id = kc.execute(code, store_history=True, allow_stdin=False)
         with lock:

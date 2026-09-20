@@ -486,8 +486,9 @@ export default function NotebookTab({
   }, [clearRunQueue, projectDir, projectId, tabId])
 
   const interruptKernel = useCallback(() => {
+    clearRunQueue()
     void window.api.notebookKernelInterrupt(tabId)
-  }, [tabId])
+  }, [clearRunQueue, tabId])
 
   const condaPlatform = window.api?.platform ?? ''
   const condaOverride = notebookCondaEnvFromMetadata(doc?.metadata)

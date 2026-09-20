@@ -24,8 +24,7 @@ import { AI_TAB_META, isRemoteProject, isShellCommandProject } from '../shared/t
 import {
   NOTEBOOK_ERROR_REMOTE,
   NOTEBOOK_ERROR_SHELL_PROJECT,
-  condaEnvInfoForNotebookSpawn,
-  notebookKernelCondaSelection,
+  resolveNotebookKernelCondaEnv,
   type NotebookKernelCondaOverride
 } from '../shared/notebook'
 import { notebookAllowedCwdRoots, resolveNotebookKernelCwd } from './notebook-cwd'
@@ -953,7 +952,7 @@ export class AppRuntime {
         projectId: string,
         cwd: string,
         condaOverride?: NotebookKernelCondaOverride | null
-      ): { error?: string; code?: string } => {
+      ): Promise<{ error?: string; code?: string }> => {
         return this.startNotebookKernel(tabId, projectId, cwd, condaOverride)
       }
     )
@@ -975,7 +974,7 @@ export class AppRuntime {
         projectId: string,
         cwd: string,
         condaOverride?: NotebookKernelCondaOverride | null
-      ): { error?: string; code?: string } => {
+      ): Promise<{ error?: string; code?: string }> => {
         this.notebookKernels.shutdown(tabId)
         return this.startNotebookKernel(tabId, projectId, cwd, condaOverride)
       }
@@ -1467,12 +1466,12 @@ export class AppRuntime {
     return resolved
   }
 
-  private startNotebookKernel(
+  private async startNotebookKernel(
     tabId: string,
     projectId: string,
     cwd: string,
     condaOverride?: NotebookKernelCondaOverride | null
-  ): { error?: string; code?: string } {
+  ): Promise<{ error?: string; code?: string }> {
     const project = this.projectsStore.peek().projects.find((item) => item.id === projectId)
     if (!project) return { error: 'Project not found.', code: 'no-project' }
     if (isRemoteProject(project)) {
@@ -1500,13 +1499,29 @@ export class AppRuntime {
       })
       return { error: cwdResult.error, code: 'cwd' }
     }
-    const selection = notebookKernelCondaSelection(
-      condaOverride
-        ? { condaEnvName: condaOverride.name, condaEnvPrefix: condaOverride.prefix }
-        : null,
-      project
+    const override = condaOverride
+      ? { condaEnvName: condaOverride.name, condaEnvPrefix: condaOverride.prefix }
+      : null
+    const hasOverride = !!(override?.condaEnvName?.trim() || override?.condaEnvPrefix?.trim())
+    // Override: live conda list only. No override: existing project-default resolve.
+    const listedEnvs = hasOverride ? (await listCondaEnvs()).envs : []
+    const projectResolved = hasOverride ? null : resolveProjectCondaEnv(project)
+    const resolved = resolveNotebookKernelCondaEnv(
+      override,
+      project,
+      listedEnvs,
+      projectResolved,
+      process.platform
     )
-    const condaEnv = condaEnvInfoForNotebookSpawn(selection, resolveProjectCondaEnv(selection)) ?? undefined
+    if (!resolved.ok) {
+      this.broadcastToAllWindows('notebook-kernel-event', tabId, {
+        event: 'fail',
+        code: resolved.code,
+        message: resolved.error
+      })
+      return { error: resolved.error, code: resolved.code }
+    }
+    const condaEnv = resolved.env ?? undefined
     this.logDebug(
       `notebookKernelStart tabId=${tabId} projectId=${projectId} cwd=${cwdResult.cwd} conda=${condaEnv?.name ?? ''} prefix=${condaEnv?.prefix ?? ''}`
     )

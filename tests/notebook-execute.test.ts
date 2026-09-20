@@ -8,6 +8,10 @@ import {
   makeExecuteRequestId,
   NotebookExecuteGate
 } from '../src/shared/notebook-execute'
+import {
+  NOTEBOOK_EXECUTE_CHAR_LIMIT,
+  notebookExecuteTooLarge
+} from '../src/shared/notebook'
 
 describe('execute request ids', () => {
   it('is unique per execute, not just per cell', () => {
@@ -80,5 +84,26 @@ describe('NotebookExecuteGate', () => {
     expect(gate.complete('b#2')).toEqual({ requestId: 'c#3', cellId: 'c', code: '3' })
     expect(gate.complete('c#3')).toBeNull()
     expect(gate.busy).toBe(false)
+  })
+
+  it('clear drops in-flight and queued work so a later submit can start', () => {
+    const gate = new NotebookExecuteGate()
+    expect(gate.submit({ requestId: 'a#1', cellId: 'a', code: '1' })).toBe('start')
+    expect(gate.submit({ requestId: 'b#2', cellId: 'b', code: '2' })).toBe('queued')
+    gate.clear()
+    expect(gate.busy).toBe(false)
+    expect(gate.inFlightId).toBeNull()
+    expect(gate.queue).toEqual([])
+    // Late execute_reply after interrupt must not dequeue leftover work.
+    expect(gate.complete('a#1')).toBeNull()
+    expect(gate.submit({ requestId: 'c#3', cellId: 'c', code: '3' })).toBe('start')
+  })
+})
+
+describe('execute payload cap', () => {
+  it('treats source over NOTEBOOK_EXECUTE_CHAR_LIMIT as too large', () => {
+    expect(NOTEBOOK_EXECUTE_CHAR_LIMIT).toBe(1_000_000)
+    expect(notebookExecuteTooLarge('x'.repeat(NOTEBOOK_EXECUTE_CHAR_LIMIT))).toBe(false)
+    expect(notebookExecuteTooLarge('x'.repeat(NOTEBOOK_EXECUTE_CHAR_LIMIT + 1))).toBe(true)
   })
 })

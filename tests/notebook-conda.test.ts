@@ -9,7 +9,9 @@ import {
   notebookCondaOverridePayload,
   notebookKernelCondaSelection,
   NOTEBOOK_ERROR_NO_CONDA,
-  NOTEBOOK_ERROR_NO_PYTHON
+  NOTEBOOK_ERROR_NO_PYTHON,
+  NOTEBOOK_ERROR_STALE_CONDA,
+  resolveNotebookKernelCondaEnv
 } from '../src/shared/notebook'
 import { resetShellEnvForTests } from '../src/main/shell-env'
 
@@ -198,6 +200,61 @@ describe('notebook conda override vs project default', () => {
       name: 'gone',
       prefix: 'D:\\gone\\envs\\gone'
     })
+  })
+
+  it('fails closed: unlisted override prefix does not spawn even if python.exe exists', () => {
+    const prefix = 'D:\\not-listed\\python-folder'
+    const python = `${prefix}\\python.exe`
+    // Disk lookup would accept this folder (python.exe present).
+    expect(
+      condaPythonExecutable(prefix, {
+        ...win,
+        existsSync: (file) => file === python
+      })
+    ).toBe(python)
+
+    const project = { condaEnvName: 'proj', condaEnvPrefix: 'C:\\proj-env' }
+    const override = { condaEnvName: 'evil', condaEnvPrefix: prefix }
+    const listed = [{ name: 'proj', prefix: 'C:\\proj-env' }]
+    const result = resolveNotebookKernelCondaEnv(
+      override,
+      project,
+      listed,
+      { name: 'proj', prefix: 'C:\\proj-env' },
+      'win32'
+    )
+    expect(result).toEqual({
+      ok: false,
+      code: 'stale-conda',
+      error: NOTEBOOK_ERROR_STALE_CONDA
+    })
+  })
+
+  it('spawns a listed override env from the live conda list', () => {
+    const listed = [
+      { name: 'proj', prefix: 'C:\\proj-env' },
+      { name: 'ml', prefix: 'C:\\ml' }
+    ]
+    const result = resolveNotebookKernelCondaEnv(
+      { condaEnvName: 'ml', condaEnvPrefix: 'C:\\ml' },
+      { condaEnvName: 'proj', condaEnvPrefix: 'C:\\proj-env' },
+      listed,
+      { name: 'proj', prefix: 'C:\\proj-env' },
+      'win32'
+    )
+    expect(result).toEqual({ ok: true, env: { name: 'ml', prefix: 'C:\\ml' } })
+  })
+
+  it('keeps the project-default resolve when there is no override', () => {
+    const project = { condaEnvName: 'proj', condaEnvPrefix: 'C:\\proj-env' }
+    const projectResolved = { name: 'proj', prefix: 'C:\\proj-env' }
+    expect(
+      resolveNotebookKernelCondaEnv(null, project, [], projectResolved, 'win32')
+    ).toEqual({ ok: true, env: projectResolved })
+    // Unlisted project prefix still reconstructs (project path unchanged).
+    expect(
+      resolveNotebookKernelCondaEnv(null, project, [], null, 'win32')
+    ).toEqual({ ok: true, env: { name: 'proj', prefix: 'C:\\proj-env' } })
   })
 
   it('treats a picker change as a new start/restart payload', () => {
