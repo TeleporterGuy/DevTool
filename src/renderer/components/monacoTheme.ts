@@ -1,10 +1,60 @@
 import type { Monaco } from '@monaco-editor/react'
+import type { editor } from 'monaco-editor'
 
-// Warm Monaco themes matching the app palette (styles.css @theme). Syntax token
-// colors stay stock vs/vs-dark; only editor chrome is retuned so the editor
-// doesn't sit as a cool gray slab inside the warm paper/ink chrome.
+// Warm Monaco themes matching the app palette (styles.css @theme).
+// Chrome colors stay on the paper/ink surfaces. Syntax rules follow the
+// highlight.js tokens in styles.css (.note-preview .hljs-*) so an idle
+// notebook cell and the focused Monaco editor read the same — especially
+// parameters/variables in blue, not default foreground.
 export const MONACO_THEME_DARK = 'devtool-dark'
 export const MONACO_THEME_LIGHT = 'devtool-light'
+
+/** Monaco wants hex without '#'. Same values as .note-preview .hljs-* (dark). */
+export const MONACO_TOKEN_RULES_DARK: editor.ITokenThemeRule[] = [
+  { token: 'comment', foreground: '6a9955' },
+  { token: 'string', foreground: 'ce9178' },
+  { token: 'string.escape', foreground: 'ce9178' },
+  { token: 'keyword', foreground: 'c586c0' },
+  { token: 'keyword.flow', foreground: 'c586c0' },
+  { token: 'number', foreground: 'b5cea8' },
+  { token: 'type', foreground: '4ec9b0' },
+  { token: 'type.identifier', foreground: '4ec9b0' },
+  { token: 'class', foreground: '4ec9b0' },
+  { token: 'function', foreground: 'dcdcaa' },
+  { token: 'member', foreground: 'dcdcaa' },
+  // Python monarch uses `identifier` for names (params, locals, attributes).
+  { token: 'identifier', foreground: '9cdcfe' },
+  { token: 'variable', foreground: '9cdcfe' },
+  { token: 'variable.parameter', foreground: '9cdcfe' },
+  { token: 'parameter', foreground: '9cdcfe' },
+  { token: 'property', foreground: '9cdcfe' },
+  { token: 'tag', foreground: '569cd6' },
+  { token: 'metatag', foreground: '569cd6' },
+  { token: 'attribute.name', foreground: '9cdcfe' }
+]
+
+/** Same mapping as .theme-light .note-preview .hljs-* */
+export const MONACO_TOKEN_RULES_LIGHT: editor.ITokenThemeRule[] = [
+  { token: 'comment', foreground: '008000' },
+  { token: 'string', foreground: 'a31515' },
+  { token: 'string.escape', foreground: 'a31515' },
+  { token: 'keyword', foreground: 'af00db' },
+  { token: 'keyword.flow', foreground: 'af00db' },
+  { token: 'number', foreground: '098658' },
+  { token: 'type', foreground: '267f99' },
+  { token: 'type.identifier', foreground: '267f99' },
+  { token: 'class', foreground: '267f99' },
+  { token: 'function', foreground: '795e26' },
+  { token: 'member', foreground: '795e26' },
+  { token: 'identifier', foreground: '001080' },
+  { token: 'variable', foreground: '001080' },
+  { token: 'variable.parameter', foreground: '001080' },
+  { token: 'parameter', foreground: '001080' },
+  { token: 'property', foreground: '001080' },
+  { token: 'tag', foreground: '800000' },
+  { token: 'metatag', foreground: '0000ff' },
+  { token: 'attribute.name', foreground: '001080' }
+]
 
 let defined = false
 
@@ -15,7 +65,7 @@ export function defineMonacoThemes(monaco: Monaco): void {
   monaco.editor.defineTheme(MONACO_THEME_DARK, {
     base: 'vs-dark',
     inherit: true,
-    rules: [],
+    rules: MONACO_TOKEN_RULES_DARK,
     colors: {
       'editor.background': '#1d1b18',
       'editor.foreground': '#f0ece4',
@@ -38,7 +88,7 @@ export function defineMonacoThemes(monaco: Monaco): void {
   monaco.editor.defineTheme(MONACO_THEME_LIGHT, {
     base: 'vs',
     inherit: true,
-    rules: [],
+    rules: MONACO_TOKEN_RULES_LIGHT,
     colors: {
       'editor.background': '#faf8f3',
       'editor.foreground': '#23211d',
