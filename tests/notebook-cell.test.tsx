@@ -208,3 +208,20 @@ describe('NotebookCell markdown preview control', () => {
     expect(onFinish).toHaveBeenCalledTimes(1)
   })
 })
+
+describe('NotebookCell collapse', () => {
+  it('hides source but still shows outputs under the header', () => {
+    renderCell({
+      isActive: false,
+      cell: cell({
+        source: 'print(1)',
+        outputs: [{ type: 'stream', name: 'stdout', text: 'hello-output\n' }],
+        metadata: { jupyter: { source_hidden: true, outputs_hidden: true } }
+      })
+    })
+    expect(screen.queryByTestId('notebook-cell-monaco')).toBeNull()
+    expect(screen.queryByTestId('notebook-cell-source-pre')).toBeNull()
+    expect(screen.getByText('print(1)')).toBeTruthy()
+    expect(screen.getByText('hello-output')).toBeTruthy()
+  })
+})

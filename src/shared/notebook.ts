@@ -297,13 +297,14 @@ export function emptyCell(cellType: NotebookCellType = 'code'): NotebookCell {
 
 /**
  * JupyterLab collapse flags live under `cell.metadata.jupyter`.
- * Collapsed in DevTool means both `source_hidden` and `outputs_hidden` are true.
+ * Collapsed in DevTool means `source_hidden` is true (editor/source hidden).
+ * `outputs_hidden` is ignored — results stay visible under the header.
  * New cells omit these keys (expanded).
  */
 export function isNotebookCellCollapsed(cell: Pick<NotebookCell, 'metadata'>): boolean {
   const jupyter = asRecord(cell.metadata.jupyter)
   if (!jupyter) return false
-  return jupyter.source_hidden === true && jupyter.outputs_hidden === true
+  return jupyter.source_hidden === true
 }
 
 /** First non-empty source line, for the collapsed-cell header preview. */
@@ -317,7 +318,8 @@ export function notebookCellSourcePreview(source: string): string {
 
 /**
  * Set or clear Jupyter hide flags without dropping other `jupyter` / cell metadata keys.
- * Expanded clears the two flags and removes an empty `jupyter` object.
+ * Collapse sets `source_hidden` and clears `outputs_hidden` so outputs stay shown.
+ * Expand clears both flags and removes an empty `jupyter` object.
  */
 export function setCellCollapsedMetadata(
   metadata: Record<string, unknown>,
@@ -327,7 +329,7 @@ export function setCellCollapsedMetadata(
   const jupyter = { ...(asRecord(next.jupyter) ?? {}) }
   if (collapsed) {
     jupyter.source_hidden = true
-    jupyter.outputs_hidden = true
+    delete jupyter.outputs_hidden
     next.jupyter = jupyter
     return next
   }

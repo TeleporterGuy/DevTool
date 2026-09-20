@@ -315,8 +315,7 @@ export default function NotebookCellView({
       </div>
 
       {!collapsed && (
-        <>
-          {showMarkdownPreview ? (
+        showMarkdownPreview ? (
             <button
               type="button"
               className="block w-full text-left bg-transparent border-0 p-0 cursor-text"
@@ -368,11 +367,10 @@ export default function NotebookCellView({
               fontSize={config.editorFontSize}
               cellType={cell.cellType}
             />
-          )}
-
-          {cell.cellType === 'code' && <NotebookOutputs outputs={cell.outputs} />}
-        </>
+          )
       )}
+
+      {cell.cellType === 'code' && <NotebookOutputs outputs={cell.outputs} />}
     </div>
   )
 }

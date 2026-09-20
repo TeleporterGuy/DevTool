@@ -285,7 +285,7 @@ describe('cell operations', () => {
 })
 
 describe('notebook cell collapse', () => {
-  it('starts expanded and writes both Jupyter hide flags when collapsed', () => {
+  it('starts expanded and writes source_hidden only when collapsed', () => {
     const doc = emptyNotebook()
     const cell = doc.cells[0]
     expect(isNotebookCellCollapsed(cell)).toBe(false)
@@ -294,8 +294,7 @@ describe('notebook cell collapse', () => {
     const collapsed = setNotebookCellCollapsed(doc, cell.id, true)
     expect(isNotebookCellCollapsed(collapsed.cells[0])).toBe(true)
     expect(collapsed.cells[0].metadata.jupyter).toEqual({
-      source_hidden: true,
-      outputs_hidden: true
+      source_hidden: true
     })
 
     const expanded = setNotebookCellCollapsed(collapsed, cell.id, false)
@@ -310,8 +309,7 @@ describe('notebook cell collapse', () => {
     expect(isNotebookCellCollapsed(again.cells[1])).toBe(true)
     expect(isNotebookCellCollapsed(again.cells[0])).toBe(false)
     expect(again.cells[1].metadata.jupyter).toEqual({
-      source_hidden: true,
-      outputs_hidden: true
+      source_hidden: true
     })
   })
 
@@ -336,8 +334,7 @@ describe('notebook cell collapse', () => {
     expect(collapsed.cells[0].metadata.tags).toEqual(['keep-me'])
     expect(collapsed.cells[0].metadata.jupyter).toEqual({
       slideshow: { slide_type: 'slide' },
-      source_hidden: true,
-      outputs_hidden: true
+      source_hidden: true
     })
 
     const expanded = setNotebookCellCollapsed(collapsed, 'c1', false)
@@ -352,10 +349,34 @@ describe('notebook cell collapse', () => {
     expect(notebookCellSourcePreview('')).toBe('')
   })
 
-  it('treats a single hide flag as expanded', () => {
+  it('collapses on source_hidden; leftover outputs_hidden is not required', () => {
     expect(isNotebookCellCollapsed({
       metadata: { jupyter: { source_hidden: true } }
+    })).toBe(true)
+    expect(isNotebookCellCollapsed({
+      metadata: { jupyter: { source_hidden: true, outputs_hidden: true } }
+    })).toBe(true)
+    expect(isNotebookCellCollapsed({
+      metadata: { jupyter: { outputs_hidden: true } }
     })).toBe(false)
+  })
+
+  it('clears outputs_hidden when collapsing so results stay visible', () => {
+    const doc = parseNotebook(JSON.stringify({
+      nbformat: 4,
+      nbformat_minor: 5,
+      metadata: {},
+      cells: [{
+        id: 'c1',
+        cell_type: 'code',
+        metadata: { jupyter: { source_hidden: true, outputs_hidden: true } },
+        execution_count: null,
+        source: ['print(1)'],
+        outputs: []
+      }]
+    }))
+    const collapsed = setNotebookCellCollapsed(doc, 'c1', true)
+    expect(collapsed.cells[0].metadata.jupyter).toEqual({ source_hidden: true })
   })
 })
 
