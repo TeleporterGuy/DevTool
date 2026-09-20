@@ -125,6 +125,17 @@ describe('NotebookCell Monaco mount', () => {
     )
     expect(screen.queryByTestId('notebook-cell-monaco')).toBeNull()
     expect(screen.getByTestId('notebook-cell-source-pre').textContent).toContain('print(1)')
+    expect(screen.getByTestId('notebook-cell-source-pre').querySelector('code.hljs')).toBeTruthy()
+  })
+
+  it('leaves idle raw cells as plain text without hljs', () => {
+    renderCell({
+      isActive: false,
+      cell: cell({ cellType: 'raw', source: 'plain text' })
+    })
+    const pre = screen.getByTestId('notebook-cell-source-pre')
+    expect(pre.textContent).toContain('plain text')
+    expect(pre.querySelector('code.hljs')).toBeNull()
   })
 
   it('unmounts Monaco when editors are suspended, even if the cell is active', () => {

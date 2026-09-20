@@ -222,6 +222,16 @@
   .notebook-preview th, .notebook-preview td { padding: 4px 8px; }
   .notebook-preview hr { margin: 8px 0; }
 
+  /* Idle notebook code cells reuse .note-preview hljs colors without a nested fence box. */
+  pre.notebook-code-preview > code {
+    padding: 0;
+    background: none;
+    border-radius: 0;
+    font-size: inherit;
+    font-family: inherit;
+    line-height: 1.5;
+  }
+
   /* highlight.js — dark theme */
   .note-preview .hljs-keyword, .note-preview .hljs-selector-tag, .note-preview .hljs-built_in { color: #c586c0; }
   .note-preview .hljs-string, .note-preview .hljs-attr, .note-preview .hljs-symbol { color: #ce9178; }

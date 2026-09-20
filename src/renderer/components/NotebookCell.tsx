@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import Editor from '@monaco-editor/react'
 import type { editor } from 'monaco-editor'
 import { Check, ChevronDown, ChevronRight, ChevronUp, Play, Plus, Trash2 } from 'lucide-react'
@@ -15,6 +15,10 @@ import { notebookCellMountsMonaco } from './notebookCellEditor'
 import { defineMonacoThemes, monacoThemeFor } from './monacoTheme'
 import MarkdownPreview from './MarkdownPreview'
 import NotebookOutputs from './NotebookOutputs'
+import {
+  highlightNotebookCodeHtml,
+  NOTEBOOK_CODE_PREVIEW_CODE_CLASS
+} from './notebookCodePreview'
 
 interface Props {
   cell: NotebookCell
@@ -79,22 +83,41 @@ class CellEditorBoundary extends React.Component<
 function NotebookCellSourcePre({
   source,
   fontFamily,
-  fontSize
+  fontSize,
+  cellType
 }: {
   source: string
   fontFamily?: string
   fontSize?: number
+  cellType: NotebookCellType
 }): React.ReactElement {
+  const highlightCode = cellType === 'code'
+  const highlightedHtml = useMemo(
+    () => (highlightCode ? highlightNotebookCodeHtml(source) : null),
+    [highlightCode, source]
+  )
+
   return (
     <pre
       data-testid="notebook-cell-source-pre"
-      className="m-0 px-3 py-2 text-sm text-text whitespace-pre-wrap break-words cursor-text min-h-[48px]"
+      className={
+        highlightCode
+          ? 'note-preview notebook-code-preview m-0 px-3 py-2 text-sm text-text whitespace-pre-wrap break-words cursor-text min-h-[48px]'
+          : 'm-0 px-3 py-2 text-sm text-text whitespace-pre-wrap break-words cursor-text min-h-[48px]'
+      }
       style={{
         fontFamily: fontFamily || 'var(--font-mono)',
         fontSize
       }}
     >
-      {source || ' '}
+      {highlightedHtml != null ? (
+        <code
+          className={NOTEBOOK_CODE_PREVIEW_CODE_CLASS}
+          dangerouslySetInnerHTML={{ __html: highlightedHtml }}
+        />
+      ) : (
+        source || ' '
+      )}
     </pre>
   )
 }
@@ -318,6 +341,7 @@ export default function NotebookCellView({
                   source={cell.source}
                   fontFamily={config.editorFontFamily}
                   fontSize={config.editorFontSize}
+                  cellType={cell.cellType}
                 />
               )}
             >
@@ -342,6 +366,7 @@ export default function NotebookCellView({
               source={cell.source}
               fontFamily={config.editorFontFamily}
               fontSize={config.editorFontSize}
+              cellType={cell.cellType}
             />
           )}
 
