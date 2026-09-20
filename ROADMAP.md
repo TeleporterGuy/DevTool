@@ -291,7 +291,7 @@ Was going to be “Open JupyterLab in a browser tab.” That path was tried (PR 
 Work items:
 
 1. **Open / save** — clicking a `.ipynb` in the Files tree opens a `notebook` tab (same tab system as `editor`). Save writes nbformat 4. Empty new files become a one-cell notebook.
-2. **Cells** — markdown + code (raw kept). Edit in Monaco. Add / delete / change type / reorder.
+2. **Cells** — markdown + code (raw kept). Only the focused, expanded cell mounts Monaco (the edit surface). Idle code cells are a highlighted read-only preview (highlight.js — they should look like code, not markdown prose); markdown idle cells stay rendered preview. Add / delete / change type / reorder. Reorder (and similar list splices) unmounts every Monaco host *before* the cells array mutates, then remounts — many live editors + DOM reorder was crashing monaco-react (`InstantiationService has been disposed`). Active-only + suspend-on-reorder is the intended architecture, not a missing-color regression.
 3. **Kernel** — `jupyter_client` + ipykernel in the **project default conda env**, with an optional per-notebook override in `metadata.devtool.condaEnv` (`getShellEnv` / same PATH as Pi/agent tabs). Toolbar env picker. Run cell / run all. Stream text, `text/plain`, PNG, and errors. Kernel status (idle / busy / dead) + restart.
 4. **Clear errors** — no conda env, missing `python`, or missing `jupyter_client` / `ipykernel` fail with an install hint, not a blank tab.
 

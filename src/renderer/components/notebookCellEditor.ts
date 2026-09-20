@@ -1,11 +1,13 @@
 import type { NotebookCellType } from '../../shared/notebook'
 
 /**
- * Only the focused, expanded cell mounts Monaco in steady state.
- * During a cell reorder, NotebookTab sets suspendEditors and flushSync-unmounts
- * every <Editor> *before* moveCellById splices the list — monaco-react throws
- * "InstantiationService has been disposed" if a live editor is still in the
- * tree while its host moves.
+ * Only the focused, expanded cell mounts Monaco (the edit surface).
+ * Idle code cells are a highlight.js read-only preview — they must look like
+ * code, not markdown prose. That is intentional: many live Monaco hosts plus
+ * a DOM reorder crashed monaco-react ("InstantiationService has been disposed").
+ *
+ * During reorder, NotebookTab sets suspendEditors and flushSync-unmounts every
+ * <Editor> *before* moveCellById splices the list, then remounts.
  *
  * Move sequence (NotebookTab):
  *   1. suspendEditors = true (this helper returns false for every cell)
