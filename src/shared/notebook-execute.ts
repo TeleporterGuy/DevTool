@@ -48,6 +48,21 @@ export function beginRunAll(cellIds: string[]): NotebookRunQueueState {
   return { owner: 'all', inFlight: cellIds[0], queued: cellIds.slice(1) }
 }
 
+/**
+ * Code cells strictly above `index`, in document order.
+ * Markdown/raw are skipped. Empty means Run-above is a no-op.
+ */
+export function codeCellIdsAbove(
+  cells: Array<{ id: string; cellType: string }>,
+  index: number
+): string[] {
+  if (index <= 0) return []
+  return cells
+    .slice(0, Math.max(0, index))
+    .filter((cell) => cell.cellType === 'code')
+    .map((cell) => cell.id)
+}
+
 export function completeRun(
   state: NotebookRunQueueState,
   cellId: string

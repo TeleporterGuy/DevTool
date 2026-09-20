@@ -60,6 +60,8 @@ function renderCell(props: {
   suspendEditors?: boolean
   cell?: NotebookCell
   onFinishMarkdownEdit?: () => void
+  onRunAbove?: () => void
+  canRunAbove?: boolean
 }) {
   return render(
     <NotebookCellView
@@ -74,6 +76,8 @@ function renderCell(props: {
       onFocus={noop}
       onChangeSource={noop}
       onRun={noop}
+      onRunAbove={props.onRunAbove}
+      canRunAbove={props.canRunAbove}
       onRunAndNext={noop}
       onChangeType={noop}
       onAddBelow={noop}
@@ -223,5 +227,29 @@ describe('NotebookCell collapse', () => {
     expect(screen.queryByTestId('notebook-cell-source-pre')).toBeNull()
     expect(screen.getByText('print(1)')).toBeTruthy()
     expect(screen.getByText('hello-output')).toBeTruthy()
+  })
+})
+
+describe('NotebookCell run above', () => {
+  it('shows Run all above next to Play on code cells and skips markdown', () => {
+    renderCell({ isActive: true, canRunAbove: true })
+    expect(screen.getByRole('button', { name: 'Run all above' })).toBeTruthy()
+    cleanup()
+    renderCell({
+      isActive: true,
+      isEditingMarkdown: false,
+      cell: cell({ cellType: 'markdown', source: '# Hello' })
+    })
+    expect(screen.queryByRole('button', { name: 'Run all above' })).toBeNull()
+  })
+
+  it('disables when there are no code cells above and runs when enabled', () => {
+    renderCell({ isActive: true, canRunAbove: false })
+    expect((screen.getByRole('button', { name: 'Run all above' }) as HTMLButtonElement).disabled).toBe(true)
+    cleanup()
+    const onRunAbove = vi.fn()
+    renderCell({ isActive: true, canRunAbove: true, onRunAbove })
+    fireEvent.click(screen.getByRole('button', { name: 'Run all above' }))
+    expect(onRunAbove).toHaveBeenCalledTimes(1)
   })
 })

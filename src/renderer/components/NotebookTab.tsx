@@ -39,6 +39,7 @@ import {
   beginRunAll,
   beginSingleRun,
   cellIdFromRequestId,
+  codeCellIdsAbove,
   completeRun,
   idleRunQueue,
   makeExecuteRequestId,
@@ -458,17 +459,27 @@ export default function NotebookTab({
     }
   }, [activeCellId, markDirty, requestSingleRun])
 
-  const runAll = useCallback(() => {
-    const current = docRef.current
-    if (!current) return
+  const startRunAll = useCallback((ids: string[]) => {
+    if (ids.length === 0) return
     // Do not replace an in-flight Run / Run-all; that would double-send the first cell.
     if (runStateRef.current.inFlight || runStateRef.current.queued.length > 0) return
-    const ids = current.cells.filter((cell) => cell.cellType === 'code').map((cell) => cell.id)
-    if (ids.length === 0) return
     const nextState = beginRunAll(ids)
     runStateRef.current = nextState
     if (nextState.inFlight) sendExecute(nextState.inFlight)
   }, [sendExecute])
+
+  const runAll = useCallback(() => {
+    const current = docRef.current
+    if (!current) return
+    startRunAll(current.cells.filter((cell) => cell.cellType === 'code').map((cell) => cell.id))
+  }, [startRunAll])
+
+  const runAbove = useCallback((cellId: string) => {
+    const current = docRef.current
+    if (!current) return
+    const index = current.cells.findIndex((cell) => cell.id === cellId)
+    startRunAll(codeCellIdsAbove(current.cells, index))
+  }, [startRunAll])
 
   const restartKernel = useCallback(() => {
     clearRunQueue()
@@ -658,6 +669,8 @@ export default function NotebookTab({
                 }
                 requestSingleRun(cell.id)
               }}
+              onRunAbove={() => runAbove(cell.id)}
+              canRunAbove={codeCellIdsAbove(doc.cells, index).length > 0}
               onRunAndNext={runAndNext}
               onChangeType={(type: NotebookCellType) => {
                 const current = docRef.current

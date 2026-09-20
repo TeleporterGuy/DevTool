@@ -32,6 +32,8 @@ interface Props {
   onFocus: () => void
   onChangeSource: (source: string) => void
   onRun: () => void
+  onRunAbove?: () => void
+  canRunAbove?: boolean
   onRunAndNext: () => void
   onChangeType: (type: NotebookCellType) => void
   onAddBelow: () => void
@@ -54,6 +56,23 @@ function safeMonacoCall(fn: () => void): void {
   } catch {
     /* layout/dispose can throw if Monaco already tore down during a cell move */
   }
+}
+
+function RunAboveIcon({ size = 14 }: { size?: number }): React.ReactElement {
+  // VS Code Codicon `run-above`: play triangle with a bar above. Filled like the
+  // glyph; 14px matches the cell Play button.
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 16 16"
+      fill="currentColor"
+      aria-hidden="true"
+    >
+      <rect x="1.5" y="1.25" width="13" height="1.75" rx="0.35" />
+      <path d="M3.15 6.1v8.2l7.35-4.1-7.35-4.1z" />
+    </svg>
+  )
 }
 
 class CellEditorBoundary extends React.Component<
@@ -134,6 +153,8 @@ export default function NotebookCellView({
   onFocus,
   onChangeSource,
   onRun,
+  onRunAbove = () => {},
+  canRunAbove = false,
   onRunAndNext,
   onChangeType,
   onAddBelow,
@@ -259,15 +280,27 @@ export default function NotebookCellView({
           <option value="raw">Raw</option>
         </select>
         {cell.cellType === 'code' && (
-          <button
-            type="button"
-            className={btnCls}
-            onClick={onRun}
-            title="Run cell (Ctrl+Enter)"
-            disabled={isRunning}
-          >
-            <Play size={14} />
-          </button>
+          <>
+            <button
+              type="button"
+              className={btnCls}
+              onClick={onRun}
+              title="Run cell (Ctrl+Enter)"
+              disabled={isRunning}
+            >
+              <Play size={14} />
+            </button>
+            <button
+              type="button"
+              className={btnCls}
+              onClick={onRunAbove}
+              title="Run all above"
+              aria-label="Run all above"
+              disabled={!canRunAbove}
+            >
+              <RunAboveIcon size={14} />
+            </button>
+          </>
         )}
         {cell.cellType === 'markdown' && isEditingMarkdown && (
           <button

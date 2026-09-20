@@ -3,6 +3,7 @@ import {
   beginRunAll,
   beginSingleRun,
   cellIdFromRequestId,
+  codeCellIdsAbove,
   completeRun,
   idleRunQueue,
   makeExecuteRequestId,
@@ -68,6 +69,29 @@ describe('run-all queue ownership', () => {
     expect(last.next).toBe('c')
     const done = completeRun(last.state, 'c')
     expect(done).toEqual({ state: idleRunQueue(), next: null })
+  })
+})
+
+describe('codeCellIdsAbove', () => {
+  const cells = [
+    { id: 'md', cellType: 'markdown' as const },
+    { id: 'c1', cellType: 'code' as const },
+    { id: 'c2', cellType: 'code' as const },
+    { id: 'c3', cellType: 'code' as const }
+  ]
+
+  it('queues prior code cells in order and skips markdown', () => {
+    expect(codeCellIdsAbove(cells, 3)).toEqual(['c1', 'c2'])
+    expect(beginRunAll(codeCellIdsAbove(cells, 3))).toEqual({
+      owner: 'all',
+      inFlight: 'c1',
+      queued: ['c2']
+    })
+  })
+
+  it('is empty on the first code cell (no-op)', () => {
+    expect(codeCellIdsAbove(cells, 1)).toEqual([])
+    expect(beginRunAll(codeCellIdsAbove(cells, 1))).toEqual(idleRunQueue())
   })
 })
 
