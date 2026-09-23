@@ -377,7 +377,8 @@ describe('SshConnectionManager connect/disconnect', () => {
     const sshCalls: string[][] = []
     mockExecFile.mockImplementation(
       (cmd: string, args: string[], _opts: unknown, cb: unknown) => {
-        if (cmd === 'ssh') sshCalls.push(args)
+        // Windows resolves an absolute ...\Git\usr\bin\ssh.exe, not bare `ssh`.
+        if (/(^|[\\/])ssh(\.exe)?$/i.test(cmd)) sshCalls.push(args)
         const stdout = args.includes('-R') ? 'Allocated port 45678 for remote forward to localhost:9999' : ''
         ;(cb as (err: null, stdout: string, stderr: string) => void)(null, stdout, '')
         return {} as ReturnType<typeof execFile>
