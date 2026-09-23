@@ -7,6 +7,7 @@ import { render, fireEvent, screen, act, cleanup, waitFor } from '@testing-libra
 void React
 
 import NewTaskModal from '../src/renderer/components/NewTaskModal'
+import type { NewTaskTarget } from '../src/renderer/components/newTask'
 import type { Project, WorkspaceConfig } from '../src/shared/types'
 
 function project(id: string, name: string, extra: Partial<Project> = {}): Project {
@@ -19,8 +20,13 @@ const PROJECTS: Project[] = [
   project('p3', 'scripts', { shellCommand: { command: 'htop' } })
 ]
 
-let onCreate: Mock<(projectId: string, name: string) => void>
-let onCreateWorkspace: Mock<(projectId: string, name: string, workspace: WorkspaceConfig) => void>
+/** The target shorthand the assertions read best in. */
+const inProject = (projectId: string): NewTaskTarget => ({ kind: 'project', projectId })
+const inDir = (directory: string): NewTaskTarget => ({ kind: 'dir', directory })
+
+let onCreate: Mock<(target: NewTaskTarget, name: string) => void>
+let onCreateWorkspace: Mock<(target: NewTaskTarget, name: string, workspace: WorkspaceConfig) => void>
+let onAddProject: Mock<(name: string, directory: string, tagIds?: string[]) => Project>
 let onClose: Mock<() => void>
 
 interface CreateResult {
@@ -34,6 +40,7 @@ function api(): {
   workspaceListBranches: Mock<(req: unknown) => Promise<string[]>>
   workspaceCreate: Mock<(req: unknown) => Promise<CreateResult>>
   workspaceDelete: Mock<(req: unknown) => Promise<{ status: string }>>
+  pickDirectory: Mock<() => Promise<string | null>>
 } {
   return (window as unknown as { api: ReturnType<typeof api> }).api
 }
@@ -51,6 +58,7 @@ beforeEach(() => {
   Element.prototype.scrollIntoView = vi.fn()
   onCreate = vi.fn()
   onCreateWorkspace = vi.fn()
+  onAddProject = vi.fn((name: string, directory: string) => project('p9', name, { directory }))
   onClose = vi.fn()
   ;(window as unknown as { api: unknown }).api = {
     workspaceListBranches: vi.fn().mockResolvedValue(['master', 'feature/old']),
@@ -59,7 +67,8 @@ beforeEach(() => {
       branchName: 'fix-the-badge',
       relativeProjectPath: ''
     }),
-    workspaceDelete: vi.fn().mockResolvedValue({ status: 'ok' })
+    workspaceDelete: vi.fn().mockResolvedValue({ status: 'ok' }),
+    pickDirectory: vi.fn().mockResolvedValue('/tmp/scratch')
   }
 })
 
@@ -73,6 +82,9 @@ function renderModal(defaultProjectId: string | null = 'p1', projects: Project[]
       projects={projects}
       defaultProjectId={defaultProjectId}
       getProjectDir={(p) => p.directory}
+      allTags={[]}
+      onEnsureTag={() => 't1'}
+      onAddProject={onAddProject}
       onCreate={onCreate}
       onCreateWorkspace={onCreateWorkspace}
       onClose={onClose}
@@ -88,19 +100,27 @@ function projectFilter(): HTMLInputElement {
   return screen.getByPlaceholderText('Filter projects…') as HTMLInputElement
 }
 
-/** Project rows, in the order the picker lists them. The list follows the filter. */
+/** Destination rows, in the order the picker lists them. The list follows the filter. */
 function projectRows(): HTMLButtonElement[] {
-  const list = projectFilter().nextElementSibling as HTMLElement
+  const list = screen.getByRole('group', { name: 'Destination' })
   return Array.from(list.querySelectorAll('button'))
 }
 
 function projectNames(): string[] {
-  return projectRows().map(b => b.textContent ?? '')
+  // Ad-hoc rows carry a "dir" badge inside the button; the label is the first span.
+  return projectRows().map(b => b.querySelector('span')?.textContent ?? '')
+}
+
+/** Open the "+" menu next to the filter and click one of its two items. */
+async function chooseFromAddMenu(label: string): Promise<void> {
+  await act(async () => { fireEvent.click(screen.getByLabelText('Add a destination')) })
+  await act(async () => { fireEvent.click(screen.getByText(label)) })
 }
 
 /** The row drawn as selected — same `bg-sel` idiom as the base-branch list. */
 function selectedProject(): string | undefined {
-  return projectRows().find(b => b.className.includes('bg-sel'))?.textContent ?? undefined
+  const row = projectRows().find(b => b.className.includes('bg-sel'))
+  return row?.querySelector('span')?.textContent ?? undefined
 }
 
 describe('NewTaskModal', () => {
@@ -109,7 +129,7 @@ describe('NewTaskModal', () => {
     await act(async () => { fireEvent.change(nameInput(), { target: { value: '  Fix the badge  ' } }) })
     await act(async () => { fireEvent.click(screen.getByText('Create')) })
 
-    expect(onCreate).toHaveBeenCalledWith('p1', 'Fix the badge')
+    expect(onCreate).toHaveBeenCalledWith(inProject('p1'), 'Fix the badge')
     expect(onCreateWorkspace).not.toHaveBeenCalled()
     expect(api().workspaceCreate).not.toHaveBeenCalled()
   })
@@ -118,14 +138,14 @@ describe('NewTaskModal', () => {
     renderModal(null)
     await act(async () => { fireEvent.change(nameInput(), { target: { value: 'Anything' } }) })
     await act(async () => { fireEvent.click(screen.getByText('Create')) })
-    expect(onCreate).toHaveBeenCalledWith('p1', 'Anything')
+    expect(onCreate).toHaveBeenCalledWith(inProject('p1'), 'Anything')
   })
 
   it('submits on Enter from the name field', async () => {
     renderModal()
     await act(async () => { fireEvent.change(nameInput(), { target: { value: 'Quick one' } }) })
     await act(async () => { fireEvent.keyDown(nameInput(), { key: 'Enter' }) })
-    expect(onCreate).toHaveBeenCalledWith('p1', 'Quick one')
+    expect(onCreate).toHaveBeenCalledWith(inProject('p1'), 'Quick one')
   })
 
   it('refuses to create without a name', async () => {
@@ -154,7 +174,7 @@ describe('NewTaskModal', () => {
       name: 'fix-the-badge',
       baseBranch: 'master'
     }))
-    expect(onCreateWorkspace).toHaveBeenCalledWith('p1', 'Fix the badge', {
+    expect(onCreateWorkspace).toHaveBeenCalledWith(inProject('p1'), 'Fix the badge', {
       worktreePath: '/repos/p1/.worktrees/fix-the-badge',
       branchName: 'fix-the-badge',
       baseBranch: 'master',
@@ -220,32 +240,63 @@ describe('NewTaskModal', () => {
     expect(projectNames()).toEqual(['notes'])
   })
 
-  it('picks the top match on Enter instead of creating the task', async () => {
+  // The bug this replaced: filtering hid the pre-selected project, the highlight
+  // moved to the only visible row, and Create still filed the task in the hidden
+  // one. Submitting from anywhere must agree with what is highlighted.
+  it('creates in the highlighted project after the filter hides the default one', async () => {
+    renderModal('p1')
+    await act(async () => { fireEvent.change(projectFilter(), { target: { value: 'not' } }) })
+
+    expect(projectNames()).toEqual(['notes'])
+    expect(selectedProject()).toBe('notes')
+
+    await act(async () => { fireEvent.change(nameInput(), { target: { value: 'Write it up' } }) })
+    await act(async () => { fireEvent.click(screen.getByText('Create')) })
+    expect(onCreate).toHaveBeenCalledWith(inProject('p2'), 'Write it up')
+  })
+
+  it('agrees with the highlight when submitting from the name field too', async () => {
+    renderModal('p1')
+    await act(async () => { fireEvent.change(projectFilter(), { target: { value: 'not' } }) })
+    await act(async () => { fireEvent.change(nameInput(), { target: { value: 'Write it up' } }) })
+    await act(async () => { fireEvent.keyDown(nameInput(), { key: 'Enter' }) })
+    expect(onCreate).toHaveBeenCalledWith(inProject('p2'), 'Write it up')
+  })
+
+  it('names the destination in the label, so it is readable when nothing matches', async () => {
+    renderModal('p1')
+    expect(screen.getByText('— devtool')).toBeTruthy()
+    await act(async () => { fireEvent.change(projectFilter(), { target: { value: 'zzz' } }) })
+    // The list is empty but the destination is still stated rather than implied.
+    expect(projectRows()).toEqual([])
+    expect(screen.getByText('— devtool')).toBeTruthy()
+  })
+
+  it('hands Enter in the filter on to the name field rather than creating', async () => {
     renderModal()
     await act(async () => { fireEvent.change(projectFilter(), { target: { value: 'not' } }) })
     await act(async () => { fireEvent.keyDown(projectFilter(), { key: 'Enter' }) })
 
     expect(onCreate).not.toHaveBeenCalled()
     expect(selectedProject()).toBe('notes')
-
-    await act(async () => { fireEvent.change(nameInput(), { target: { value: 'Write it up' } }) })
-    await act(async () => { fireEvent.click(screen.getByText('Create')) })
-    expect(onCreate).toHaveBeenCalledWith('p2', 'Write it up')
+    expect(document.activeElement).toBe(nameInput())
   })
 
-  it('walks the list with the arrow keys, starting from the selected project', async () => {
+  it('walks the list with the arrow keys, committing as it goes', async () => {
     renderModal()
     await act(async () => { fireEvent.keyDown(projectFilter(), { key: 'ArrowDown' }) })
     await act(async () => { fireEvent.keyDown(projectFilter(), { key: 'ArrowDown' }) })
     await act(async () => { fireEvent.keyDown(projectFilter(), { key: 'ArrowUp' }) })
-    await act(async () => { fireEvent.keyDown(projectFilter(), { key: 'Enter' }) })
     expect(selectedProject()).toBe('notes')
 
     // And it stops at the ends rather than wrapping.
     await act(async () => { fireEvent.keyDown(projectFilter(), { key: 'ArrowUp' }) })
     await act(async () => { fireEvent.keyDown(projectFilter(), { key: 'ArrowUp' }) })
-    await act(async () => { fireEvent.keyDown(projectFilter(), { key: 'Enter' }) })
     expect(selectedProject()).toBe('devtool')
+
+    await act(async () => { fireEvent.change(nameInput(), { target: { value: 'Anything' } }) })
+    await act(async () => { fireEvent.click(screen.getByText('Create')) })
+    expect(onCreate).toHaveBeenCalledWith(inProject('p1'), 'Anything')
   })
 
   it('keeps the project filter clear of the branch filter', async () => {
@@ -256,11 +307,15 @@ describe('NewTaskModal', () => {
 
     const branchFilter = screen.getByPlaceholderText('Filter branches…') as HTMLInputElement
     await act(async () => { fireEvent.change(branchFilter, { target: { value: 'feature' } }) })
-    await act(async () => { fireEvent.change(projectFilter(), { target: { value: 'not' } }) })
+
+    // A project filter that leaves the selection alone leaves the branches alone.
+    await act(async () => { fireEvent.change(projectFilter(), { target: { value: 'dev' } }) })
+    expect(selectedProject()).toBe('devtool')
     expect((screen.getByPlaceholderText('Filter branches…') as HTMLInputElement).value).toBe('feature')
 
-    // Switching project drops the old repo's branches, filter included.
-    await act(async () => { fireEvent.click(projectRows()[0]) })
+    // Landing on another project drops the old repo's branches, filter included.
+    await act(async () => { fireEvent.change(projectFilter(), { target: { value: 'not' } }) })
+    expect(selectedProject()).toBe('notes')
     expect(projectFilter().value).toBe('not')
     await waitFor(() => {
       expect((screen.getByPlaceholderText('Filter branches…') as HTMLInputElement).value).toBe('')
@@ -273,10 +328,121 @@ describe('NewTaskModal', () => {
     expect(screen.getByRole('button', { name: 'devtool' })).toBeTruthy()
   })
 
-  it('still asks for a project when there are none', async () => {
+  it('offers a way out when there are no projects at all', async () => {
     renderModal(null, [])
-    expect(screen.getByText('Add a project first — tasks live inside one.')).toBeTruthy()
+    expect(screen.getByText('Tasks live in a project — add one, or point this task at a directory.')).toBeTruthy()
     expect(screen.queryByPlaceholderText('Filter projects…')).toBeNull()
+    // The dead end was the bug: the "+" is reachable with an empty list.
+    expect(screen.getByLabelText('Add a destination')).toBeTruthy()
+    expect((screen.getByText('Create') as HTMLButtonElement).disabled).toBe(true)
+  })
+
+  describe('adding a destination', () => {
+    it('creates a project and selects it', async () => {
+      const { rerender } = renderModal()
+      await chooseFromAddMenu('New project…')
+
+      const dirField = screen.getByPlaceholderText('/path/to/project') as HTMLInputElement
+      await act(async () => { fireEvent.change(dirField, { target: { value: '/repos/p9' } }) })
+      const nameField = screen.getByPlaceholderText('My Project') as HTMLInputElement
+      await act(async () => { fireEvent.change(nameField, { target: { value: 'new-thing' } }) })
+      await act(async () => { fireEvent.click(screen.getByText('Add')) })
+
+      expect(onAddProject).toHaveBeenCalledWith('new-thing', '/repos/p9', undefined)
+      expect(screen.queryByPlaceholderText('/path/to/project')).toBeNull()
+
+      // The parent hands the new project back down on its next render; until it
+      // does, the selection must survive rather than snapping to the top match.
+      expect(selectedProject()).toBeUndefined()
+      await act(async () => {
+        rerender(
+          <NewTaskModal
+            projects={[...PROJECTS, project('p9', 'new-thing', { directory: '/repos/p9' })]}
+            defaultProjectId="p1"
+            getProjectDir={(p) => p.directory}
+            allTags={[]}
+            onEnsureTag={() => 't1'}
+            onAddProject={onAddProject}
+            onCreate={onCreate}
+            onCreateWorkspace={onCreateWorkspace}
+            onClose={onClose}
+          />
+        )
+      })
+      expect(selectedProject()).toBe('new-thing')
+      expect(screen.getByText('— new-thing')).toBeTruthy()
+
+      await act(async () => { fireEvent.change(nameInput(), { target: { value: 'Kick off' } }) })
+      await act(async () => { fireEvent.click(screen.getByText('Create')) })
+      expect(onCreate).toHaveBeenCalledWith(inProject('p9'), 'Kick off')
+    })
+
+    it('peels off the nested dialog on Escape before the composer', async () => {
+      renderModal()
+      await chooseFromAddMenu('New project…')
+
+      await act(async () => { fireEvent.keyDown(window, { key: 'Escape' }) })
+      expect(screen.queryByPlaceholderText('/path/to/project')).toBeNull()
+      expect(onClose).not.toHaveBeenCalled()
+
+      // The composer itself only goes on the next press.
+      await act(async () => { fireEvent.keyDown(window, { key: 'Escape' }) })
+      expect(onClose).toHaveBeenCalled()
+    })
+
+    it('files the task against a picked directory without creating a project', async () => {
+      renderModal()
+      await chooseFromAddMenu('Use a directory…')
+
+      expect(api().pickDirectory).toHaveBeenCalled()
+      // Pinned at the top, selected, and marked as not-a-project.
+      expect(projectNames()).toEqual(['scratch', 'devtool', 'notes', 'scripts'])
+      expect(selectedProject()).toBe('scratch')
+      expect(screen.getByText('dir')).toBeTruthy()
+      expect(onAddProject).not.toHaveBeenCalled()
+
+      await act(async () => { fireEvent.change(nameInput(), { target: { value: 'Poke at it' } }) })
+      await act(async () => { fireEvent.click(screen.getByText('Create')) })
+      expect(onCreate).toHaveBeenCalledWith(inDir('/tmp/scratch'), 'Poke at it')
+    })
+
+    it('keeps the picked directory visible through a filter that excludes everything', async () => {
+      renderModal()
+      await chooseFromAddMenu('Use a directory…')
+      await act(async () => { fireEvent.change(projectFilter(), { target: { value: 'zzz' } }) })
+
+      expect(projectNames()).toEqual(['scratch'])
+      expect(selectedProject()).toBe('scratch')
+    })
+
+    it('cuts a worktree in the picked directory when a workspace is asked for', async () => {
+      renderModal()
+      await chooseFromAddMenu('Use a directory…')
+      await act(async () => { fireEvent.change(nameInput(), { target: { value: 'Fix the badge' } }) })
+      await act(async () => { fireEvent.click(screen.getByRole('switch')) })
+      await waitFor(() => expect(api().workspaceListBranches).toHaveBeenCalledWith(
+        expect.objectContaining({ projectDir: '/tmp/scratch' })
+      ))
+
+      await act(async () => { fireEvent.click(screen.getByText('Create')) })
+      expect(api().workspaceCreate).toHaveBeenCalledWith(expect.objectContaining({
+        projectDir: '/tmp/scratch',
+        name: 'fix-the-badge'
+      }))
+      expect(onCreateWorkspace).toHaveBeenCalledWith(
+        inDir('/tmp/scratch'),
+        'Fix the badge',
+        expect.objectContaining({ branchName: 'fix-the-badge' })
+      )
+    })
+
+    it('stays put when the directory picker is cancelled', async () => {
+      renderModal()
+      api().pickDirectory.mockResolvedValueOnce(null)
+      await chooseFromAddMenu('Use a directory…')
+      expect(projectNames()).toEqual(['devtool', 'notes', 'scripts'])
+      expect(selectedProject()).toBe('devtool')
+    })
   })
 
   it('closes on Escape', async () => {
@@ -439,7 +605,7 @@ describe('NewTaskModal', () => {
         await pending.promise
       })
 
-      expect(onCreateWorkspace).toHaveBeenCalledWith('p1', 'Fix the badge', {
+      expect(onCreateWorkspace).toHaveBeenCalledWith(inProject('p1'), 'Fix the badge', {
         worktreePath: '/repos/p1/.worktrees/fix-the-badge',
         branchName: 'fix-the-badge',
         baseBranch: 'master',

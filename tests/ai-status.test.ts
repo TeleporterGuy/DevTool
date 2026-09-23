@@ -75,9 +75,25 @@ describe('nextAiStatus', () => {
       expect(nextAiStatus(null, 'hook-notification', ctx)).toBe('keep')
     })
 
-    it('still raises the idle nudge when the tab is hidden or the window is not focused', () => {
-      expect(nextAiStatus(null, 'hook-notification', hookTab({ visible: false, windowFocused: true, notificationKind: 'idle' }))).toBe('attention')
-      expect(nextAiStatus(null, 'hook-notification', hookTab({ visible: true, windowFocused: false, notificationKind: 'idle' }))).toBe('attention')
+    // The inbox bug: Claude sends the idle nudge 60s after every Stop, and it used to
+    // pull a finished (even settled) task back into "Needs you".
+    it('never raises the idle nudge, wherever the tab is', () => {
+      expect(nextAiStatus(null, 'hook-notification', hookTab({ visible: false, windowFocused: false, notificationKind: 'idle' }))).toBe('keep')
+      expect(nextAiStatus(null, 'hook-notification', hookTab({ visible: true, windowFocused: false, notificationKind: 'idle' }))).toBe('keep')
+      expect(nextAiStatus('attention', 'hook-notification', hookTab({ notificationKind: 'idle' }))).toBe('keep')
+    })
+
+    it('treats the idle nudge as a late Stop when the tab still thinks it is working', () => {
+      expect(nextAiStatus('working', 'hook-notification', hookTab({ notificationKind: 'idle' }))).toBeNull()
+    })
+
+    it('ignores informational notifications', () => {
+      expect(nextAiStatus(null, 'hook-notification', hookTab({ notificationKind: 'info' }))).toBe('keep')
+      expect(nextAiStatus('working', 'hook-notification', hookTab({ notificationKind: 'info' }))).toBe('keep')
+    })
+
+    it('marks an auto-resumed turn as working', () => {
+      expect(nextAiStatus(null, 'hook-notification', hookTab({ notificationKind: 'resumed' }))).toBe('working')
     })
 
     it('always raises a permission prompt, even on the visible focused tab', () => {
@@ -88,6 +104,23 @@ describe('nextAiStatus', () => {
     it('treats an unclassified notification as attention', () => {
       const ctx = hookTab({ visible: true, windowFocused: true, notificationKind: 'unknown' })
       expect(nextAiStatus(null, 'hook-notification', ctx)).toBe('attention')
+    })
+  })
+
+  describe('hook-needs-input / hook-input-resolved', () => {
+    it('raises attention for a permission dialog, question or failed turn', () => {
+      expect(nextAiStatus('working', 'hook-needs-input', hookTab({ visible: true, windowFocused: true }))).toBe('attention')
+      expect(nextAiStatus(null, 'hook-needs-input', hookTab())).toBe('attention')
+      expect(nextAiStatus('exited', 'hook-needs-input', hookTab())).toBe('keep')
+    })
+
+    it('goes back to working once you answer', () => {
+      expect(nextAiStatus('attention', 'hook-input-resolved', hookTab())).toBe('working')
+    })
+
+    it('does not restart a finished turn', () => {
+      expect(nextAiStatus(null, 'hook-input-resolved', hookTab())).toBe('keep')
+      expect(nextAiStatus('working', 'hook-input-resolved', hookTab())).toBe('keep')
     })
   })
 
@@ -171,6 +204,23 @@ describe('classifyNotification', () => {
 
   it('prefers permission over idle when a message mentions both', () => {
     expect(classifyNotification({ message: 'Claude is idle, waiting for your permission to use Bash' })).toBe('permission')
+  })
+
+  it('prefers the structured notification_type over the message', () => {
+    expect(classifyNotification({ notification_type: 'idle_prompt', message: 'needs your permission' })).toBe('idle')
+    expect(classifyNotification({ notification_type: 'permission_prompt' })).toBe('permission')
+    expect(classifyNotification({ notification_type: 'elicitation_dialog' })).toBe('permission')
+    expect(classifyNotification({ notification_type: 'auth_success' })).toBe('info')
+    expect(classifyNotification({ notification_type: 'quota_auto_resume_fired' })).toBe('resumed')
+  })
+
+  it('falls back to the message for an unrecognised notification_type', () => {
+    expect(classifyNotification({ notification_type: 'something_new', message: 'Claude needs your permission' })).toBe('permission')
+  })
+
+  it('recognises the messages older builds send without a type', () => {
+    expect(classifyNotification({ message: 'Claude Code login successful' })).toBe('info')
+    expect(classifyNotification({ message: 'Usage limit reset — Claude is continuing your task' })).toBe('resumed')
   })
 
   it('falls back to unknown for anything unmatched, empty or absent', () => {

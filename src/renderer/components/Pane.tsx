@@ -11,6 +11,7 @@ import NoteTab from './NoteTab'
 import { ProjectHome } from './ProjectHome'
 import { AI_TAB_TYPES } from '../../shared/types'
 import { isNotebookFile } from '../../shared/notebook'
+import ClaudeChatTab from './claude-chat/ClaudeChatTab'
 import type { Tab, AiTabType, SshConfig, ShellCommandConfig } from '../../shared/types'
 import type { PaneSide } from './paneFocus'
 import type { TabDragState, TabDropTarget } from './tabDrag'
@@ -128,6 +129,22 @@ export default function Pane({
                 projectDir={projectDir}
                 sshConfig={sshConfig}
                 extraArgs={aiToolArgs?.[tab.type as AiTabType]}
+              />
+            )
+          }
+          if (tab.type === 'claude-chat') {
+            return (
+              <ClaudeChatTab
+                key={tab.id}
+                tabId={tab.id}
+                visible={taskVisible && tab.id === activeTabId}
+                sessionId={tab.sessionId}
+                pane={pane}
+                projectId={projectId}
+                taskId={taskId}
+                projectDir={projectDir}
+                sshConfig={sshConfig}
+                extraArgs={aiToolArgs?.claude}
               />
             )
           }

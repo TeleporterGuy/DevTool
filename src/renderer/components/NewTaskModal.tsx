@@ -1,17 +1,42 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
-import type { Project, WorkspaceConfig } from '../../shared/types'
+import type { Project, Tag, WorkspaceConfig } from '../../shared/types'
 import { isShellCommandProject } from '../../shared/types'
-import { Modal, SetBlock, Field, LinkBtn, PrimaryButton, HelperText, Switch } from './ui'
+import { dirBasename } from '../../shared/paths'
+import { Modal, SetBlock, Field, LinkBtn, PrimaryButton, HelperText, Switch, menuCls, menuItemCls } from './ui'
+import AddLocalProject from './AddLocalProject'
 import { branchSlug, defaultBaseBranch, isNewTaskDraftValid, matchProjects } from './newTask'
+import type { NewTaskTarget } from './newTask'
+import { Plus } from 'lucide-react'
 
 interface Props {
   projects: Project[]
   /** Pre-selected project — the one you were last looking at. */
   defaultProjectId: string | null
   getProjectDir: (project: Project) => string
-  onCreate: (projectId: string, name: string) => void
-  onCreateWorkspace: (projectId: string, name: string, workspace: WorkspaceConfig) => void
+  allTags: readonly Tag[]
+  onEnsureTag: (name: string) => string
+  onAddProject: (name: string, directory: string, tagIds?: string[]) => Project
+  onCreate: (target: NewTaskTarget, name: string) => void
+  onCreateWorkspace: (target: NewTaskTarget, name: string, workspace: WorkspaceConfig) => void
   onClose: () => void
+}
+
+/** A row in the destination list: a real project, or the directory you just picked. */
+interface TargetRow {
+  key: string
+  target: NewTaskTarget
+  label: string
+  /** Tooltip — the full path, which the label usually shortens away. */
+  title: string
+  /** Ad-hoc directories are marked, so "no project is being created" is visible. */
+  adhoc: boolean
+}
+
+function sameTarget(a: NewTaskTarget | null, b: NewTaskTarget): boolean {
+  if (!a || a.kind !== b.kind) return false
+  return a.kind === 'project' && b.kind === 'project'
+    ? a.projectId === b.projectId
+    : a.kind === 'dir' && b.kind === 'dir' && a.directory === b.directory
 }
 
 /**
@@ -19,18 +44,27 @@ interface Props {
  * subject, send. The optional workspace toggle is the one thing the tree's
  * "+ Task" can't do in a single step, so it lives here rather than forcing a
  * second trip through the project row.
+ *
+ * The destination list holds exactly one highlighted row, and that row is what
+ * gets created — there is no separate "cursor" that can drift away from the
+ * selection while the filter hides the difference.
  */
 export default function NewTaskModal({
   projects,
   defaultProjectId,
   getProjectDir,
+  allTags,
+  onEnsureTag,
+  onAddProject,
   onCreate,
   onCreateWorkspace,
   onClose
 }: Props): React.ReactElement {
-  const [projectId, setProjectId] = useState(() => {
-    if (defaultProjectId && projects.some(p => p.id === defaultProjectId)) return defaultProjectId
-    return projects[0]?.id ?? ''
+  const [target, setTarget] = useState<NewTaskTarget | null>(() => {
+    if (defaultProjectId && projects.some(p => p.id === defaultProjectId)) {
+      return { kind: 'project', projectId: defaultProjectId }
+    }
+    return projects[0] ? { kind: 'project', projectId: projects[0].id } : null
   })
   const [name, setName] = useState('')
   const [workspace, setWorkspace] = useState(false)
@@ -41,41 +75,89 @@ export default function NewTaskModal({
   const [baseBranch, setBaseBranch] = useState('')
   const [filter, setFilter] = useState('')
   const [projectFilter, setProjectFilter] = useState('')
-  // Keyboard cursor in the project list, independent of what's actually selected.
-  const [projectIndex, setProjectIndex] = useState(0)
+  // The directory picked via "Use a directory…", if any. No project record exists
+  // for it yet — one is minted only if this draft is actually created.
+  const [pickedDir, setPickedDir] = useState<string | null>(null)
+  const [addMenuOpen, setAddMenuOpen] = useState(false)
+  const [newProjectOpen, setNewProjectOpen] = useState(false)
   const [creating, setCreating] = useState(false)
   const [cancelling, setCancelling] = useState(false)
   const [error, setError] = useState('')
   const projectListRef = useRef<HTMLDivElement>(null)
+  const nameRef = useRef<HTMLInputElement>(null)
   // git has no abort once it starts cutting a worktree, so "cancel" means: ignore
   // whatever comes back, and undo it. Checked after every await, not just the first.
   const cancelledRef = useRef(false)
   const mountedRef = useRef(true)
 
-  const project = useMemo(() => projects.find(p => p.id === projectId) ?? null, [projects, projectId])
+  const project = useMemo(
+    () => (target?.kind === 'project' ? projects.find(p => p.id === target.projectId) ?? null : null),
+    [projects, target]
+  )
   const filteredProjects = useMemo(() => matchProjects(projects, projectFilter), [projects, projectFilter])
+  // The picked directory is pinned to the top and never filtered out: it is the
+  // one row the filter box has nothing to say about.
+  const rows = useMemo<TargetRow[]>(() => {
+    const dirRow: TargetRow[] = pickedDir
+      ? [{
+          key: `dir:${pickedDir}`,
+          target: { kind: 'dir', directory: pickedDir },
+          label: dirBasename(pickedDir),
+          title: pickedDir,
+          adhoc: true
+        }]
+      : []
+    return [
+      ...dirRow,
+      ...filteredProjects.map(p => ({
+        key: p.id,
+        target: { kind: 'project', projectId: p.id } as NewTaskTarget,
+        label: p.name,
+        title: p.name,
+        adhoc: false
+      }))
+    ]
+  }, [pickedDir, filteredProjects])
+  const cursor = rows.findIndex(row => sameTarget(target, row.target))
+
+  // Where the task will run, and what to call it. A directory target has no
+  // project record behind it, so both come straight off the path.
+  const targetDir = project ? getProjectDir(project) : pickedDir && target?.kind === 'dir' ? pickedDir : ''
+  const targetLabel = project ? project.name : target?.kind === 'dir' ? dirBasename(target.directory) : ''
   // Shell-command projects have no directory to make a worktree in.
-  const workspaceSupported = !!project && !isShellCommandProject(project)
+  const workspaceSupported = target?.kind === 'dir' || (!!project && !isShellCommandProject(project))
   const workspaceOn = workspace && workspaceSupported
   const branch = branchOverride ?? branchSlug(name)
 
-  // Re-aim the cursor whenever the filter narrows the list: with nothing typed the
-  // whole list is on screen, so park it on the project you already have; otherwise
-  // lead with the best match. Deliberately not keyed on projectId — picking a
-  // project shouldn't yank the cursor away from where you were arrowing.
-  useEffect(() => {
-    if (projectFilter) {
-      setProjectIndex(0)
-      return
-    }
-    setProjectIndex(Math.max(filteredProjects.findIndex(p => p.id === projectId), 0))
-  }, [projectFilter, filteredProjects])
+  /** Point the composer somewhere else, dropping everything the old target loaded. */
+  const selectTarget = (next: NewTaskTarget): void => {
+    setTarget(next)
+    // Another repo means other branches.
+    setBranches([])
+    setBaseBranch('')
+    setFilter('')
+    setError('')
+  }
 
-  // Follow the cursor — this also brings the selected project into view on open.
+  // Keep the selection inside the visible list: if the filter hides whatever was
+  // picked, the top match takes over. Without this the highlighted row and the
+  // row that actually gets created can drift apart.
   useEffect(() => {
-    const row = projectListRef.current?.children[projectIndex] as HTMLElement | undefined
+    if (rows.length === 0) return
+    if (rows.some(row => sameTarget(target, row.target))) return
+    // A project the composer just created can be selected a beat before the
+    // parent hands it back down. That is a pending selection, not a filtered-out
+    // one, and stealing it back to the top match would undo the add.
+    if (target?.kind === 'project' && !projects.some(p => p.id === target.projectId)) return
+    selectTarget(rows[0].target)
+  }, [rows, projects])
+
+  // Follow the selection — this also brings it into view on open.
+  useEffect(() => {
+    if (cursor < 0) return
+    const row = projectListRef.current?.children[cursor] as HTMLElement | undefined
     row?.scrollIntoView({ block: 'nearest' })
-  }, [projectIndex])
+  }, [cursor])
 
   // However the dialog goes away — Escape, backdrop, or the parent dropping it —
   // it takes any request it started with it.
@@ -103,23 +185,41 @@ export default function NewTaskModal({
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent): void => {
-      if (e.key === 'Escape') requestClose()
+      if (e.key !== 'Escape') return
+      // Escape peels off one layer at a time: the nested "add project" dialog
+      // first, so it never takes the composer down with it.
+      if (newProjectOpen) {
+        setNewProjectOpen(false)
+        return
+      }
+      if (addMenuOpen) {
+        setAddMenuOpen(false)
+        return
+      }
+      requestClose()
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [onClose, creating, cancelling])
+  }, [onClose, creating, cancelling, newProjectOpen, addMenuOpen])
+
+  useEffect(() => {
+    if (!addMenuOpen) return
+    const close = (): void => setAddMenuOpen(false)
+    window.addEventListener('mousedown', close)
+    return () => window.removeEventListener('mousedown', close)
+  }, [addMenuOpen])
 
   // Branches are only fetched once you actually ask for a workspace — the common
   // case is a plain task, and a git call per project switch would be wasted work.
   useEffect(() => {
-    if (!workspaceOn || !project) return
+    if (!workspaceOn || !targetDir) return
     let cancelled = false
     setBranchesLoading(true)
     setError('')
     window.api.workspaceListBranches({
-      projectDir: getProjectDir(project),
-      projectId: project.ssh ? project.id : undefined,
-      sshConfig: project.ssh
+      projectDir: targetDir,
+      projectId: project?.ssh ? project.id : undefined,
+      sshConfig: project?.ssh
     })
       .then(list => {
         if (cancelled) return
@@ -136,13 +236,13 @@ export default function NewTaskModal({
         if (!cancelled) setBranchesLoading(false)
       })
     return () => { cancelled = true }
-  }, [workspaceOn, project, getProjectDir])
+  }, [workspaceOn, targetDir, project])
 
   const filteredBranches = filter
     ? branches.filter(b => b.toLowerCase().includes(filter.toLowerCase()))
     : branches
 
-  const valid = isNewTaskDraftValid({ projectId, name, workspace: workspaceOn, branch, baseBranch })
+  const valid = isNewTaskDraftValid({ target, name, workspace: workspaceOn, branch, baseBranch })
 
   /** The unwind is done — drop the dialog, unless the user already walked away. */
   const finishCancel = (): void => {
@@ -153,11 +253,11 @@ export default function NewTaskModal({
   }
 
   const handleCreate = async (): Promise<void> => {
-    if (!valid || creating || !project) return
+    if (!valid || creating || !target) return
     const taskName = name.trim()
 
     if (!workspaceOn) {
-      onCreate(project.id, taskName)
+      onCreate(target, taskName)
       return
     }
 
@@ -166,12 +266,16 @@ export default function NewTaskModal({
     setCancelling(false)
     setError('')
 
+    const workspaceTarget = {
+      projectDir: targetDir,
+      projectId: project?.ssh ? project.id : undefined,
+      sshConfig: project?.ssh
+    }
+
     let result: Awaited<ReturnType<typeof window.api.workspaceCreate>>
     try {
       result = await window.api.workspaceCreate({
-        projectDir: getProjectDir(project),
-        projectId: project.ssh ? project.id : undefined,
-        sshConfig: project.ssh,
+        ...workspaceTarget,
         name: branch.trim(),
         baseBranch
       })
@@ -188,7 +292,7 @@ export default function NewTaskModal({
     }
 
     if (!cancelledRef.current) {
-      onCreateWorkspace(project.id, taskName, {
+      onCreateWorkspace(target, taskName, {
         worktreePath: result.worktreePath,
         branchName: result.branchName,
         baseBranch,
@@ -202,9 +306,7 @@ export default function NewTaskModal({
     // its base, so there is no uncommitted or unmerged work to protect.
     try {
       await window.api.workspaceDelete({
-        projectDir: getProjectDir(project),
-        projectId: project.ssh ? project.id : undefined,
-        sshConfig: project.ssh,
+        ...workspaceTarget,
         worktreePath: result.worktreePath,
         branchName: result.branchName,
         baseBranch,
@@ -226,145 +328,220 @@ export default function NewTaskModal({
     if (e.key === 'Enter') void handleCreate()
   }
 
-  const selectProject = (id: string): void => {
-    setProjectId(id)
-    // Another repo means other branches; drop everything the old one loaded.
-    setBranches([])
-    setBaseBranch('')
-    setFilter('')
-    setError('')
-  }
-
   const onProjectFilterKeyDown = (e: React.KeyboardEvent): void => {
     if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
       e.preventDefault()
+      if (rows.length === 0) return
       const delta = e.key === 'ArrowDown' ? 1 : -1
-      setProjectIndex(i => Math.min(Math.max(i + delta, 0), filteredProjects.length - 1))
+      const next = Math.min(Math.max((cursor < 0 ? 0 : cursor) + delta, 0), rows.length - 1)
+      selectTarget(rows[next].target)
     } else if (e.key === 'Enter') {
-      // Enter picks a project here — only the task name field creates the task.
+      // The destination is already picked — Enter here just moves you along to
+      // the thing you still have to type.
       e.preventDefault()
-      const pick = filteredProjects[projectIndex] ?? filteredProjects[0]
-      if (pick) selectProject(pick.id)
+      nameRef.current?.focus()
     }
   }
 
+  const handlePickDirectory = async (): Promise<void> => {
+    const picked = await window.api.pickDirectory()
+    if (!picked || !mountedRef.current) return
+    setPickedDir(picked)
+    setProjectFilter('')
+    selectTarget({ kind: 'dir', directory: picked })
+    nameRef.current?.focus()
+  }
+
+  const handleAddProject = (projectName: string, directory: string, tagIds?: string[]): void => {
+    const created = onAddProject(projectName, directory, tagIds)
+    setNewProjectOpen(false)
+    setProjectFilter('')
+    selectTarget({ kind: 'project', projectId: created.id })
+    nameRef.current?.focus()
+  }
+
   return (
-    <Modal
-      title="New task"
-      onClose={requestClose}
-      footer={
-        <>
-          <LinkBtn onClick={requestClose}>{cancelling ? 'Close anyway' : 'Cancel'}</LinkBtn>
-          <PrimaryButton onClick={() => void handleCreate()} disabled={!valid || creating}>
-            {cancelling ? 'Cancelling…' : creating ? 'Creating…' : 'Create'}
-          </PrimaryButton>
-        </>
-      }
-    >
-      {projects.length === 0 ? (
-        <HelperText>Add a project first — tasks live inside one.</HelperText>
-      ) : (
-        <>
-          <SetBlock label="Project">
+    <>
+      <Modal
+        title="New task"
+        onClose={requestClose}
+        footer={
+          <>
+            <LinkBtn onClick={requestClose}>{cancelling ? 'Close anyway' : 'Cancel'}</LinkBtn>
+            <PrimaryButton onClick={() => void handleCreate()} disabled={!valid || creating}>
+              {cancelling ? 'Cancelling…' : creating ? 'Creating…' : 'Create'}
+            </PrimaryButton>
+          </>
+        }
+      >
+        <SetBlock
+          label={
+            <span className="flex items-baseline gap-1.5">
+              <span>Project</span>
+              {/* Naming the destination in the label is what makes a filter that
+                  matches nothing harmless: you can still read where this goes. */}
+              {targetLabel && (
+                <span className="text-sm font-normal text-text-muted truncate" title={targetDir || targetLabel}>
+                  — {targetLabel}
+                </span>
+              )}
+            </span>
+          }
+        >
+          <div className="flex gap-2">
             {/* One project is nothing to filter — the input would just be noise. */}
             {projects.length > 1 && (
               <Field
+                className="flex-1"
                 value={projectFilter}
                 onChange={(e) => setProjectFilter(e.target.value)}
                 placeholder="Filter projects…"
                 onKeyDown={onProjectFilterKeyDown}
               />
             )}
-            <div ref={projectListRef} className="max-h-[160px] overflow-y-auto rounded-md border border-border bg-field p-1">
-              {filteredProjects.length === 0 && (
-                <div className="px-2 py-1.5 text-sm text-text-muted">No matching projects</div>
-              )}
-              {filteredProjects.map((p, i) => (
-                <button
-                  key={p.id}
-                  // The background belongs to exactly one branch below: a static
-                  // `bg-transparent` here would out-rank `bg-sel` in the utility
-                  // layer and the selected row would draw as if nothing was picked.
-                  className={`block w-full rounded-md px-2 py-1 text-left text-base text-text border-0 cursor-pointer ${p.id === projectId ? 'bg-sel' : i === projectIndex ? 'bg-surface-3' : 'bg-transparent hover:bg-surface-3'}`}
-                  onClick={() => selectProject(p.id)}
+            <div className="relative ml-auto">
+              <button
+                className="h-(--ctl-h) px-2.5 flex items-center rounded-md bg-field text-text-muted hover:text-text border border-border cursor-pointer"
+                onClick={(e) => { e.stopPropagation(); setAddMenuOpen(!addMenuOpen) }}
+                title="Add a destination"
+                aria-label="Add a destination"
+              >
+                <Plus size={14} />
+              </button>
+              {addMenuOpen && (
+                <div
+                  className={`absolute top-full right-0 mt-1 z-(--z-menu) whitespace-nowrap ${menuCls}`}
+                  onMouseDown={(e) => e.stopPropagation()}
                 >
-                  {p.name}
-                </button>
-              ))}
+                  <button
+                    className={menuItemCls}
+                    onClick={() => { setAddMenuOpen(false); setNewProjectOpen(true) }}
+                  >
+                    New project…
+                  </button>
+                  <button
+                    className={menuItemCls}
+                    onClick={() => { setAddMenuOpen(false); void handlePickDirectory() }}
+                  >
+                    Use a directory…
+                  </button>
+                </div>
+              )}
             </div>
-          </SetBlock>
-
-          <SetBlock label="Task name">
-            <Field
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="What needs doing?"
-              autoFocus
-              onKeyDown={submitOnEnter}
-            />
-          </SetBlock>
-
-          <SetBlock
-            label={
-              <span className="flex items-center justify-between gap-3">
-                <span>Isolate in a workspace</span>
-                <Switch
-                  checked={workspaceOn}
-                  onChange={setWorkspace}
-                  disabled={!workspaceSupported}
-                />
-              </span>
-            }
-            sub={
-              workspaceSupported
-                ? 'Creates a git worktree on a new branch and points the task at it.'
-                : 'Not available for custom shell projects.'
-            }
+          </div>
+          <div
+            ref={projectListRef}
+            role="group"
+            aria-label="Destination"
+            className="max-h-[160px] overflow-y-auto rounded-md border border-border bg-field p-1"
           >
-            {workspaceOn && (
-              <div className="flex flex-col gap-3 pt-1">
-                <SetBlock label={<span className="text-sm text-text-muted">Branch</span>}>
-                  <Field
-                    value={branch}
-                    onChange={(e) => setBranchOverride(e.target.value)}
-                    placeholder="feature-name"
-                    onKeyDown={submitOnEnter}
-                  />
-                </SetBlock>
-
-                <SetBlock label={<span className="text-sm text-text-muted">Base branch</span>}>
-                  <Field
-                    value={filter}
-                    onChange={(e) => setFilter(e.target.value)}
-                    placeholder="Filter branches…"
-                  />
-                  <div className="max-h-[160px] overflow-y-auto rounded-md border border-border bg-field p-1">
-                    {filteredBranches.length === 0 && (
-                      <div className="px-2 py-1.5 text-sm text-text-muted">
-                        {branchesLoading ? 'Loading…' : branches.length === 0 ? 'No branches' : 'No matching branches'}
-                      </div>
-                    )}
-                    {filteredBranches.map(b => (
-                      <button
-                        key={b}
-                        className={`block w-full rounded-md px-2 py-1 text-left text-base text-text border-0 cursor-pointer ${b === baseBranch ? 'bg-sel' : 'bg-transparent hover:bg-surface-3'}`}
-                        onClick={() => setBaseBranch(b)}
-                      >
-                        {b}
-                      </button>
-                    ))}
-                  </div>
-                </SetBlock>
+            {rows.length === 0 && (
+              <div className="px-2 py-1.5 text-sm text-text-muted">
+                {projects.length === 0 ? 'No projects yet' : 'No matching projects'}
               </div>
             )}
-          </SetBlock>
-
-          {cancelling && (
-            <HelperText>Cancelling — removing the workspace git already started.</HelperText>
+            {rows.map(row => (
+              <button
+                key={row.key}
+                title={row.title}
+                // The background belongs to exactly one branch below: a static
+                // `bg-transparent` here would out-rank `bg-sel` in the utility
+                // layer and the selected row would draw as if nothing was picked.
+                className={`flex w-full items-center gap-1.5 rounded-md px-2 py-1 text-left text-base text-text border-0 cursor-pointer ${cursor >= 0 && rows[cursor].key === row.key ? 'bg-sel' : 'bg-transparent hover:bg-surface-3'}`}
+                onClick={() => selectTarget(row.target)}
+              >
+                <span className="truncate">{row.label}</span>
+                {row.adhoc && (
+                  <span className="text-2xs px-1 py-px rounded-sm bg-surface-3 text-text-muted shrink-0">dir</span>
+                )}
+              </button>
+            ))}
+          </div>
+          {projects.length === 0 && !pickedDir && (
+            <HelperText>Tasks live in a project — add one, or point this task at a directory.</HelperText>
           )}
-          {error && <HelperText><span className="text-danger">{error}</span></HelperText>}
-        </>
+        </SetBlock>
+
+        <SetBlock label="Task name">
+          <Field
+            ref={nameRef}
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="What needs doing?"
+            autoFocus
+            onKeyDown={submitOnEnter}
+          />
+        </SetBlock>
+
+        <SetBlock
+          label={
+            <span className="flex items-center justify-between gap-3">
+              <span>Isolate in a workspace</span>
+              <Switch
+                checked={workspaceOn}
+                onChange={setWorkspace}
+                disabled={!workspaceSupported}
+              />
+            </span>
+          }
+          sub={
+            workspaceSupported
+              ? 'Creates a git worktree on a new branch and points the task at it.'
+              : 'Not available for custom shell projects.'
+          }
+        >
+          {workspaceOn && (
+            <div className="flex flex-col gap-3 pt-1">
+              <SetBlock label={<span className="text-sm text-text-muted">Branch</span>}>
+                <Field
+                  value={branch}
+                  onChange={(e) => setBranchOverride(e.target.value)}
+                  placeholder="feature-name"
+                  onKeyDown={submitOnEnter}
+                />
+              </SetBlock>
+
+              <SetBlock label={<span className="text-sm text-text-muted">Base branch</span>}>
+                <Field
+                  value={filter}
+                  onChange={(e) => setFilter(e.target.value)}
+                  placeholder="Filter branches…"
+                />
+                <div className="max-h-[160px] overflow-y-auto rounded-md border border-border bg-field p-1">
+                  {filteredBranches.length === 0 && (
+                    <div className="px-2 py-1.5 text-sm text-text-muted">
+                      {branchesLoading ? 'Loading…' : branches.length === 0 ? 'No branches' : 'No matching branches'}
+                    </div>
+                  )}
+                  {filteredBranches.map(b => (
+                    <button
+                      key={b}
+                      className={`block w-full rounded-md px-2 py-1 text-left text-base text-text border-0 cursor-pointer ${b === baseBranch ? 'bg-sel' : 'bg-transparent hover:bg-surface-3'}`}
+                      onClick={() => setBaseBranch(b)}
+                    >
+                      {b}
+                    </button>
+                  ))}
+                </div>
+              </SetBlock>
+            </div>
+          )}
+        </SetBlock>
+
+        {cancelling && (
+          <HelperText>Cancelling — removing the workspace git already started.</HelperText>
+        )}
+        {error && <HelperText><span className="text-danger">{error}</span></HelperText>}
+      </Modal>
+
+      {newProjectOpen && (
+        <AddLocalProject
+          onAdd={handleAddProject}
+          onCancel={() => setNewProjectOpen(false)}
+          allTags={allTags}
+          onEnsureTag={onEnsureTag}
+        />
       )}
-    </Modal>
+    </>
   )
 }

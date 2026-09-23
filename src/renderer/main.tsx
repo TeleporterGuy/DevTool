@@ -2,6 +2,7 @@ import React from 'react'
 import ReactDOM from 'react-dom/client'
 import { isIgnorableRendererError, shouldSkipRendererCrashScreen } from './renderer-errors'
 import './styles.css'
+import { startStatusPulse } from './statusPulse'
 
 interface CrashDetails {
   title: string
@@ -132,4 +133,5 @@ async function bootstrap(): Promise<void> {
   }
 }
 
+startStatusPulse()
 void bootstrap()

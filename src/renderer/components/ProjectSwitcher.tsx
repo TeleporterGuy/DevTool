@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react'
-import { isRemoteProject, isShellCommandProject, AI_TAB_TYPES } from '../../shared/types'
+import { isEphemeralProject, isRemoteProject, isShellCommandProject, isAgentTabType } from '../../shared/types'
 import type { Project } from '../../shared/types'
 import { useTabStatusStore } from '../context/TabStatusContext'
 
@@ -44,12 +44,16 @@ export default function ProjectSwitcher({
       } else if (isShellCommandProject(project) && project.shellCommand) {
         context = project.shellCommand.command || 'Shell command'
       }
-      projectResults.push({
-        type: 'project',
-        projectId: project.id,
-        name: project.name,
-        context
-      })
+      // A hidden ad-hoc project is not somewhere you switch *to* — only its
+      // tasks are worth listing.
+      if (!isEphemeralProject(project)) {
+        projectResults.push({
+          type: 'project',
+          projectId: project.id,
+          name: project.name,
+          context
+        })
+      }
       for (const task of project.tasks) {
         if (task.system === 'home') continue
         taskResults.push({
@@ -122,7 +126,7 @@ export default function ProjectSwitcher({
       const task = project?.tasks.find(t => t.id === result.taskId)
       if (task) {
         const aiTabs = [...task.tabs.left, ...task.tabs.right]
-          .filter(t => (AI_TAB_TYPES as readonly string[]).includes(t.type))
+          .filter(t => isAgentTabType(t.type))
         for (const tab of aiTabs) {
           if (tabStatusStore.getStatus(tab.id) === 'attention') {
             tabStatusStore.setStatus(tab.id, null)

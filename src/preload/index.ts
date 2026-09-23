@@ -25,6 +25,9 @@ import type {
 } from '../shared/types'
 import type { CondaListResult } from '../shared/conda'
 import type { NotebookKernelCondaOverride, NotebookKernelEvent } from '../shared/notebook'
+import type { AgentActivity } from '../shared/agent-activity'
+import type { AiStatusEvent } from '../shared/ai-status'
+import type { ChatEvent, ChatImage, ChatPromptResponse, ChatSnapshot } from '../shared/claude-chat'
 
 const api = {
   // Projects
@@ -175,6 +178,41 @@ const api = {
   },
   onHookNotification: (callback: (tabId: string, body: Record<string, unknown>) => void): void => {
     ipcRenderer.on('hook-notification', (_e, tabId, body) => callback(tabId, body))
+  },
+  /** Any other Claude hook; `statusEvent` is the status transition it implies, if any. */
+  onHookActivity: (callback: (tabId: string, statusEvent: AiStatusEvent | null) => void): void => {
+    ipcRenderer.on('hook-activity', (_e, tabId, statusEvent) => callback(tabId, statusEvent))
+  },
+  /** What each Claude tab is doing, across every window. `null` = forgotten. */
+  getAgentActivity: (): Promise<Record<string, AgentActivity>> => ipcRenderer.invoke('get-agent-activity'),
+  onAgentActivity: (callback: (tabId: string, activity: AgentActivity | null) => void): (() => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, tabId: string, activity: AgentActivity | null) => callback(tabId, activity)
+    ipcRenderer.on('agent-activity', handler)
+    return () => ipcRenderer.removeListener('agent-activity', handler)
+  },
+
+  // Claude chat tabs (Agent SDK). Main owns the process; windows attach to it.
+  chatAttach: (
+    tabId: string,
+    config: { cwd: string; sessionId: string; projectId?: string; sshConfig?: SshConfig; extraArgs?: string[] }
+  ): Promise<ChatSnapshot> => ipcRenderer.invoke('chat-attach', tabId, config),
+  chatDetach: (tabId: string): void => ipcRenderer.send('chat-detach', tabId),
+  chatSend: (tabId: string, text: string, images?: ChatImage[]): Promise<void> =>
+    ipcRenderer.invoke('chat-send', tabId, text, images),
+  chatInterrupt: (tabId: string): Promise<void> => ipcRenderer.invoke('chat-interrupt', tabId),
+  chatRespond: (tabId: string, promptId: string, response: ChatPromptResponse): Promise<boolean> =>
+    ipcRenderer.invoke('chat-respond', tabId, promptId, response),
+  chatSetModel: (tabId: string, model?: string): Promise<void> => ipcRenderer.invoke('chat-set-model', tabId, model),
+  chatSetMode: (tabId: string, mode: string): Promise<void> => ipcRenderer.invoke('chat-set-mode', tabId, mode),
+  chatSetEffort: (tabId: string, effort?: string): Promise<void> => ipcRenderer.invoke('chat-set-effort', tabId, effort),
+  chatStop: (tabId: string): Promise<void> => ipcRenderer.invoke('chat-stop', tabId),
+  chatClose: (tabId: string): void => ipcRenderer.send('chat-close', tabId),
+  chatListFiles: (cwd: string, projectId?: string, sshConfig?: SshConfig): Promise<string[]> =>
+    ipcRenderer.invoke('chat-list-files', cwd, projectId, sshConfig),
+  onChatEvent: (callback: (tabId: string, seq: number, event: ChatEvent) => void): (() => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, tabId: string, seq: number, event: ChatEvent) => callback(tabId, seq, event)
+    ipcRenderer.on('chat-event', handler)
+    return () => ipcRenderer.removeListener('chat-event', handler)
   },
 
   // PTY

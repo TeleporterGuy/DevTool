@@ -34,8 +34,17 @@ export function branchSlug(taskName: string): string {
   return slug
 }
 
+/**
+ * Where a composed task will land. A `dir` target is a directory the user picked
+ * that no project owns yet — nothing is written until the task is actually
+ * created, so cancelling the composer leaves no trace.
+ */
+export type NewTaskTarget =
+  | { kind: 'project'; projectId: string }
+  | { kind: 'dir'; directory: string }
+
 export interface NewTaskDraft {
-  projectId: string
+  target: NewTaskTarget | null
   name: string
   /** Whether the task should get its own worktree + branch. */
   workspace: boolean
@@ -48,7 +57,8 @@ export interface NewTaskDraft {
  * both a branch to create and a branch to create it from.
  */
 export function isNewTaskDraftValid(draft: NewTaskDraft): boolean {
-  if (!draft.projectId) return false
+  if (!draft.target) return false
+  if (draft.target.kind === 'project' ? !draft.target.projectId : !draft.target.directory) return false
   if (!draft.name.trim()) return false
   if (!draft.workspace) return true
   return draft.branch.trim().length > 0 && draft.baseBranch.length > 0

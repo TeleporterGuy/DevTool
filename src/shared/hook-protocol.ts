@@ -18,5 +18,10 @@ export const HOOK_PORT_ENV = 'DEVTOOL_HOOK_PORT'
 /** Env var: shared secret minted when the hook server starts. */
 export const HOOK_TOKEN_ENV = 'DEVTOOL_HOOK_TOKEN'
 
-/** Reject hook bodies larger than this (bytes). */
-export const MAX_HOOK_BODY_BYTES = 64 * 1024
+/**
+ * Reject hook bodies larger than this (bytes). PostToolUse carries the whole
+ * `tool_response` (a Read of a big file, long Bash output), so this is sized for
+ * that rather than for the small lifecycle events. A dropped PostToolUse only
+ * leaves a stale tool label until the next tool call or Stop.
+ */
+export const MAX_HOOK_BODY_BYTES = 4 * 1024 * 1024

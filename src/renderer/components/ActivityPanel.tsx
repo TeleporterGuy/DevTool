@@ -1,7 +1,7 @@
 import React, { useState, useRef, useCallback } from 'react'
 import { ChevronRight } from 'lucide-react'
-import type { Project, AppConfig } from '../../shared/types'
-import { AI_TAB_TYPES, isHomeTask, isWorkspaceTask } from '../../shared/types'
+import type { Project, AppConfig, TabType } from '../../shared/types'
+import { isAgentTabType, isEphemeralProject, isHomeTask, isWorkspaceTask } from '../../shared/types'
 import type { TabStatusValue } from '../context/TabStatusContext'
 import { buildRecencyStyle, computeTaskRecencyOpacity, sortTasksByRecency } from './taskRecency'
 
@@ -23,7 +23,7 @@ function getTaskStatus(
   allStatuses: Record<string, TabStatusValue>
 ): TabStatusValue {
   const aiTabIds = [...task.tabs.left, ...task.tabs.right]
-    .filter((t) => (AI_TAB_TYPES as readonly string[]).includes(t.type))
+    .filter((t) => isAgentTabType(t.type as TabType))
     .map((t) => t.id)
   if (aiTabIds.length === 0) return null
   const statuses = aiTabIds.map((id) => allStatuses[id]).filter(Boolean)
@@ -36,7 +36,7 @@ function getTaskStatus(
 function StatusDot({ status }: { status: NonNullable<TabStatusValue> }) {
   const stateClass =
     status === 'working'
-      ? 'bg-status-working animate-pulse'
+      ? 'bg-status-working status-pulse'
       : status === 'attention'
         ? 'bg-status-attention shadow-[0_0_3px_var(--color-status-attention)]'
         : 'bg-status-exited'
@@ -161,6 +161,12 @@ export default function ActivityPanel({
                     <span className="overflow-hidden text-ellipsis whitespace-nowrap flex-1">{task.name}</span>
                     {isWorkspaceTask(task) && (
                       <span className="text-2xs px-1 py-px rounded-sm bg-surface-3 text-text-muted ml-1.5 shrink-0">ws</span>
+                    )}
+                    {isEphemeralProject(project) && (
+                      <span
+                        className="text-2xs px-1 py-px rounded-sm bg-surface-3 text-text-muted ml-1.5 shrink-0"
+                        title={project.directory}
+                      >dir</span>
                     )}
                     {status && <StatusDot status={status} />}
                   </div>

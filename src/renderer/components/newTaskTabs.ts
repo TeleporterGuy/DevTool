@@ -7,8 +7,8 @@
  */
 
 import { v4 as uuid } from 'uuid'
-import { AI_TAB_META, AI_TAB_TYPES } from '../../shared/types'
-import type { AiTabType, NewTaskAutoOpen, Tab, TabType } from '../../shared/types'
+import { AI_TAB_META, AI_TAB_TYPES, CLAUDE_CHAT_LABEL } from '../../shared/types'
+import type { AiTabType, ClaudeView, NewTaskAutoOpen, Tab, TabType } from '../../shared/types'
 
 export type CreateTabOptions = {
   filePath?: string
@@ -30,6 +30,8 @@ export function createTab(type: TabType, options: CreateTabOptions = {}): Tab {
   } else if (cwd && type === 'terminal') {
     const folder = cwd.replace(/[\\/]+$/, '').split(/[\\/]/).pop() ?? 'Terminal'
     title = folder
+  } else if (type === 'claude-chat') {
+    title = CLAUDE_CHAT_LABEL
   } else {
     title = isAi
       ? AI_TAB_META[type as AiTabType].label
@@ -39,9 +41,10 @@ export function createTab(type: TabType, options: CreateTabOptions = {}): Tab {
     id: uuid(),
     type,
     title,
-    // pi resumes via `--session-id <uuid>`; pre-generate a stable id at creation so
-    // the same session is reloaded across app restarts (pi creates it if missing).
-    ...(type === 'pi' ? { sessionId: uuid() } : {}),
+    // pi resumes via `--session-id <uuid>`, and a chat tab creates its Claude session
+    // with the id it is given; pre-generate a stable id at creation so the same
+    // session is reloaded across app restarts.
+    ...(type === 'pi' || type === 'claude-chat' ? { sessionId: uuid() } : {}),
     ...(filePath ? { filePath } : {}),
     ...(url ? { url } : {}),
     ...(noteId ? { noteId } : {}),
@@ -71,8 +74,13 @@ export function isAutoOpenAvailable(value: NewTaskAutoOpen, enabled: EnabledTool
  * would put a tab in the task the rest of the app refuses to offer, so that case
  * opens nothing — the Settings row says as much rather than failing silently.
  */
-export function newTaskInitialTabs(value: NewTaskAutoOpen, enabled: EnabledTools): Tab[] {
+export function newTaskInitialTabs(value: NewTaskAutoOpen, enabled: EnabledTools, claudeView: ClaudeView = 'terminal'): Tab[] {
   if (value === 'none') return []
   if (!isAutoOpenAvailable(value, enabled)) return []
-  return [createTab(value)]
+  return [createTab(claudeTabType(value, claudeView))]
+}
+
+/** A Claude choice opens as whichever view Settings picks; anything else is itself. */
+export function claudeTabType<T extends TabType>(type: T, claudeView: ClaudeView): T | 'claude-chat' {
+  return type === 'claude' && claudeView === 'chat' ? 'claude-chat' : type
 }

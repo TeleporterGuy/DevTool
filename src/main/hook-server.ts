@@ -7,7 +7,7 @@ import {
   MAX_HOOK_BODY_BYTES
 } from '../shared/hook-protocol'
 
-const VALID_ENDPOINTS = new Set(['session-start', 'working', 'stopped', 'notification'])
+const VALID_ENDPOINTS = new Set(['session-start', 'working', 'stopped', 'notification', 'activity'])
 
 function headerValue(headers: http.IncomingHttpHeaders, name: string): string | undefined {
   const raw = headers[name.toLowerCase()]
@@ -109,14 +109,13 @@ export class HookServer extends EventEmitter {
 
           this.logger?.(
             `hook endpoint=${endpoint} tabId=${tabId}` +
+            (endpoint === 'activity' && typeof body.hook_event_name === 'string' ? ` event=${body.hook_event_name}` : '') +
+            (typeof body.tool_name === 'string' ? ` tool=${body.tool_name}` : '') +
+            (typeof body.notification_type === 'string' ? ` type=${body.notification_type}` : '') +
             (typeof body.message === 'string' ? ` message=${JSON.stringify(body.message)}` : '')
           )
 
-          if (endpoint === 'working' || endpoint === 'stopped') {
-            this.emit(endpoint, tabId)
-          } else {
-            this.emit(endpoint, tabId, body)
-          }
+          this.emit(endpoint, tabId, body)
 
           res.writeHead(200)
           res.end()

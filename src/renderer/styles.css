@@ -147,6 +147,11 @@
 @layer utilities {
   .sidebar-hidden .content-toolbar { padding-left: 76px; background: var(--color-surface-2); border-bottom: none; }
   .sidebar-hidden .tab-bar { padding-left: 76px; }
+
+  /* Blinking status dots, ticked at 1Hz from statusPulse.ts — an infinite CSS
+     animation here would keep the compositor emitting frames at 60fps while idle. */
+  .status-pulse { opacity: 0.5; }
+  .status-pulse-on .status-pulse { opacity: 1; }
 }
 
 @layer base {
@@ -172,6 +177,12 @@
   .note-preview ul, .note-preview ol { margin-bottom: 12px; padding-left: 24px; }
   .note-preview li { margin-bottom: 4px; }
   .note-preview li > ul, .note-preview li > ol { margin-bottom: 0; margin-top: 4px; }
+  /* Preflight strips list markers; without them a list is just unexplained indentation. */
+  .note-preview ul { list-style: disc; }
+  .note-preview ul ul { list-style: circle; }
+  .note-preview ol { list-style: decimal; }
+  .note-preview li::marker { color: var(--color-text-subtle); }
+  .note-preview li:has(> input[type="checkbox"]) { list-style: none; }
 
   .note-preview blockquote {
     margin: 0 0 12px 0; padding: 8px 16px;
@@ -282,5 +293,44 @@
   .terminal-tab .xterm-scrollable-element > .scrollbar.vertical > .slider,
   .ai-tool-tab .xterm-scrollable-element > .scrollbar.vertical > .slider {
     width: 6px !important; left: 0 !important; border-radius: 3px;
+  }
+}
+
+/* Claude chat tab — compact work log */
+@layer components {
+  .chat-row-btn {
+    display: flex; align-items: center; gap: 8px; min-width: 0;
+    padding: 2px 4px; margin: 0 -4px; border: 0; border-radius: 4px;
+    background: transparent; color: inherit; text-align: left; cursor: pointer;
+    font: inherit;
+  }
+  .chat-row-btn:hover { background: var(--color-surface-2); }
+
+  .chat-pre {
+    margin: 0; padding: 6px 8px; max-height: 320px; overflow: auto;
+    font-family: var(--font-mono); font-size: 12px; line-height: 1.45;
+    white-space: pre-wrap; word-break: break-word;
+    background: var(--color-surface); border: 0.5px solid var(--color-border); border-radius: 6px;
+  }
+  .chat-diff { white-space: pre; word-break: normal; padding: 4px 0; }
+  .chat-diff > div { padding: 0 8px; }
+  .chat-diff-add { color: var(--color-success); background: color-mix(in srgb, var(--color-success) 12%, transparent); }
+  .chat-diff-del { color: var(--color-danger); background: color-mix(in srgb, var(--color-danger) 10%, transparent); }
+
+  .note-preview.chat-md { line-height: 1.6; }
+  .note-preview.chat-md p { margin-bottom: 8px; }
+  .note-preview.chat-md > *:last-child { margin-bottom: 0; }
+  .note-preview.chat-md h1, .note-preview.chat-md h2 { font-size: 1.15em; border-bottom: 0; padding-bottom: 0; margin-top: 14px; margin-bottom: 6px; }
+  .note-preview.chat-md h3, .note-preview.chat-md h4 { font-size: 1.02em; margin-top: 12px; margin-bottom: 4px; }
+  .note-preview.chat-md ul, .note-preview.chat-md ol { margin-bottom: 8px; padding-left: 18px; }
+  .note-preview.chat-md li { margin-bottom: 2px; }
+  .note-preview.chat-md pre { margin-bottom: 8px; padding: 8px 10px; background: var(--color-surface); border: 0.5px solid var(--color-border); }
+  .note-preview.chat-md pre code { font-size: 12px; }
+  .note-preview.chat-md code { font-size: 0.88em; padding: 1px 4px; }
+  .note-preview.chat-md table { font-size: 12px; margin-bottom: 8px; }
+  .note-preview.chat-md th, .note-preview.chat-md td { padding: 4px 8px; }
+  .chat-streaming > *:last-child::after {
+    content: ''; display: inline-block; width: 6px; height: 1em; margin-left: 2px;
+    vertical-align: text-bottom; background: var(--color-accent); opacity: 0.7;
   }
 }

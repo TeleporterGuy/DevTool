@@ -1,6 +1,7 @@
 import type { Project, Task } from '../../shared/types'
 import type { TabStatusValue } from '../context/TabStatusContext'
 import { inboxState, isSettled, isSnoozed, isUnread, lastActivityAt, taskStatus } from '../../shared/inbox-state'
+import { describeActivity, type AgentActivity } from '../../shared/agent-activity'
 
 // The triage predicates themselves moved to shared/inbox-state.ts when idle
 // cleanup moved into main — both processes must answer them identically. They
@@ -21,6 +22,46 @@ export function taskStatusSince(
     .filter((stamp): stamp is number => typeof stamp === 'number')
   if (stamps.length === 0) return null
   return Math.min(...stamps)
+}
+
+export interface TaskActivitySummary {
+  /** One line for the row: "Bash · npm test", "Permission: Edit a.ts", the last reply. */
+  line?: string
+  /** Multi-line hover text: session title, your last prompt, Claude's last reply. */
+  tooltip?: string
+}
+
+const STATUS_RANK: Record<string, number> = { attention: 3, working: 2, exited: 1 }
+
+/**
+ * The activity of the task's most relevant agent tab: the one that needs you, else
+ * the one working, else whichever reported last. Tasks with several Claude tabs
+ * show one line, so it has to be the line you would act on.
+ */
+export function taskActivity(
+  task: Task,
+  allStatuses: Record<string, TabStatusValue>,
+  activities: Record<string, AgentActivity>
+): TaskActivitySummary {
+  let best: { activity: AgentActivity; status: TabStatusValue; rank: number } | null = null
+  for (const tab of [...task.tabs.left, ...task.tabs.right]) {
+    const activity = activities[tab.id]
+    if (!activity) continue
+    const status = allStatuses[tab.id] ?? null
+    const rank = status ? STATUS_RANK[status] ?? 0 : 0
+    if (!best || rank > best.rank || (rank === best.rank && activity.updatedAt > best.activity.updatedAt)) {
+      best = { activity, status, rank }
+    }
+  }
+  if (!best) return {}
+
+  const { activity, status } = best
+  const tooltip = [
+    activity.title,
+    activity.lastPrompt && `You: ${activity.lastPrompt}`,
+    activity.lastMessage && `Claude: ${activity.lastMessage}`
+  ].filter(Boolean).join('\n')
+  return { line: describeActivity(activity, status), tooltip: tooltip || undefined }
 }
 
 export interface InboxEntry {

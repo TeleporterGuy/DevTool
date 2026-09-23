@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react'
 import { useApp } from '../context/AppContext'
 import { useAllTabStatuses, useAllTabStatusSince, useTabStatusStore, type TabStatusValue } from '../context/TabStatusContext'
-import { AI_TAB_TYPES, isHomeTask, isRemoteProject, isShellCommandProject, isWorkspaceTask, pinnedItemKey, projectMatchesTagFilter } from '../../shared/types'
+import { isAgentTabType, isEphemeralProject, isHomeTask, isRemoteProject, isShellCommandProject, isWorkspaceTask, pinnedItemKey, projectMatchesTagFilter } from '../../shared/types'
 import type { Task, Project, PinnedItem, WorkspaceDeleteResult } from '../../shared/types'
 import AddRemoteProject from './AddRemoteProject'
 import CreateWorkspaceModal from './CreateWorkspaceModal'
@@ -15,12 +15,13 @@ import InboxPanel from './InboxPanel'
 import NewTaskModal from './NewTaskModal'
 import { getReorderInsertIndex, getTaskDropIndex } from './sidebarDrag'
 import { buildRecencyStyle, computeTaskRecencyOpacity, sortTasksByRecency } from './taskRecency'
-import { isSettled, isSnoozed, isUnread, snoozePresets } from './inbox'
+import { isSettled, isSnoozed, isUnread, snoozePresets, taskActivity } from './inbox'
+import { useAllAgentActivity } from '../agentActivity'
 import { newTaskInitialTabs } from './newTaskTabs'
 import { useResizeHandle } from '../hooks/useResizeHandle'
 import { useMenuPosition } from '../hooks/useMenuPosition'
 import { ChevronRight, Filter, Plus, Search, Settings as SettingsIcon, Plug, SquarePen, Terminal as TerminalIcon, X, Cog } from 'lucide-react'
-import { RowActions, RowAction } from './ui'
+import { RowActions, RowAction, menuCls, menuItemCls } from './ui'
 import { paletteEvents } from '../palette/paletteEvents'
 import { dashboardIconUrl, fetchDashboardIconsMetadata, type DashboardIconsMetadata } from './dashboardIcons'
 import { formatShortcutForApp } from '../../shared/shortcut-label'
@@ -39,7 +40,7 @@ type DropTarget =
 
 function getTaskStatus(task: Task, allStatuses: Record<string, TabStatusValue>): TabStatusValue {
   const aiTabIds = [...task.tabs.left, ...task.tabs.right]
-    .filter((t) => (AI_TAB_TYPES as readonly string[]).includes(t.type))
+    .filter((t) => isAgentTabType(t.type))
     .map((t) => t.id)
   if (aiTabIds.length === 0) return null
   const statuses = aiTabIds.map((id) => allStatuses[id]).filter(Boolean)
@@ -62,10 +63,6 @@ function getProjectStatus(tasks: Task[], allStatuses: Record<string, TabStatusVa
     Task rows indent to it with pl (inside mx), drop indicators with ml (no mx). */
 const TASK_ROW_PL = 'pl-[58px]'
 const TASK_ROW_ML = 'ml-[64px]'
-
-/** Stem ctx-menu row */
-const menuItemCls = 'block w-full rounded-md px-2.5 py-1 bg-transparent border-0 text-text text-sm text-left cursor-pointer hover:bg-sel'
-const menuCls = 'bg-surface border-[0.5px] border-border rounded-lg p-1 shadow-pop'
 
 /** Icon buttons in the sidebar header strip (search / filter / add). */
 const headerIconCls = 'relative flex items-center bg-transparent border-0 text-text-muted cursor-pointer px-1.5 py-1 rounded-md hover:bg-surface-3 hover:text-text transition-colors duration-(--motion-fast)'
@@ -158,7 +155,7 @@ function TaskStatusDot({ task, allStatuses }: { task: Task; allStatuses: Record<
   const status = getTaskStatus(task, allStatuses)
   if (!status) return null
   const dotClass = status === 'working'
-    ? 'bg-status-working animate-pulse'
+    ? 'bg-status-working status-pulse'
     : status === 'attention'
     ? 'bg-status-attention shadow-[0_0_3px_var(--color-status-attention)]'
     : 'bg-status-exited'
@@ -172,7 +169,7 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
     selectedProjectId, selectedTaskId, selectedTagIds,
     switchToTask, selectProjectHome,
     addProject, addRemoteProject, connectSsh, addShellCommandProject, addTag, removeProject, renameProject, updateProject,
-    addTask, addWorkspaceTask, removeTask, renameTask,
+    addTask, addWorkspaceTask, addTaskInDirectory, removeTask, renameTask,
     reorderProjects, reorderTasks, getProjectDir,
     config, updateConfig,
     toggleTagFilter, clearTagFilters,
@@ -187,6 +184,12 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
   const allStatuses = useAllTabStatuses()
   const statusSince = useAllTabStatusSince()
   const tabStatusStore = useTabStatusStore()
+  const agentActivities = useAllAgentActivity()
+  // Tree rows are one line tall, so what the agent is doing lives in the tooltip.
+  const taskTooltip = (task: Task): string | undefined => {
+    const { line, tooltip } = taskActivity(task, allStatuses, agentActivities)
+    return [line, tooltip].filter(Boolean).join('\n') || undefined
+  }
 
   const [now, setNow] = useState(() => Date.now())
   const sortedByRecency = React.useMemo(
@@ -218,7 +221,7 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
   // Tabs the composer seeds a new task with. Passed into the create call rather
   // than opened afterwards, so the task and its tab land in one state write.
   const composerInitialTabs = useCallback(
-    () => (config ? newTaskInitialTabs(config.newTaskAutoOpen, config) : []),
+    () => (config ? newTaskInitialTabs(config.newTaskAutoOpen, config, config.claudeDefaultView) : []),
     [config]
   )
 
@@ -279,15 +282,28 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
     })
   }, [projectOrder, projectsById, selectedTagIds])
   // The inbox honours the same tag filter as the tree, so the chips row means the
-  // same thing in both tabs.
+  // same thing in both tabs. Unlike the tree it *keeps* ad-hoc projects: their
+  // tasks are real work, and the inbox is the only place they surface.
   const inboxProjects = React.useMemo(
     () => visibleProjectIds.map(id => projectsById.get(id)).filter((p): p is Project => !!p),
     [visibleProjectIds, projectsById]
   )
+  // The tree is the list of projects you chose to have; the hidden ones a task
+  // borrowed a directory through don't belong in it.
+  const treeProjectIds = React.useMemo(
+    () => visibleProjectIds.filter(id => {
+      const project = projectsById.get(id)
+      return !!project && !isEphemeralProject(project)
+    }),
+    [visibleProjectIds, projectsById]
+  )
   // The composer deliberately ignores the tag filter: filtering the destination
   // list would make projects you can see in the tree un-creatable-in from here.
+  // Ad-hoc projects stay out — you reach one again by picking its directory.
   const orderedProjects = React.useMemo(
-    () => projectOrder.map(id => projectsById.get(id)).filter((p): p is Project => !!p),
+    () => projectOrder
+      .map(id => projectsById.get(id))
+      .filter((p): p is Project => !!p && !isEphemeralProject(p)),
     [projectOrder, projectsById]
   )
   const sortedTags = React.useMemo(
@@ -591,7 +607,7 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
         if (ev.clientY < rect.top || ev.clientY > rect.bottom) continue
 
         const itemId = item.dataset.dragId!
-        const listIdx = visibleProjectIds.indexOf(itemId)
+        const listIdx = treeProjectIds.indexOf(itemId)
         if (listIdx < 0) break
         const midY = rect.top + rect.height / 2
         const insertIdx = ev.clientY > midY ? listIdx + 1 : listIdx
@@ -600,7 +616,7 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
       }
 
       if (!newTarget) {
-        newTarget = { type: 'between-projects', index: visibleProjectIds.length }
+        newTarget = { type: 'between-projects', index: treeProjectIds.length }
       }
 
       dropTargetRef.current = newTarget
@@ -625,9 +641,9 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
           }
         } else if (currentDragState.type === 'project' && currentDropTarget.type === 'between-projects') {
           const fromIdx = projectOrder.indexOf(currentDragState.id)
-          const orderDropIndex = currentDropTarget.index >= visibleProjectIds.length
+          const orderDropIndex = currentDropTarget.index >= treeProjectIds.length
             ? projectOrder.length
-            : projectOrder.indexOf(visibleProjectIds[currentDropTarget.index] ?? '')
+            : projectOrder.indexOf(treeProjectIds[currentDropTarget.index] ?? '')
           if (orderDropIndex >= 0) {
             const toIdx = getReorderInsertIndex(fromIdx, orderDropIndex)
             if (toIdx !== null) {
@@ -645,7 +661,7 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
 
     document.addEventListener('mousemove', onMouseMove)
     document.addEventListener('mouseup', onMouseUp)
-  }, [editingId, projectOrder, visibleProjectIds, reorderTasks, reorderProjects])
+  }, [editingId, projectOrder, treeProjectIds, reorderTasks, reorderProjects])
 
   const [pinDragIndex, setPinDragIndex] = useState<number | null>(null)
   const [pinDropIndex, setPinDropIndex] = useState<number | null>(null)
@@ -779,7 +795,7 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
               const dotClass = sshStatus === 'connected'
                 ? 'bg-ssh-connected'
                 : sshStatus === 'connecting'
-                ? 'bg-ssh-connecting animate-pulse'
+                ? 'bg-ssh-connecting status-pulse'
                 : 'bg-ssh-disconnected'
               return <span className={`w-1.5 h-1.5 rounded-full shrink-0 ml-1 ${dotClass}`} />
             })()}
@@ -788,7 +804,7 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
                 const projectStatus = getProjectStatus(project.tasks.filter(t => !isHomeTask(t)), allStatuses)
                 if (!projectStatus) return null
                 const dotClass = projectStatus === 'working'
-                  ? 'bg-status-working animate-pulse'
+                  ? 'bg-status-working status-pulse'
                   : projectStatus === 'attention'
                   ? 'bg-status-attention shadow-[0_0_3px_var(--color-status-attention)]'
                   : 'bg-status-exited'
@@ -834,6 +850,7 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
                   ].join(' ')}
                   data-task-id={task.id}
                   data-task-index={projectTaskIndex}
+                  title={editingId === task.id ? undefined : taskTooltip(task)}
                   style={recencyStyle}
                   onClick={() => handleSelectTask(project.id, task)}
                   onMouseDown={(e) => handleDragMouseDown(e, 'task', task.id, projectTaskIndex, project.id)}
@@ -935,6 +952,7 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
                     ].join(' ')}
                     data-pin-key={pin.key}
                     data-pin-index={index}
+                    title={isProjectPin ? undefined : taskTooltip(pin.task!)}
                     onClick={() => {
                       if (isProjectPin) selectProjectHome(pin.project.id)
                       else handleSelectTask(pin.project.id, pin.task!)
@@ -969,12 +987,19 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
                     {!isProjectPin && isWorkspaceTask(pin.task!) && (
                       <span className="text-2xs px-1 py-px rounded-sm bg-surface-3 text-text-muted shrink-0">ws</span>
                     )}
+                    {/* Pins are the one place a hidden ad-hoc project reaches the tree. */}
+                    {isEphemeralProject(pin.project) && (
+                      <span
+                        className="text-2xs px-1 py-px rounded-sm bg-surface-3 text-text-muted shrink-0"
+                        title={pin.project.directory}
+                      >dir</span>
+                    )}
                     <span className="ml-auto flex items-center shrink-0" onMouseDown={(e) => e.stopPropagation()}>
                       {isProjectPin ? (() => {
                         const projectStatus = getProjectStatus(pin.project.tasks.filter(t => !isHomeTask(t)), allStatuses)
                         if (!projectStatus) return null
                         const dotClass = projectStatus === 'working'
-                          ? 'bg-status-working animate-pulse'
+                          ? 'bg-status-working status-pulse'
                           : projectStatus === 'attention'
                           ? 'bg-status-attention shadow-[0_0_3px_var(--color-status-attention)]'
                           : 'bg-status-exited'
@@ -1134,11 +1159,12 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
           onNewTask={() => setNewTaskOpen(true)}
           allStatuses={allStatuses}
           statusSince={statusSince}
+          activities={agentActivities}
           now={now}
         />
       ) : (
       <div className="sidebar-list flex-1 overflow-y-auto py-1">
-        {visibleProjectIds.map((projectId, listIdx) => {
+        {treeProjectIds.map((projectId, listIdx) => {
           const project = projectsById.get(projectId)
           if (!project) return null
           return (
@@ -1150,7 +1176,7 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
             </React.Fragment>
           )
         })}
-        {dropTarget?.type === 'between-projects' && dropTarget.index === visibleProjectIds.length && (
+        {dropTarget?.type === 'between-projects' && dropTarget.index === treeProjectIds.length && (
           <div className="h-0.5 bg-accent mx-2 rounded-sm" />
         )}
       </div>
@@ -1257,6 +1283,19 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
                     togglePinnedItem(item)
                     setContextMenu(null)
                   }}>{pinned ? `Unpin ${noun}` : `Pin ${noun}`}</button>
+                )
+              })()}
+              {/* Promote the hidden project a "task in a directory" is filed under:
+                  clearing the flag is all it takes for the tree to show it. */}
+              {contextMenu.type === 'task' && (() => {
+                const project = projects.find(p => p.id === contextMenu.projectId)
+                if (!project || !isEphemeralProject(project)) return null
+                return (
+                  <button className={menuItemCls} onClick={() => {
+                    updateProject(project.id, { ephemeral: undefined })
+                    setProjectExpanded(project.id, true)
+                    setContextMenu(null)
+                  }}>Save as project</button>
                 )
               })()}
               {contextMenu.type === 'project' && (
@@ -1417,16 +1456,27 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
           projects={orderedProjects}
           defaultProjectId={selectedProjectId}
           getProjectDir={getProjectDir}
-          onCreate={(projectId, name) => {
-            addTask(projectId, name, composerInitialTabs())
-            // The task is selected on create; expand its project so switching back
-            // to the tree doesn't hide the thing you just made.
-            setProjectExpanded(projectId, true)
+          allTags={tags}
+          onEnsureTag={addTag}
+          onAddProject={addProject}
+          onCreate={(target, name) => {
+            if (target.kind === 'dir') {
+              addTaskInDirectory(target.directory, name, composerInitialTabs())
+            } else {
+              addTask(target.projectId, name, composerInitialTabs())
+              // The task is selected on create; expand its project so switching back
+              // to the tree doesn't hide the thing you just made.
+              setProjectExpanded(target.projectId, true)
+            }
             setNewTaskOpen(false)
           }}
-          onCreateWorkspace={(projectId, name, workspace) => {
-            addWorkspaceTask(projectId, name, workspace, composerInitialTabs())
-            setProjectExpanded(projectId, true)
+          onCreateWorkspace={(target, name, workspace) => {
+            if (target.kind === 'dir') {
+              addTaskInDirectory(target.directory, name, composerInitialTabs(), workspace)
+            } else {
+              addWorkspaceTask(target.projectId, name, workspace, composerInitialTabs())
+              setProjectExpanded(target.projectId, true)
+            }
             setNewTaskOpen(false)
           }}
           onClose={() => setNewTaskOpen(false)}

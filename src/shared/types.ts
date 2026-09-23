@@ -1,4 +1,4 @@
-export type TabType = 'terminal' | 'browser' | 'claude' | 'codex' | 'pi' | 'diff' | 'editor' | 'notebook' | 'note' | 'home'
+export type TabType = 'terminal' | 'browser' | 'claude' | 'claude-chat' | 'codex' | 'pi' | 'diff' | 'editor' | 'notebook' | 'note' | 'home'
 
 export const AI_TAB_TYPES = ['claude', 'codex', 'pi'] as const
 export type AiTabType = typeof AI_TAB_TYPES[number]
@@ -8,6 +8,20 @@ export const AI_TAB_META: Record<AiTabType, { label: string; command: string }> 
   codex: { label: 'Codex', command: 'codex' },
   pi: { label: 'Pi', command: 'pi' }
 }
+
+/**
+ * Tabs that run a coding agent: the terminal AI tabs plus the Claude chat tab,
+ * which drives the same `claude` through the Agent SDK instead of a PTY. Status,
+ * the inbox and the sidebar's activity line treat them all alike.
+ */
+export function isAgentTabType(type: TabType): boolean {
+  return type === 'claude-chat' || (AI_TAB_TYPES as readonly string[]).includes(type)
+}
+
+export const CLAUDE_CHAT_LABEL = 'Claude'
+
+/** Which way a new Claude tab opens: the terminal UI, or DevTool's chat. */
+export type ClaudeView = 'terminal' | 'chat'
 
 /** What the New-task composer opens in a task it just created. */
 export const NEW_TASK_AUTO_OPEN = ['none', 'claude', 'codex', 'pi', 'browser', 'terminal'] as const
@@ -153,7 +167,7 @@ export function isHomeTab(tab: Tab): boolean {
   return tab.system === 'home'
 }
 
-const RENAMABLE_TAB_TYPES: readonly TabType[] = ['terminal', 'browser', 'claude', 'codex', 'pi']
+const RENAMABLE_TAB_TYPES: readonly TabType[] = ['terminal', 'browser', 'claude', 'claude-chat', 'codex', 'pi']
 
 export function isRenamableTab(tab: Tab): boolean {
   if (isHomeTab(tab)) return false
@@ -212,10 +226,26 @@ export interface Project {
   condaEnvPrefix?: string
   lifetimeStats?: { tasksCreated: number; notesCreated: number }
   tagIds?: string[]
+  /**
+   * A project the user never asked for: created behind the composer's "Use a
+   * directory…" so a task can have a working directory without cluttering the
+   * tree. Hidden from every project list, and swept away once its last real task
+   * is gone. Clearing the flag promotes it to an ordinary project.
+   */
+  ephemeral?: true
 }
 
 export function isRemoteProject(project: Project): boolean {
   return !!project.ssh
+}
+
+export function isEphemeralProject(project: Project): boolean {
+  return !!project.ephemeral
+}
+
+/** A hidden ad-hoc project is spent once nothing but its home task is left. */
+export function isSpentEphemeralProject(project: Project): boolean {
+  return isEphemeralProject(project) && !project.tasks.some(task => !isHomeTask(task))
 }
 
 export interface SshConfig {
@@ -390,6 +420,8 @@ export interface AppConfig {
   codexCommand: string
   piCommand: string
   lazyLoadClaude: boolean
+  /** New Claude tabs (task auto-open, the tab bar's ✦) open as a terminal or a chat. */
+  claudeDefaultView: ClaudeView
   lastProjectId: string | null
   lastTaskId: string | null
   defaultSidebarTab: SidebarTab
@@ -604,6 +636,7 @@ export const DEFAULT_CONFIG: AppConfig = {
   codexCommand: '',
   piCommand: '',
   lazyLoadClaude: true,
+  claudeDefaultView: 'terminal',
   lastProjectId: null,
   lastTaskId: null,
   defaultSidebarTab: 'inbox',

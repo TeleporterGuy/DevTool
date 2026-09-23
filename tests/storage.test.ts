@@ -533,6 +533,76 @@ describe('Storage', () => {
     expect((tasks[0] as any).lastFocusedAt).toBeUndefined()
   })
 
+  describe('ad-hoc (ephemeral) projects', () => {
+    const task = (id: string, system?: 'home'): Record<string, unknown> => ({
+      id,
+      name: id,
+      tabs: { left: [], right: [] },
+      activeTab: { left: null, right: null },
+      splitOpen: false,
+      splitRatio: 0.5,
+      lastInteractedAt: 1,
+      ...(system ? { system } : {})
+    })
+
+    it('drops one whose last real task is gone, order entry included', () => {
+      const data = {
+        projects: [
+          { id: 'p1', name: 'P1', directory: '/tmp/p1', tasks: [task('t1')] },
+          { id: 'adhoc', name: 'scratch', directory: '/tmp/scratch', ephemeral: true, tasks: [task('home', 'home')] }
+        ],
+        projectOrder: ['p1', 'adhoc'],
+        tags: [],
+        pinnedItems: []
+      }
+
+      const normalized = Storage.normalizeProjectsData(data as Record<string, unknown>)
+      expect(normalized.projects.map(p => p.id)).toEqual(['p1'])
+      expect(normalized.projectOrder).toEqual(['p1'])
+    })
+
+    it('keeps one that still holds a real task', () => {
+      const data = {
+        projects: [
+          { id: 'adhoc', name: 'scratch', directory: '/tmp/scratch', ephemeral: true, tasks: [task('home', 'home'), task('t1')] }
+        ],
+        projectOrder: ['adhoc'],
+        tags: [],
+        pinnedItems: []
+      }
+
+      const normalized = Storage.normalizeProjectsData(data as Record<string, unknown>)
+      expect(normalized.projects.map(p => p.id)).toEqual(['adhoc'])
+      expect(normalized.projectOrder).toEqual(['adhoc'])
+    })
+
+    it('leaves an ordinary empty project alone', () => {
+      const data = {
+        projects: [{ id: 'p1', name: 'P1', directory: '/tmp/p1', tasks: [task('home', 'home')] }],
+        projectOrder: ['p1'],
+        tags: [],
+        pinnedItems: []
+      }
+
+      const normalized = Storage.normalizeProjectsData(data as Record<string, unknown>)
+      expect(normalized.projects.map(p => p.id)).toEqual(['p1'])
+    })
+
+    it('prunes pins that pointed at the project it dropped', () => {
+      const data = {
+        projects: [
+          { id: 'adhoc', name: 'scratch', directory: '/tmp/scratch', ephemeral: true, tasks: [task('home', 'home')] }
+        ],
+        projectOrder: ['adhoc'],
+        tags: [],
+        pinnedItems: [{ type: 'project', projectId: 'adhoc' }]
+      }
+
+      const normalized = Storage.normalizeProjectsData(data as Record<string, unknown>)
+      expect(normalized.pinnedItems).toEqual([])
+    })
+  })
+
   it('returns empty window session when the file contains no saved windows', () => {
     fs.writeFileSync(path.join(testDir, 'window-session.json'), JSON.stringify({ windows: [] }))
     const loaded = storage.loadWindowSession({ projects: [], tags: [], projectOrder: [], pinnedItems: [] })

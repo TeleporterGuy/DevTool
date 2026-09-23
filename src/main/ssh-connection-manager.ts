@@ -35,6 +35,45 @@ export function joinRemotePath(remoteDir: string, relative: string): string {
   return remoteDir.replace(/\/+$/, '') + '/' + relative.replace(/^\/+/, '')
 }
 
+/** Pick this project's ControlMaster processes out of `ps -axo pid=,command=`.
+ *
+ *  A master whose control socket has been unlinked is unreachable by every
+ *  socket-based mechanism we have (`-O exit`, `-O check`), yet it keeps holding
+ *  the local tunnel port — so argv is the only handle left on it. Matching the
+ *  full socket path keeps instances apart: a dev run (`~/.devtool-dev/ssh/…`)
+ *  can never reap the packaged app's masters, or vice versa.
+ *
+ *  Requiring `-M` is what keeps mux *slaves* out of the results — those are the
+ *  user's open remote terminals, spawned against the same `-S` path. */
+export function parseMasterPids(psOutput: string, socketPath: string): number[] {
+  const escaped = socketPath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const ownsSocket = new RegExp(`(^|\\s)-S\\s+${escaped}(\\s|$)`)
+  const isMaster = /(^|\s)-M(\s|$)/
+  const pids: number[] = []
+  for (const line of psOutput.split('\n')) {
+    const match = line.trim().match(/^(\d+)\s+(\S.*)$/)
+    if (!match) continue
+    const [, pid, command] = match
+    if (!ownsSocket.test(command) || !isMaster.test(command)) continue
+    pids.push(parseInt(pid, 10))
+  }
+  return pids
+}
+
+/** Turn an `ssh -O forward` failure into something a user can act on. The raw
+ *  error is the whole command line plus ssh's "mux_client_forward: forwarding
+ *  request failed: Port forwarding failed", which says nothing about *why* —
+ *  and by far the most common cause is the local port already being bound by
+ *  something else (often an orphaned ssh master from an earlier session). */
+export function describeTunnelFailure(err: unknown, tunnel: TunnelConfig): string {
+  const raw = err instanceof Error ? err.message : String(err)
+  const stderr = typeof (err as { stderr?: unknown })?.stderr === 'string' ? (err as { stderr: string }).stderr : ''
+  if (/Port forwarding failed|forwarding request failed|Address already in use/i.test(raw + stderr)) {
+    return `Could not open local port ${tunnel.sourcePort} — it is already in use by another process. Free it, or pick a different local port.`
+  }
+  return raw
+}
+
 /** Compute the ControlMaster socket path for a given socketDir + projectId */
 export function controlSocketPath(socketDir: string, projectId: string): string {
   return path.join(socketDir, `${projectId}.sock`)
@@ -336,6 +375,32 @@ export class SshConnectionManager extends EventEmitter {
     return args
   }
 
+  /**
+   * Args for a non-tty remote command whose stdin/stdout are a protocol, not a
+   * screen — the Claude chat tab's `claude` speaks stream-json over them. Same
+   * interactive login shell as {@link buildSpawnArgs} so PATH matches the user's
+   * terminal; `-T` because a tty would echo input and mangle the stream.
+   */
+  buildStdioSpawnArgs(
+    projectId: string,
+    config: SshConfig,
+    command: string,
+    commandArgs: string[],
+    envVars: Record<string, string>,
+    cwd: string
+  ): string[] {
+    const args = [
+      ...this.buildSessionArgs(projectId, config, this.platform !== 'win32'),
+      '-T',
+      `${config.username}@${config.host}`
+    ]
+    const envPrefix = Object.entries(envVars).map(([k, v]) => `${k}=${shellQuote(v)} `).join('')
+    const cmdSuffix = commandArgs.length ? ' ' + commandArgs.map(a => shellQuote(a)).join(' ') : ''
+    const innerCmd = `${spawnCdCommand(cwd || config.remoteDir)} && ${envPrefix}exec ${command}${cmdSuffix}`
+    args.push(`bash -l -i -c ${shellQuote(innerCmd)}`)
+    return args
+  }
+
   /** Args for an end-to-end liveness probe through the master socket: runs
    *  `true` on the remote host as a mux slave. Unlike `-O check` (which only
    *  asks the local master process if it's alive), this exercises the actual
@@ -568,8 +633,25 @@ export class SshConnectionManager extends EventEmitter {
       try {
         await this.execFileAsync('ssh', this.buildExitArgs(projectId, config), { timeout: 5000 })
       } catch { /* master may already be dead */ }
+      // `-O exit` can fail, time out, or even report success while the master
+      // process is still alive. Unlinking the socket then *orphans* it: the
+      // master keeps holding this project's local tunnel port, and no later
+      // `-O exit` can ever reach it again because the socket it listened on is
+      // gone. Every subsequent connect then fails at the `-L` forward with
+      // "Port forwarding failed" and sits in 'connecting' forever. So never
+      // trust the exit — verify with `-O check` and kill by pid while the
+      // socket, and therefore `-O check`, still reaches it.
+      await this.killMasterByPid(projectId, config)
       try { fs.unlinkSync(socketPath) } catch { /* may not exist */ }
     }
+
+    // Reap masters the socket can no longer reach. Runs unconditionally — the
+    // case that matters most is precisely the one where there is *no* socket
+    // file, because an earlier connect unlinked it out from under a master that
+    // is still alive and still bound to the tunnel port. We are about to spawn a
+    // fresh master, so every process still holding this socket path is stale by
+    // definition.
+    await this.killStrayMasters(projectId)
 
     this.setStatus(projectId, 'connecting')
     this.configs.set(projectId, config)
@@ -649,7 +731,11 @@ export class SshConnectionManager extends EventEmitter {
    *  renderer-driven `setTunnel` and by the connect/reconnect path, so both
    *  establish the tunnel exactly the same way. */
   private async applyTunnel(projectId: string, config: SshConfig, tunnel: TunnelConfig): Promise<void> {
-    await this.execFileAsync('ssh', this.buildTunnelForwardArgs(projectId, config, tunnel), { timeout: 10000 })
+    try {
+      await this.execFileAsync('ssh', this.buildTunnelForwardArgs(projectId, config, tunnel), { timeout: 10000 })
+    } catch (err) {
+      throw new Error(describeTunnelFailure(err, tunnel))
+    }
     this.tunnels.set(projectId, tunnel)
     this.setTunnelState(projectId, 'active')
   }
@@ -701,6 +787,50 @@ export class SshConnectionManager extends EventEmitter {
       if (err && typeof err === 'object' && (err.code === 1 || err.code === 2)) return null
       if (typeof err?.stderr === 'string' && /No such file/i.test(err.stderr)) return null
       throw err
+    }
+  }
+
+  /** Last-resort teardown for a ControlMaster that ignored `-O exit`. `-O check`
+   *  reports "Master running (pid=NNNN)" (on stderr for older OpenSSH), which is
+   *  the only handle we have on a process that was forked with `-f`. */
+  private async killMasterByPid(projectId: string, config: SshConfig): Promise<void> {
+    let output: string
+    try {
+      const { stdout, stderr } = await this.execFileAsync('ssh', this.buildCheckArgs(projectId, config), { timeout: 5000 })
+      output = stdout + stderr
+    } catch (err: any) {
+      // A non-zero exit means no master answered — nothing left to kill.
+      output = typeof err?.stderr === 'string' ? err.stderr : ''
+      if (!/Master running/.test(output)) return
+    }
+    const match = output.match(/pid=(\d+)/)
+    if (!match) return
+    await this.terminate(parseInt(match[1], 10))
+  }
+
+  /** Kill any ControlMaster still running against this project's socket path,
+   *  including ones whose socket file is already gone. See `parseMasterPids`. */
+  private async killStrayMasters(projectId: string): Promise<void> {
+    let stdout: string
+    try {
+      ;({ stdout } = await this.execFileAsync('ps', ['-axo', 'pid=,command='], { timeout: 5000 }))
+    } catch {
+      return // No process list — nothing we can do beyond the socket-based path.
+    }
+    for (const pid of parseMasterPids(stdout, this.getSocketPath(projectId))) {
+      await this.terminate(pid)
+    }
+  }
+
+  /** SIGTERM a pid and wait for it to actually exit, so the tunnel port and
+   *  sockets it held are free before we spawn its replacement — otherwise the
+   *  new master can lose a race with the dying one and fail its `-L` forward. */
+  private async terminate(pid: number, timeoutMs = 2000): Promise<void> {
+    try { process.kill(pid, 'SIGTERM') } catch { return /* already gone */ }
+    const deadline = timeoutMs / 100
+    for (let i = 0; i < deadline; i++) {
+      await new Promise(resolve => setTimeout(resolve, 100))
+      try { process.kill(pid, 0) } catch { return }
     }
   }
 
