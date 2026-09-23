@@ -7,6 +7,8 @@ import { useMenuPosition } from '../hooks/useMenuPosition'
 import { getTabDropIndex } from './tabDrag'
 import type { TabDragState, TabDropTarget } from './tabDrag'
 import { formatShortcutForApp } from '../../shared/shortcut-label'
+import { menuCls, menuItemCls } from './ui'
+import { MessageSquare } from 'lucide-react'
 
 interface Props {
   tabs: Tab[]
@@ -23,14 +25,10 @@ interface Props {
 
 const DRAG_THRESHOLD = 5
 
-/** Stem ctx-menu row */
-const menuItemCls = 'block w-full rounded-md px-2.5 py-1 bg-transparent border-0 text-text text-sm text-left cursor-pointer hover:bg-sel'
-const menuCls = 'bg-surface border-[0.5px] border-border rounded-lg p-1 shadow-pop'
-
 function tabIcon(type: TabType): string {
   if (type === 'terminal') return '>'
   if (type === 'browser') return '◉'
-  if (type === 'claude') return '✦'
+  if (type === 'claude' || type === 'claude-chat') return '✦'
   if (type === 'codex') return '◫'
   if (type === 'pi') return 'π'
   return '>'
@@ -42,7 +40,7 @@ function TabStatusIndicator({ tabId }: { tabId: string }): React.ReactElement | 
 
   const stateClasses =
     status === 'working'
-      ? 'bg-status-working animate-pulse'
+      ? 'bg-status-working status-pulse'
       : status === 'attention'
         ? 'bg-status-attention shadow-[0_0_4px_var(--color-status-attention)]'
         : 'bg-status-exited'
@@ -120,7 +118,8 @@ export default function TabBar({
   onTabDropTargetChange,
   onTabDragComplete
 }: Props): React.ReactElement {
-  const { selectedProject, addTab, removeTab, setActiveTab, moveTab, config, renameTab } = useApp()
+  const { selectedProject, addTab, removeTab, setActiveTab, moveTab, config, renameTab, convertClaudeTab } = useApp()
+  const claudeChatDefault = config?.claudeDefaultView === 'chat'
   const suppressClickRef = useRef(false)
   const [tabMenu, setTabMenu] = useState<{ tabId: string; x: number; y: number } | null>(null)
   const tabMenuPos = useMenuPosition<HTMLDivElement>(tabMenu)
@@ -329,9 +328,14 @@ export default function TabBar({
           &#9673;
         </button>
         {config?.enableClaude && selectedProject && !isShellCommandProject(selectedProject) && (
-          <button className="bg-transparent border-0 text-text-muted cursor-pointer px-1.5 py-1 rounded-md text-xs font-mono hover:bg-surface-3 hover:text-text transition-colors duration-(--motion-fast)" onClick={() => handleAdd('claude')} title="New Claude Code">
-            &#10022;
-          </button>
+          <>
+            <button className="bg-transparent border-0 text-text-muted cursor-pointer px-1.5 py-1 rounded-md text-xs font-mono hover:bg-surface-3 hover:text-text transition-colors duration-(--motion-fast)" onClick={() => handleAdd(claudeChatDefault ? 'claude-chat' : 'claude')} title={claudeChatDefault ? 'New Claude chat' : 'New Claude Code'}>
+              &#10022;
+            </button>
+            <button className="bg-transparent border-0 text-text-muted cursor-pointer px-1.5 py-1 rounded-md text-xs font-mono hover:bg-surface-3 hover:text-text transition-colors duration-(--motion-fast) inline-flex items-center" onClick={() => handleAdd(claudeChatDefault ? 'claude' : 'claude-chat')} title={claudeChatDefault ? 'New Claude Code (terminal)' : 'New Claude chat'}>
+              {claudeChatDefault ? <span>&gt;&#10022;</span> : <MessageSquare size={12} strokeWidth={2} />}
+            </button>
+          </>
         )}
         {config?.enableCodex && selectedProject && !isShellCommandProject(selectedProject) && (
           <button className="bg-transparent border-0 text-text-muted cursor-pointer px-1.5 py-1 rounded-md text-xs font-mono hover:bg-surface-3 hover:text-text transition-colors duration-(--motion-fast)" onClick={() => handleAdd('codex')} title="New Codex">
@@ -367,6 +371,18 @@ export default function TabBar({
                 }}
               >
                 Rename tab
+              </button>
+            )}
+            {(tab.type === 'claude' || tab.type === 'claude-chat') && (
+              <button
+                type="button"
+                className={menuItemCls}
+                onClick={() => {
+                  convertClaudeTab(projectId, taskId, pane, tab.id, tab.type === 'claude' ? 'claude-chat' : 'claude')
+                  close()
+                }}
+              >
+                {tab.type === 'claude' ? 'Open as chat' : 'Open in terminal'}
               </button>
             )}
             {!isHomeTab(tab) && (

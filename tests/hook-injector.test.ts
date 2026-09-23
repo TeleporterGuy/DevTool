@@ -25,14 +25,52 @@ describe('HookInjector', () => {
     expect(fs.existsSync(settingsPath)).toBe(true)
   })
 
-  it('injects all four hook types', () => {
+  it('injects the four status hooks synchronously', () => {
     const injector = new HookInjector(3456, 'test-token', () => 'curl')
     injector.inject(testDir, 'tab-1')
     const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf-8'))
-    expect(settings.hooks.SessionStart).toBeDefined()
-    expect(settings.hooks.UserPromptSubmit).toBeDefined()
-    expect(settings.hooks.Stop).toBeDefined()
-    expect(settings.hooks.Notification).toBeDefined()
+    for (const [event, endpoint] of [
+      ['SessionStart', 'session-start'],
+      ['UserPromptSubmit', 'working'],
+      ['Stop', 'stopped'],
+      ['Notification', 'notification']
+    ]) {
+      const hook = settings.hooks[event][0].hooks[0]
+      expect(hook.command).toContain(`/hook/${endpoint} `)
+      expect(hook.async).toBeUndefined()
+    }
+  })
+
+  it('injects the activity hooks as async posts to /hook/activity', () => {
+    const injector = new HookInjector(3456, 'test-token', () => 'curl')
+    injector.inject(testDir, 'tab-1')
+    const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf-8'))
+    for (const event of [
+      'PreToolUse', 'PostToolUse', 'PostToolUseFailure', 'PermissionRequest', 'StopFailure',
+      'SubagentStart', 'SubagentStop', 'PreCompact', 'PostCompact', 'SessionEnd'
+    ]) {
+      const hook = settings.hooks[event][0].hooks[0]
+      expect(hook.command).toContain('/hook/activity ')
+      expect(hook.async).toBe(true)
+    }
+  })
+
+  it('removes every injected event on cleanup', () => {
+    const injector = new HookInjector(3456, 'test-token', () => 'curl')
+    injector.inject(testDir, 'tab-1')
+    injector.cleanup(testDir, 'tab-1')
+    const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf-8'))
+    expect(settings.hooks).toBeUndefined()
+  })
+
+  it('remote inject script carries the activity hooks too', () => {
+    const injector = new HookInjector(3456, 'test-token', () => 'curl')
+    const script = injector.buildRemoteInjectScript('/srv/app', 4567)
+    const b64 = /b64decode\('([^']+)'\)/.exec(script)![1]
+    const hooks = JSON.parse(Buffer.from(b64, 'base64').toString())
+    expect(hooks.PermissionRequest[0].hooks[0].command).toContain('localhost:4567/hook/activity')
+    expect(hooks.PermissionRequest[0].hooks[0].async).toBe(true)
+    expect(hooks.Stop[0].hooks[0].async).toBeUndefined()
   })
 
   it('includes correct port in hook commands', () => {
@@ -72,7 +110,9 @@ describe('HookInjector', () => {
     const injector = new HookInjector(3456, 'test-token', () => 'curl')
     injector.inject(testDir, 'tab-1')
     const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf-8'))
-    expect(settings.hooks.PreToolUse).toHaveLength(1)
+    // The user's hook stays first; ours is appended beside it.
+    expect(settings.hooks.PreToolUse).toHaveLength(2)
+    expect(settings.hooks.PreToolUse[0].hooks[0].command).toBe('echo hi')
     expect(settings.hooks.Notification).toBeDefined()
   })
 
@@ -140,8 +180,9 @@ describe('HookInjector', () => {
     // Old stale hook (port 9999) should be replaced, not duplicated
     expect(settings.hooks.SessionStart).toHaveLength(1)
     expect(settings.hooks.SessionStart[0].hooks[0].command).toContain('localhost:3456')
-    // User hooks preserved
-    expect(settings.hooks.PreToolUse).toHaveLength(1)
+    // User hooks preserved, ours appended
+    expect(settings.hooks.PreToolUse).toHaveLength(2)
+    expect(settings.hooks.PreToolUse[0].hooks[0].command).toBe('echo user-hook')
   })
 
   // --- Remote hook injection tests ---

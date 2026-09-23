@@ -11,10 +11,10 @@ import type { Tab, TabType } from '../../shared/types'
 
 interface Props { projectId: string }
 
-const TAB_TYPE_ORDER: TabType[] = ['terminal', 'editor', 'diff', 'note', 'browser', 'claude', 'codex', 'pi']
+const TAB_TYPE_ORDER: TabType[] = ['terminal', 'editor', 'diff', 'note', 'browser', 'claude', 'claude-chat', 'codex', 'pi']
 const TAB_TYPE_LABEL: Record<TabType, string> = {
   terminal: 'terminal', editor: 'editor', diff: 'diff', note: 'note',
-  browser: 'browser', claude: 'claude', codex: 'codex', pi: 'pi',
+  browser: 'browser', claude: 'claude', 'claude-chat': 'claude chat', codex: 'codex', pi: 'pi',
   home: 'home'
 }
 

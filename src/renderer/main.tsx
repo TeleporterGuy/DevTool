@@ -1,6 +1,7 @@
 import React from 'react'
 import ReactDOM from 'react-dom/client'
 import './styles.css'
+import { startStatusPulse } from './statusPulse'
 
 interface CrashDetails {
   title: string
@@ -110,4 +111,5 @@ async function bootstrap(): Promise<void> {
   }
 }
 
+startStatusPulse()
 void bootstrap()

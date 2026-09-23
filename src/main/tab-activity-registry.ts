@@ -1,4 +1,5 @@
-import { classifyNotification, nextAiStatus } from '../shared/ai-status'
+import { classifyNotification, nextAiStatus, type AiStatusEvent } from '../shared/ai-status'
+import { reduceAgentActivity, type ActivityUpdate, type AgentActivity } from '../shared/agent-activity'
 import type { TabStatusValue } from '../shared/types'
 
 /**
@@ -18,6 +19,8 @@ import type { TabStatusValue } from '../shared/types'
 export class TabActivityRegistry {
   private readonly statuses = new Map<string, TabStatusValue>()
   private readonly since = new Map<string, number>()
+  /** The "what is it doing" side (shared/agent-activity.ts), fed by every Claude hook body. */
+  private readonly activities = new Map<string, AgentActivity>()
 
   constructor(private readonly now: () => number = () => Date.now()) {}
 
@@ -42,6 +45,34 @@ export class TabActivityRegistry {
     this.apply(tabId, (current) => nextAiStatus(current, 'hook-notification', this.context(notificationKind)))
   }
 
+  /**
+   * A status event implied by an `activity` hook (permission dialog, question,
+   * API failure, answered prompt) — see `reduceAgentActivity`.
+   */
+  statusEvent(tabId: string, event: AiStatusEvent): void {
+    this.apply(tabId, (current) => nextAiStatus(current, event, this.context()))
+  }
+
+  /**
+   * Fold a hook body into the tab's activity. Returns null when nothing changed,
+   * so callers only broadcast real updates.
+   */
+  applyHook(tabId: string, body: Record<string, unknown> | undefined): ActivityUpdate | null {
+    const prev = this.activities.get(tabId)
+    const update = reduceAgentActivity(prev, body, this.now())
+    if (!update.changed) return null
+    this.activities.set(tabId, update.activity)
+    return update
+  }
+
+  getActivity(tabId: string): AgentActivity | null {
+    return this.activities.get(tabId) ?? null
+  }
+
+  getActivitySnapshot(): Record<string, AgentActivity> {
+    return Object.fromEntries(this.activities)
+  }
+
   /** A session started in this tab: it exists, but nothing is claimed about its status. */
   touch(tabId: string): void {
     if (this.statuses.has(tabId)) return
@@ -52,18 +83,39 @@ export class TabActivityRegistry {
   /** The PTY exited. Terminal until the tab respawns — and not a protective status. */
   exited(tabId: string): void {
     this.apply(tabId, (current) => nextAiStatus(current, 'exit', this.context()))
+    this.endTurn(tabId)
   }
 
   /** A fresh process for the same tab id — the old status describes a dead one. */
   reset(tabId: string): void {
     this.statuses.set(tabId, null)
     this.since.set(tabId, this.now())
+    this.endTurn(tabId)
+  }
+
+  /**
+   * Keep what the conversation was about (a resume continues it); drop anything
+   * that described the dead process's in-flight turn.
+   */
+  private endTurn(tabId: string): void {
+    const activity = this.activities.get(tabId)
+    if (!activity) return
+    this.activities.set(tabId, {
+      ...activity,
+      tool: undefined,
+      waiting: undefined,
+      subagents: 0,
+      compacting: false,
+      turnStartedAt: undefined,
+      updatedAt: this.now()
+    })
   }
 
   /** The tab is gone (removed, or its task deleted). */
   remove(tabId: string): void {
     this.statuses.delete(tabId)
     this.since.delete(tabId)
+    this.activities.delete(tabId)
   }
 
   getStatus(tabId: string): TabStatusValue {

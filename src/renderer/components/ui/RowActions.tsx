@@ -17,7 +17,13 @@ export function RowActions({ children, className }: RowActionsProps): React.Reac
         // expands and fades in on row hover.
         'flex items-center gap-0.5 max-w-0 overflow-hidden opacity-0',
         'group-hover:max-w-[120px] group-hover:opacity-100 focus-within:max-w-[120px] focus-within:opacity-100',
-        'transition-all duration-(--motion-fast)',
+        // Only the fade is animated. Animating the width too used to slide these
+        // buttons ~26px left over 120ms while they were also unclipping, so a
+        // click aimed at where an icon lands would fall through to the row
+        // underneath — the first click on a row's action selected the task and
+        // the action itself only fired on the second. A hit target may fade in,
+        // but it must not move.
+        'transition-opacity duration-(--motion-fast)',
         className ?? ''
       ].join(' ')}
     >

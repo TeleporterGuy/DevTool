@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from 'react'
 import { Check, ChevronRight, Clock, Inbox as InboxIcon, SquarePen } from 'lucide-react'
 import type { Project, Task } from '../../shared/types'
-import { isHomeTask, isWorkspaceTask } from '../../shared/types'
+import { isEphemeralProject, isHomeTask, isWorkspaceTask } from '../../shared/types'
 import type { TabStatusValue } from '../context/TabStatusContext'
 import { RowActions, RowAction } from './ui'
 import {
@@ -10,8 +10,11 @@ import {
   inboxState,
   lastActivityAt,
   partitionInbox,
-  type InboxEntry
+  taskActivity,
+  type InboxEntry,
+  type TaskActivitySummary
 } from './inbox'
+import type { AgentActivity } from '../../shared/agent-activity'
 
 type Props = {
   projects: Project[]
@@ -22,6 +25,7 @@ type Props = {
   onNewTask: () => void
   allStatuses: Record<string, TabStatusValue>
   statusSince: Record<string, number>
+  activities: Record<string, AgentActivity>
   now: number
 }
 
@@ -40,7 +44,7 @@ const STATUS_LABEL: Record<NonNullable<TabStatusValue>, string> = {
 function StatusDot({ status }: { status: TabStatusValue }): React.ReactElement {
   const stateClass =
     status === 'working'
-      ? 'bg-status-working animate-pulse'
+      ? 'bg-status-working status-pulse'
       : status === 'attention'
         ? 'bg-status-attention shadow-[0_0_3px_var(--color-status-attention)]'
         : status === 'exited'
@@ -52,9 +56,10 @@ function StatusDot({ status }: { status: TabStatusValue }): React.ReactElement {
 /**
  * Second line of a row: what the task is doing, or when it wakes. Blocked tasks
  * show how long they have been waiting rather than how old the last message is —
- * the wait is the thing you are triaging on.
+ * the wait is the thing you are triaging on. Claude tabs replace the bare status
+ * word with what the agent is actually doing or asking (agent-activity.ts).
  */
-function rowSubtitle(entry: InboxEntry, now: number, group: GroupKey): string {
+function rowSubtitle(entry: InboxEntry, now: number, group: GroupKey, agent: TaskActivitySummary): string {
   const inbox = inboxState(entry.task)
 
   if (group === 'snoozed') {
@@ -66,11 +71,13 @@ function rowSubtitle(entry: InboxEntry, now: number, group: GroupKey): string {
   }
 
   if (entry.status === 'attention' && entry.since !== null) {
-    return `needs you · waiting ${formatWaitTime(now - entry.since)}`
+    return `${agent.line ?? 'needs you'} · waiting ${formatWaitTime(now - entry.since)}`
   }
   if (entry.status === 'working' && entry.since !== null) {
-    return `working · ${formatWaitTime(now - entry.since)}`
+    return `${agent.line ?? 'working'} · ${formatWaitTime(now - entry.since)}`
   }
+  if (entry.status === 'exited') return STATUS_LABEL.exited
+  if (agent.line) return agent.line
   if (entry.status) return STATUS_LABEL[entry.status]
 
   const activity = lastActivityAt(entry.task)
@@ -82,6 +89,7 @@ type GroupKey = 'needsYou' | 'active' | 'settled' | 'snoozed'
 function InboxRow({
   entry,
   group,
+  agent,
   selected,
   now,
   onSelect,
@@ -90,6 +98,7 @@ function InboxRow({
 }: {
   entry: InboxEntry
   group: GroupKey
+  agent: TaskActivitySummary
   selected: boolean
   now: number
   onSelect: () => void
@@ -108,12 +117,16 @@ function InboxRow({
       ].join(' ')}
       onClick={onSelect}
       onContextMenu={onContextMenu}
+      title={agent.tooltip}
     >
       <div className="flex items-center gap-1.5">
         {unread || entry.status
           ? <StatusDot status={entry.status} />
           : <span className="w-1.5 shrink-0" />}
-        <span className="font-semibold shrink-0 max-w-[55%] overflow-hidden text-ellipsis whitespace-nowrap">
+        <span
+          className="font-semibold shrink-0 max-w-[55%] overflow-hidden text-ellipsis whitespace-nowrap"
+          title={isEphemeralProject(project) ? project.directory : undefined}
+        >
           {project.name}
         </span>
         <span
@@ -128,6 +141,13 @@ function InboxRow({
         </span>
         {isWorkspaceTask(task) && (
           <span className="text-2xs px-1 py-px rounded-sm bg-surface-3 text-text-muted shrink-0">ws</span>
+        )}
+        {/* This task borrowed a directory rather than living in a project you added. */}
+        {isEphemeralProject(project) && (
+          <span
+            className="text-2xs px-1 py-px rounded-sm bg-surface-3 text-text-muted shrink-0"
+            title={project.directory}
+          >dir</span>
         )}
         <span className="ml-auto flex items-center shrink-0" onMouseDown={(e) => e.stopPropagation()}>
           <RowActions>
@@ -145,7 +165,7 @@ function InboxRow({
         </span>
       </div>
       <div className="pl-3 text-2xs text-text-subtle overflow-hidden text-ellipsis whitespace-nowrap">
-        {rowSubtitle(entry, now, group)}
+        {rowSubtitle(entry, now, group, agent)}
       </div>
     </div>
   )
@@ -193,6 +213,7 @@ export default function InboxPanel({
   onNewTask,
   allStatuses,
   statusSince,
+  activities,
   now
 }: Props): React.ReactElement {
   const [settledCollapsed, setSettledCollapsed] = useState(true)
@@ -218,6 +239,7 @@ export default function InboxPanel({
       key={entry.task.id}
       entry={entry}
       group={group}
+      agent={taskActivity(entry.task, allStatuses, activities)}
       selected={selectedTaskId === entry.task.id}
       now={now}
       onSelect={() => onSelectTask(entry.project.id, entry.task)}

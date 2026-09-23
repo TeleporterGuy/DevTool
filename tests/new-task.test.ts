@@ -37,12 +37,19 @@ describe('branchSlug', () => {
 })
 
 describe('isNewTaskDraftValid', () => {
-  const base = { projectId: 'p1', name: 'Do the thing', workspace: false, branch: '', baseBranch: '' }
+  const target = { kind: 'project' as const, projectId: 'p1' }
+  const base = { target, name: 'Do the thing', workspace: false, branch: '', baseBranch: '' }
 
-  it('needs a project and a name', () => {
+  it('needs a destination and a name', () => {
     expect(isNewTaskDraftValid(base)).toBe(true)
-    expect(isNewTaskDraftValid({ ...base, projectId: '' })).toBe(false)
+    expect(isNewTaskDraftValid({ ...base, target: null })).toBe(false)
+    expect(isNewTaskDraftValid({ ...base, target: { kind: 'project', projectId: '' } })).toBe(false)
     expect(isNewTaskDraftValid({ ...base, name: '   ' })).toBe(false)
+  })
+
+  it('accepts a bare directory as the destination', () => {
+    expect(isNewTaskDraftValid({ ...base, target: { kind: 'dir', directory: '/tmp/scratch' } })).toBe(true)
+    expect(isNewTaskDraftValid({ ...base, target: { kind: 'dir', directory: '' } })).toBe(false)
   })
 
   it('ignores branch fields when no workspace is requested', () => {

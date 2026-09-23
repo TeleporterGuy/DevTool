@@ -9,8 +9,10 @@ vi.mock('child_process', async () => {
 import { execFile } from 'child_process'
 import {
   SshConnectionManager,
+  describeTunnelFailure,
   ensureSshDir,
   formatSshConnectError,
+  parseMasterPids,
   quoteSpawnArg,
   spawnCdCommand
 } from '../src/main/ssh-connection-manager'
@@ -372,15 +374,12 @@ describe('SshConnectionManager connect/disconnect', () => {
     const statuses: string[] = []
     manager.on('status-changed', (_id: string, status: string) => statuses.push(status))
 
-    let callCount = 0
+    const sshCalls: string[][] = []
     mockExecFile.mockImplementation(
-      (_cmd: string, _args: string[], _opts: unknown, cb: unknown) => {
-        callCount++
-        if (callCount === 1) {
-          (cb as (err: null, stdout: string, stderr: string) => void)(null, '', '')
-        } else {
-          (cb as (err: null, stdout: string, stderr: string) => void)(null, 'Allocated port 45678 for remote forward to localhost:9999', '')
-        }
+      (cmd: string, args: string[], _opts: unknown, cb: unknown) => {
+        if (cmd === 'ssh') sshCalls.push(args)
+        const stdout = args.includes('-R') ? 'Allocated port 45678 for remote forward to localhost:9999' : ''
+        ;(cb as (err: null, stdout: string, stderr: string) => void)(null, stdout, '')
         return {} as ReturnType<typeof execFile>
       }
     )
@@ -389,7 +388,9 @@ describe('SshConnectionManager connect/disconnect', () => {
       host: 'dev.example.com', port: 22, username: 'deploy', remoteDir: '/app'
     })
 
-    expect(callCount).toBe(2)
+    expect(sshCalls).toHaveLength(2)
+    expect(sshCalls[0]).toContain('-M')
+    expect(sshCalls[1]).toContain('-R')
     expect(statuses).toEqual(['connecting', 'connected'])
     expect(manager.getRemotePort('proj-1')).toBe(45678)
   })
@@ -815,7 +816,7 @@ describe('SshConnectionManager auto-reconnect restores the configured tunnel', (
     expect(manager.getStatus('proj-1')).toBe('connecting')
     expect(manager.getTunnelState('proj-1')).toEqual({
       status: 'error',
-      error: expect.stringContaining('Address already in use')
+      error: expect.stringContaining('Could not open local port 3000')
     })
     expect(manager.getTunnel('proj-1')).toBeUndefined()
 
@@ -961,5 +962,237 @@ describe('ssh trust helpers', () => {
     // A user-supplied $HOME/... arg must not let the remote shell expand `$(...)`.
     expect(quoteSpawnArg('$HOME/x$(id)')).toBe("'$HOME/x$(id)'")
     expect(quoteSpawnArg('--resume')).toBe("'--resume'")
+  })
+})
+
+describe('describeTunnelFailure', () => {
+  const tunnel = { host: 'localhost', sourcePort: 54553, destinationPort: 54553 }
+
+  it('explains a mux forward rejection as a busy local port', () => {
+    const err = new Error(
+      'Command failed: ssh -S /tmp/p.sock -O forward -L 54553:localhost:54553 u@h\n' +
+      'mux_client_forward: forwarding request failed: Port forwarding failed'
+    )
+    expect(describeTunnelFailure(err, tunnel)).toContain('Could not open local port 54553')
+  })
+
+  it('explains a bind failure reported only on stderr', () => {
+    const err = Object.assign(new Error('Command failed: ssh ...'), {
+      stderr: 'bind [127.0.0.1]:54553: Address already in use'
+    })
+    expect(describeTunnelFailure(err, tunnel)).toContain('Could not open local port 54553')
+  })
+
+  it('passes unrelated failures through untouched', () => {
+    expect(describeTunnelFailure(new Error('Connection refused'), tunnel)).toBe('Connection refused')
+  })
+})
+
+describe('parseMasterPids', () => {
+  const sock = '/Users/j/.devtool/ssh/934a7a54.sock'
+  const master = (pid: number, s = sock): string =>
+    `${pid} ssh -fN -M -S ${s} -o StrictHostKeyChecking=accept-new -p 22 deploy@dev.example.com`
+
+  it('finds a master whose socket file is already unlinked', () => {
+    expect(parseMasterPids(master(48865), sock)).toEqual([48865])
+  })
+
+  it('finds every stray master for the socket', () => {
+    expect(parseMasterPids([master(48865), master(86434), master(79958)].join('\n'), sock)).toEqual([48865, 86434, 79958])
+  })
+
+  it('ignores mux slaves — those are the user\'s open remote terminals', () => {
+    const slave = `10245 ssh -S ${sock} -o ControlMaster=no -t deploy@dev.example.com bash -l -i -c 'cd /app'`
+    expect(parseMasterPids(slave, sock)).toEqual([])
+  })
+
+  it('ignores masters belonging to another config dir (dev vs packaged)', () => {
+    const devSock = '/Users/j/.devtool-dev/ssh/934a7a54.sock'
+    expect(parseMasterPids(master(48865, devSock), sock)).toEqual([])
+  })
+
+  it('ignores masters for a different project on the same host', () => {
+    expect(parseMasterPids(master(30169, '/Users/j/.devtool/ssh/8daa84c6.sock'), sock)).toEqual([])
+  })
+
+  it('does not match a socket path that merely shares a prefix', () => {
+    expect(parseMasterPids(master(1, sock + '.k3oVLfLK'), sock)).toEqual([])
+  })
+
+  it('tolerates ps noise and blank lines', () => {
+    expect(parseMasterPids(`\n  PID COMMAND\n${master(48865)}\n\n`, sock)).toEqual([48865])
+  })
+})
+
+describe('SshConnectionManager orphaned ControlMaster cleanup', () => {
+  let manager: SshConnectionManager
+  let socketDir: string
+  const config = { host: 'dev.example.com', port: 22, username: 'deploy', remoteDir: '/app' }
+
+  const isExit = (args: string[]): boolean => args.includes('exit')
+  const isCheck = (args: string[]): boolean => args.includes('check')
+
+  /** Signal 0 is a liveness probe — throwing ESRCH says "the process is gone",
+   *  which is what lets `terminate()` stop waiting. */
+  const spyOnKill = (): ReturnType<typeof vi.spyOn> =>
+    vi.spyOn(process, 'kill').mockImplementation((_pid: number, signal?: string | number) => {
+      if (signal === 0) throw Object.assign(new Error('ESRCH'), { code: 'ESRCH' })
+      return true
+    }) as ReturnType<typeof vi.spyOn>
+
+  const respondByArgs = (handler: (args: string[]) => Error | string): void => {
+    mockExecFile.mockImplementation(
+      (_cmd: string, args: string[], _opts: unknown, cb: unknown) => {
+        const result = handler(args)
+        if (result instanceof Error) (cb as (err: Error) => void)(result)
+        else (cb as (err: null, stdout: string, stderr: string) => void)(null, result, '')
+        return {} as ReturnType<typeof execFile>
+      }
+    )
+  }
+
+  beforeEach(() => {
+    socketDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devtool-ssh-test-'))
+    manager = new SshConnectionManager(socketDir, 9999)
+    mockExecFile.mockReset()
+    // A leftover socket from a previous run, so connect() takes the cleanup path.
+    fs.writeFileSync(manager.getSocketPath('proj-1'), '')
+  })
+
+  afterEach(() => {
+    manager.clearProject('proj-1')
+    fs.rmSync(socketDir, { recursive: true, force: true })
+    vi.restoreAllMocks()
+  })
+
+  it('kills the master by pid when `-O exit` fails, so it cannot orphan the tunnel port', async () => {
+    const kill = spyOnKill()
+    respondByArgs(args => {
+      if (isExit(args)) return new Error('Command failed: ssh -O exit')
+      if (isCheck(args)) return 'Master running (pid=48865)'
+      if (args.includes('-R')) return 'Allocated port 45678'
+      return ''
+    })
+
+    await manager.connect('proj-1', config)
+
+    expect(kill).toHaveBeenCalledWith(48865, 'SIGTERM')
+    expect(manager.getStatus('proj-1')).toBe('connected')
+  })
+
+  it('reads the pid from stderr when `-O check` itself exits non-zero', async () => {
+    const kill = spyOnKill()
+    respondByArgs(args => {
+      if (isExit(args)) return new Error('Command failed: ssh -O exit')
+      if (isCheck(args)) return Object.assign(new Error('Command failed'), { stderr: 'Master running (pid=1234)\n' })
+      if (args.includes('-R')) return 'Allocated port 45678'
+      return ''
+    })
+
+    await manager.connect('proj-1', config)
+    expect(kill).toHaveBeenCalledWith(1234, 'SIGTERM')
+  })
+
+  it('kills a master that survived a `-O exit` that reported success', async () => {
+    const kill = spyOnKill()
+    respondByArgs(args => {
+      if (isCheck(args)) return 'Master running (pid=79958)'
+      if (args.includes('-R')) return 'Allocated port 45678'
+      return ''
+    })
+
+    await manager.connect('proj-1', config)
+    expect(kill).toHaveBeenCalledWith(79958, 'SIGTERM')
+  })
+
+  it('kills nothing when the socket is stale and no master answers', async () => {
+    const kill = spyOnKill()
+    respondByArgs(args => {
+      if (isCheck(args)) return new Error('Control socket connect: No such file or directory')
+      if (args.includes('-R')) return 'Allocated port 45678'
+      return ''
+    })
+
+    await manager.connect('proj-1', config)
+    expect(kill).not.toHaveBeenCalled()
+    expect(manager.getStatus('proj-1')).toBe('connected')
+  })
+
+  it('does not probe for a master when there is no leftover socket', async () => {
+    fs.unlinkSync(manager.getSocketPath('proj-1'))
+    const kill = spyOnKill()
+    respondByArgs(args => (args.includes('-R') ? 'Allocated port 45678' : ''))
+
+    await manager.connect('proj-1', config)
+
+    expect(mockExecFile.mock.calls.filter(call => isCheck(call[1] as string[]))).toHaveLength(0)
+    expect(kill).not.toHaveBeenCalled()
+  })
+
+  it('leaves no pid to kill when no master answers the socket', async () => {
+    const kill = spyOnKill()
+    respondByArgs(args => {
+      if (isExit(args) || isCheck(args)) return new Error('Command failed: no controlling master')
+      if (args.includes('-R')) return 'Allocated port 45678'
+      return ''
+    })
+
+    await manager.connect('proj-1', config)
+    expect(kill).not.toHaveBeenCalled()
+  })
+
+  // The failure this whole path exists for: a master left over from an earlier
+  // run whose socket was unlinked out from under it. Nothing socket-based can
+  // reach it, and it squats the tunnel port until it is killed by pid.
+  it('reaps a stray master even when no socket file is left to reach it', async () => {
+    fs.unlinkSync(manager.getSocketPath('proj-1'))
+    const kill = spyOnKill()
+    const sock = manager.getSocketPath('proj-1')
+    respondByArgs(args => {
+      if (args.includes('-axo')) return `48865 ssh -fN -M -S ${sock} -p 22 deploy@dev.example.com`
+      if (args.includes('-R')) return 'Allocated port 45678'
+      return ''
+    })
+
+    await manager.connect('proj-1', config)
+
+    expect(kill).toHaveBeenCalledWith(48865, 'SIGTERM')
+    expect(manager.getStatus('proj-1')).toBe('connected')
+  })
+
+  it('kills the stray before spawning its replacement, so the port is free', async () => {
+    fs.unlinkSync(manager.getSocketPath('proj-1'))
+    const order: string[] = []
+    vi.spyOn(process, 'kill').mockImplementation((_pid: number, signal?: string | number) => {
+      if (signal === 0) throw Object.assign(new Error('ESRCH'), { code: 'ESRCH' })
+      order.push('kill')
+      return true
+    })
+    const sock = manager.getSocketPath('proj-1')
+    respondByArgs(args => {
+      if (args.includes('-axo')) return `48865 ssh -fN -M -S ${sock} -p 22 deploy@dev.example.com`
+      if (args.includes('-M')) order.push('spawn-master')
+      if (args.includes('-R')) return 'Allocated port 45678'
+      return ''
+    })
+
+    await manager.connect('proj-1', config)
+
+    expect(order).toEqual(['kill', 'spawn-master'])
+  })
+
+  it('still connects when the process list is unavailable', async () => {
+    fs.unlinkSync(manager.getSocketPath('proj-1'))
+    const kill = spyOnKill()
+    respondByArgs(args => {
+      if (args.includes('-axo')) return new Error('ps: command not found')
+      if (args.includes('-R')) return 'Allocated port 45678'
+      return ''
+    })
+
+    await manager.connect('proj-1', config)
+
+    expect(kill).not.toHaveBeenCalled()
+    expect(manager.getStatus('proj-1')).toBe('connected')
   })
 })

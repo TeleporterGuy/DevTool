@@ -7,6 +7,7 @@ import {
   ProjectsData,
   createDefaultWindowSessionState,
   createDefaultWindowViewState,
+  isSpentEphemeralProject,
   normalizePinnedItems,
   pruneUnusedTags,
   reconcileWindowViewState,
@@ -111,7 +112,13 @@ export class Storage {
   }
 
   static normalizeProjectsData(data: Record<string, unknown>): ProjectsData {
-    const projects: Project[] = Array.isArray(data.projects) ? data.projects : []
+    const allProjects: Project[] = Array.isArray(data.projects) ? data.projects : []
+    // A hidden ad-hoc project is only ever a home for tasks; once the last real
+    // one is gone it has no reason to exist. Dropping it here catches every
+    // writer at once — including main's idle-cleanup sweep, which removes tasks
+    // without going through the renderer. Safe because such a project is always
+    // created in the same write as its first task.
+    const projects = allProjects.filter(p => !isSpentEphemeralProject(p))
     const projectIds = new Set(projects.map(p => p.id))
     const tagIds = new Set(
       (Array.isArray(data.tags) ? data.tags as Tag[] : [])

@@ -7,14 +7,17 @@ import { CONFIG_DIR } from './config-dir'
 import { ScrollbackStorage } from './scrollback-storage'
 import { PtyManager } from './pty-manager'
 import { HookServer } from './hook-server'
-import { HookInjector } from './hook-injector'
-import { SshConnectionManager } from './ssh-connection-manager'
+import { HookInjector, hookEndpointFor } from './hook-injector'
+import { ClaudeChatManager, type ChatTabConfig } from './claude-chat/chat-manager'
+import type { ChatImage, ChatPromptResponse } from '../shared/claude-chat'
+import { SshConnectionManager, spawnCdCommand } from './ssh-connection-manager'
 import { CodexSessionManager } from './codex-session-manager'
 import { RemoteWorkspaceManager } from './remote-workspace-manager'
 import { WorkspaceManager } from './workspace-manager'
 import { NotesStorage } from './notes-storage'
 import { RevisionStore } from './revision-store'
 import { TabActivityRegistry } from './tab-activity-registry'
+import type { ActivityUpdate } from '../shared/agent-activity'
 import { runIdleCleanupSweep, type IdleCleanupEnvironment } from './idle-cleanup-sweep'
 import { tearDownTaskTabs } from './task-teardown'
 import { PaletteFrecencyStorage, type FrecencyFile } from './palette-frecency-storage'
@@ -24,7 +27,7 @@ import { AI_TAB_META } from '../shared/types'
 import { agentCommandOverride, conptySpawnArgv, isAiAgentCommand, resolveAgentCommand } from './resolve-agent-command'
 import { detectExternalEditors, openFolderInEditor } from './external-ide'
 import { isLocalInteractiveTerminal, resolveLocalTerminalSpawn } from './resolve-local-terminal'
-import { findGitBashExe, setPortableNodeDir } from './shell-env'
+import { findGitBashExe, getShellEnv, setPortableNodeDir } from './shell-env'
 import { resolveSafeProjectPath } from './project-fs-path'
 import {
   createProjectDirectory,
@@ -183,6 +186,8 @@ export class AppRuntime {
   private readonly dirtyTabsByWindow = new Map<number, Set<string>>()
   private hookInjector!: HookInjector
   private sshManager!: SshConnectionManager
+  /** Claude chat tabs' processes — the Agent SDK counterpart of `ptyRuntimes`. */
+  private chatManager!: ClaudeChatManager
   private started = false
   private quitting = false
   private socksProxyEnabled = new Map<string, boolean>()
@@ -240,6 +245,7 @@ export class AppRuntime {
     this.logDebug(`start hookPort=${this.hookServer.getPort()}`)
     this.hookInjector = new HookInjector(this.hookServer.getPort(), this.hookServer.getToken())
     this.sshManager = new SshConnectionManager(path.join(CONFIG_DIR, 'ssh'), this.hookServer.getPort())
+    this.chatManager = this.createChatManager()
     this.registerEventForwarders()
     this.registerIpcHandlers()
   }
@@ -271,6 +277,7 @@ export class AppRuntime {
         this.windowStates.delete(window.id)
         this.persistWindowSession()
       }
+      this.chatManager.detachWindow(window.id)
       for (const [tabId, runtime] of this.ptyRuntimes.entries()) {
         runtime.attachedWindowIds.delete(window.id)
         if (runtime.controllerWindowId === window.id) {
@@ -354,6 +361,7 @@ export class AppRuntime {
     for (const [tabId, runtime] of this.ptyRuntimes.entries()) {
       if (runtime.exitCode === null) ids.push(tabId)
     }
+    ids.push(...this.chatManager.liveTabIds())
     return ids
   }
 
@@ -409,9 +417,13 @@ export class AppRuntime {
       killPty: (tabId) => {
         this.ptyManager.kill(tabId)
         this.ptyRuntimes.delete(tabId)
+        this.chatManager.close(tabId)
       },
       deleteScrollback: (tabId) => this.scrollbackStorage.delete(tabId),
-      forgetActivity: (tabId) => this.activityRegistry.remove(tabId),
+      forgetActivity: (tabId) => {
+        this.activityRegistry.remove(tabId)
+        this.broadcastAgentActivity(tabId)
+      },
       releaseHooks: (owner, dir, tabId) => owner.ssh
         ? this.cleanupRemoteHooks(owner.id, owner.ssh, dir, tabId)
         : this.hookInjector.cleanup(dir, tabId)
@@ -462,34 +474,16 @@ export class AppRuntime {
       this.scrollbackStorage.save(tabId, runtime.scrollback)
     }
     this.ptyManager.killAll()
+    this.chatManager.closeAll()
     this.hookInjector.cleanupAll()
     await this.hookServer.stop()
     await this.sshManager.disconnectAll().catch(() => {})
   }
 
   private registerEventForwarders(): void {
-    // Each hook event now has two consumers: the windows, which draw the status dot
-    // for the tabs they have mounted, and the activity registry, which is what idle
-    // cleanup asks. The forwarding is unchanged — the registry is an addition.
-    this.hookServer.on('session-start', (tabId: string, body: Record<string, unknown>) => {
-      this.activityRegistry.touch(tabId)
-      this.broadcastToAttachedWindows(tabId, 'hook-session-start', tabId, body)
-    })
-
-    this.hookServer.on('working', (tabId: string) => {
-      this.activityRegistry.working(tabId)
-      this.broadcastToAttachedWindows(tabId, 'hook-working', tabId)
-    })
-
-    this.hookServer.on('stopped', (tabId: string) => {
-      this.activityRegistry.stopped(tabId)
-      this.broadcastToAttachedWindows(tabId, 'hook-stopped', tabId)
-    })
-
-    this.hookServer.on('notification', (tabId: string, body: Record<string, unknown>) => {
-      this.activityRegistry.notification(tabId, body)
-      this.broadcastToAttachedWindows(tabId, 'hook-notification', tabId, body)
-    })
+    for (const endpoint of ['session-start', 'working', 'stopped', 'notification', 'activity']) {
+      this.hookServer.on(endpoint, (tabId: string, body: Record<string, unknown>) => this.handleHook(endpoint, tabId, body))
+    }
 
     this.sshManager.on('status-changed', async (projectId: string, status: string) => {
       this.logDebug(`sshStatus projectId=${projectId} status=${status}`)
@@ -541,6 +535,85 @@ export class AppRuntime {
     })
   }
 
+  /**
+   * One hook event, from a terminal tab's curl (hook server) or a chat tab's SDK
+   * process (in-process). Each has two consumers: the windows, which draw the
+   * status dot for the tabs they mount, and the activity registry, which is what
+   * idle cleanup and the sidebar's activity line read.
+   */
+  private handleHook(endpoint: string, tabId: string, body: Record<string, unknown>): void {
+    switch (endpoint) {
+      case 'session-start':
+        this.activityRegistry.touch(tabId)
+        this.recordAgentActivity(tabId, body)
+        this.broadcastToAttachedWindows(tabId, 'hook-session-start', tabId, body)
+        return
+      case 'working':
+        this.activityRegistry.working(tabId)
+        this.recordAgentActivity(tabId, body)
+        this.broadcastToAttachedWindows(tabId, 'hook-working', tabId)
+        return
+      case 'stopped':
+        this.activityRegistry.stopped(tabId)
+        this.recordAgentActivity(tabId, body)
+        this.broadcastToAttachedWindows(tabId, 'hook-stopped', tabId)
+        return
+      case 'notification':
+        this.activityRegistry.notification(tabId, body)
+        this.recordAgentActivity(tabId, body)
+        this.broadcastToAttachedWindows(tabId, 'hook-notification', tabId, body)
+        return
+      default: {
+        // Everything else Claude reports (tools, permission dialogs, API failures,
+        // subagents, compaction). `hook-activity` is sent even without a status
+        // change, because any hook proves the agent is alive (the stale-working timer).
+        const update = this.recordAgentActivity(tabId, body)
+        const statusEvent = update?.statusEvent ?? null
+        if (statusEvent) this.activityRegistry.statusEvent(tabId, statusEvent)
+        this.broadcastToAttachedWindows(tabId, 'hook-activity', tabId, statusEvent)
+      }
+    }
+  }
+
+  private createChatManager(): ClaudeChatManager {
+    return new ClaudeChatManager({
+      sendToWindow: (windowId, channel, ...args) => {
+        const window = this.windows.get(windowId)
+        if (window && !window.isDestroyed()) window.webContents.send(channel, ...args)
+      },
+      resolveLocalClaude: () => resolveAgentCommand(agentCommandOverride('claude', this.config).trim() || 'claude'),
+      localEnv: () => getShellEnv(),
+      ensureSsh: (projectId, sshConfig) => this.ensureSshConnected(projectId, sshConfig),
+      remoteCommand: (projectId, sshConfig, cwd, claudeArgs, env) => ({
+        file: this.sshManager.getSshCommand(),
+        args: this.sshManager.buildStdioSpawnArgs(projectId, sshConfig, 'claude', claudeArgs, env, cwd)
+      }),
+      remoteExec: async (projectId, sshConfig, script) => {
+        const { stdout } = await execFileAsync(this.sshManager.getSshCommand(), [
+          '-S', this.sshManager.getSocketPath(projectId),
+          `${sshConfig.username}@${sshConfig.host}`,
+          script
+        ], { timeout: 30_000, maxBuffer: 512 * 1024 * 1024 })
+        return stdout
+      },
+      onHook: (tabId, body) => {
+        const event = typeof body.hook_event_name === 'string' ? body.hook_event_name : ''
+        this.handleHook(hookEndpointFor(event), tabId, body)
+      },
+      onPromptResolved: (tabId, prompt) => {
+        this.handleHook('activity', tabId, { hook_event_name: 'DevtoolPromptResolved', tool_use_id: prompt.toolUseId })
+      },
+      onProcessChange: (tabId, running, error) => {
+        // A fresh process says nothing about the old one's status; an ended one is
+        // 'exited' only when it died on its own — a chat restarts on the next send.
+        if (running || !error) this.activityRegistry.reset(tabId)
+        else this.activityRegistry.exited(tabId)
+        this.broadcastAgentActivity(tabId)
+      },
+      log: (message) => this.logDebug(message)
+    })
+  }
+
   private async ensureSshConnected(projectId: string, sshConfig: SshConfig): Promise<void> {
     if (this.sshManager.getStatus(projectId) === 'connected') return
     await this.sshManager.connect(projectId, sshConfig, { tunnel: this.getProjectTunnel(projectId) ?? null })
@@ -577,6 +650,7 @@ export class AppRuntime {
     // Everything the sweep exempts a task for, as the settings preview needs to show
     // it: what is on screen in any window, what main has heard from the hooks, what
     // still has a process, and what has an unsaved buffer open.
+    ipcMain.handle('get-agent-activity', () => this.activityRegistry.getActivitySnapshot())
     ipcMain.handle('get-cleanup-activity', () => ({
       openTaskIds: this.getOpenTaskIds(),
       statuses: this.activityRegistry.getSnapshot(),
@@ -928,6 +1002,33 @@ export class AppRuntime {
       this.killPty(id)
     })
 
+    ipcMain.handle('chat-attach', (event, tabId: string, config: ChatTabConfig) => {
+      const window = BrowserWindow.fromWebContents(event.sender)
+      if (!window) throw new Error('Unable to resolve window for chat attach')
+      return this.chatManager.attach(window.id, tabId, config)
+    })
+    ipcMain.on('chat-detach', (event, tabId: string) => {
+      const window = BrowserWindow.fromWebContents(event.sender)
+      if (window) this.chatManager.detach(window.id, tabId)
+    })
+    ipcMain.handle('chat-send', (_event, tabId: string, text: string, images?: ChatImage[]) =>
+      this.chatManager.send(tabId, text, images ?? []))
+    ipcMain.handle('chat-interrupt', (_event, tabId: string) => this.chatManager.interrupt(tabId))
+    ipcMain.handle('chat-respond', (_event, tabId: string, promptId: string, response: ChatPromptResponse) =>
+      this.chatManager.respond(tabId, promptId, response))
+    ipcMain.handle('chat-set-model', (_event, tabId: string, model?: string) => this.chatManager.setModel(tabId, model))
+    ipcMain.handle('chat-set-mode', (_event, tabId: string, mode: string) => this.chatManager.setPermissionMode(tabId, mode))
+    ipcMain.handle('chat-set-effort', (_event, tabId: string, effort?: string) => this.chatManager.setEffort(tabId, effort))
+    // Stop keeps the timeline (a tab turning into a terminal); close forgets the tab.
+    ipcMain.handle('chat-stop', (_event, tabId: string) => this.chatManager.stop(tabId))
+    ipcMain.on('chat-close', (_event, tabId: string) => {
+      this.chatManager.close(tabId)
+      this.activityRegistry.remove(tabId)
+      this.broadcastAgentActivity(tabId)
+    })
+    ipcMain.handle('chat-list-files', (_event, cwd: string, projectId?: string, sshConfig?: SshConfig) =>
+      this.listChatFiles(cwd, projectId, sshConfig))
+
     ipcMain.handle('workspace-list-branches', async (_event, request: WorkspaceListBranchesRequest) => {
       if (request.sshConfig && request.projectId) {
         await this.ensureSshConnected(request.projectId, request.sshConfig)
@@ -1275,6 +1376,7 @@ export class AppRuntime {
     // A fresh process for this tab: whatever the old one was doing (including
     // 'exited') describes a process that no longer exists.
     this.activityRegistry.reset(id)
+    this.broadcastAgentActivity(id)
 
     // Capture the current runtime so callbacks can verify they belong to the
     // right generation.  After a kill+respawn cycle the same `id` maps to a
@@ -1303,6 +1405,7 @@ export class AppRuntime {
         if (!runtime || runtime !== expectedRuntime) return
         runtime.exitCode = exitCode
         this.activityRegistry.exited(id)
+        this.broadcastAgentActivity(id)
         this.logDebug(`ptyExit id=${id} exitCode=${exitCode}`)
         this.broadcastToAttachedWindows(id, 'pty-exit', id, exitCode)
       }
@@ -1390,6 +1493,28 @@ export class AppRuntime {
     }
   }
 
+  /** Files the chat composer's @-mention offers: git's view (tracked + untracked, not ignored). */
+  private async listChatFiles(cwd: string, projectId?: string, sshConfig?: SshConfig): Promise<string[]> {
+    const script = 'git ls-files --cached --others --exclude-standard 2>/dev/null | head -20000'
+    try {
+      if (sshConfig && projectId) {
+        await this.ensureSshConnected(projectId, sshConfig)
+        const { stdout } = await execFileAsync(this.sshManager.getSshCommand(), [
+          '-S', this.sshManager.getSocketPath(projectId),
+          `${sshConfig.username}@${sshConfig.host}`,
+          `${spawnCdCommand(cwd || sshConfig.remoteDir)} && ${script}`
+        ], { timeout: 10_000, maxBuffer: 64 * 1024 * 1024 })
+        return stdout.split('\n').filter(Boolean)
+      }
+      const { stdout } = await execFileAsync('git', ['ls-files', '--cached', '--others', '--exclude-standard'], {
+        cwd, timeout: 10_000, maxBuffer: 64 * 1024 * 1024
+      })
+      return stdout.split('\n').filter(Boolean).slice(0, 20_000)
+    } catch {
+      return []
+    }
+  }
+
   private killPty(id: string): void {
     this.logDebug(`ptyKill id=${id}`)
     const runtime = this.ptyRuntimes.get(id)
@@ -1401,6 +1526,7 @@ export class AppRuntime {
     // No process, no activity: a status left at 'working' here would protect the
     // task from cleanup for the rest of the session.
     this.activityRegistry.remove(id)
+    this.broadcastAgentActivity(id)
   }
 
   private claimPtyControl(tabId: string, windowId: number): void {
@@ -1440,6 +1566,20 @@ export class AppRuntime {
     }
   }
 
+  /**
+   * Fold a hook body into the tab's activity and push it to every window — the
+   * sidebar lists tasks that are not mounted in the window showing them.
+   */
+  private recordAgentActivity(tabId: string, body: Record<string, unknown>): ActivityUpdate | null {
+    const update = this.activityRegistry.applyHook(tabId, body)
+    if (update) this.broadcastToAllWindows('agent-activity', tabId, update.activity)
+    return update
+  }
+
+  private broadcastAgentActivity(tabId: string): void {
+    this.broadcastToAllWindows('agent-activity', tabId, this.activityRegistry.getActivity(tabId))
+  }
+
   private broadcastToAllWindows(channel: string, ...args: unknown[]): void {
     for (const window of this.windows.values()) {
       if (!window.isDestroyed()) {
@@ -1453,9 +1593,9 @@ export class AppRuntime {
   }
 
   private broadcastToAttachedWindows(tabId: string, channel: string, ...args: unknown[]): void {
-    const runtime = this.ptyRuntimes.get(tabId)
-    if (!runtime) return
-    for (const windowId of runtime.attachedWindowIds) {
+    const windowIds = this.ptyRuntimes.get(tabId)?.attachedWindowIds ?? this.chatManager?.attachedWindows(tabId)
+    if (!windowIds) return
+    for (const windowId of windowIds) {
       const window = this.windows.get(windowId)
       if (window && !window.isDestroyed()) {
         window.webContents.send(channel, ...args)

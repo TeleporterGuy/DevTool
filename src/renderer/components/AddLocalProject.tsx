@@ -6,7 +6,8 @@ import { Modal, SetBlock, Field, LinkBtn, PrimaryButton } from './ui'
 interface Props {
   onAdd: (name: string, directory: string, tagIds?: string[]) => void
   onCancel: () => void
-  initialValues: {
+  /** Omitted when adding from scratch; present when duplicating an existing project. */
+  initialValues?: {
     name: string
     directory: string
   }
@@ -15,8 +16,8 @@ interface Props {
 }
 
 export default function AddLocalProject({ onAdd, onCancel, initialValues, allTags, onEnsureTag }: Props): React.ReactElement {
-  const [name, setName] = useState(initialValues.name)
-  const [directory, setDirectory] = useState(initialValues.directory)
+  const [name, setName] = useState(initialValues?.name ?? '')
+  const [directory, setDirectory] = useState(initialValues?.directory ?? '')
   const [tagIds, setTagIds] = useState<string[]>([])
 
   const isValid = name.trim() && directory.trim()
@@ -28,12 +29,15 @@ export default function AddLocalProject({ onAdd, onCancel, initialValues, allTag
 
   const handlePickDir = async () => {
     const picked = await window.api.pickDirectory()
-    if (picked) setDirectory(picked)
+    if (!picked) return
+    setDirectory(picked)
+    // Browsing to a folder is usually all the naming anyone wants to do.
+    if (!name.trim()) setName(picked.split('/').pop() || '')
   }
 
   return (
     <Modal
-      title="Duplicate Local Project"
+      title={`${initialValues ? 'Duplicate' : 'Add'} Local Project`}
       onClose={onCancel}
       footer={
         <>

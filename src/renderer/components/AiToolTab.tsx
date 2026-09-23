@@ -18,6 +18,8 @@ import { AI_TAB_META } from '../../shared/types'
 import type { AiTabType, SshConfig } from '../../shared/types'
 import { buildAiToolArgs, parseExtraArgs } from './aiToolTabUtils'
 import { classifyNotification, nextAiStatus, type AiNotificationKind, type AiStatusDecision, type AiStatusEvent } from '../../shared/ai-status'
+import { ensureHookListeners, hookStatusCallbacks } from './hookStatusListeners'
+import { takeClaudeHandoff } from './claudeTabHandoff'
 import { logStatusDetail } from '../statusDebug'
 import { normalizeBrowserUrl } from '../browserUrl'
 import LinkContextMenu, { type LinkMenuState } from './LinkContextMenu'
@@ -121,33 +123,6 @@ function ensureExitListener(): void {
   })
 }
 
-// Hook listeners (registered once)
-let hookListenersRegistered = false
-const hookStatusCallbacks = new Map<string, {
-  onWorking: () => void
-  onStopped: () => void
-  onNotification: (body: Record<string, unknown>) => void
-  onSessionStart: (body: Record<string, unknown>) => void
-}>()
-
-function ensureHookListeners(): void {
-  if (hookListenersRegistered) return
-  hookListenersRegistered = true
-
-  window.api.onHookWorking((tabId: string) => {
-    hookStatusCallbacks.get(tabId)?.onWorking()
-  })
-  window.api.onHookStopped((tabId: string) => {
-    hookStatusCallbacks.get(tabId)?.onStopped()
-  })
-  window.api.onHookNotification((tabId: string, body: Record<string, unknown>) => {
-    hookStatusCallbacks.get(tabId)?.onNotification(body)
-  })
-  window.api.onHookSessionStart((tabId: string, body: Record<string, unknown>) => {
-    hookStatusCallbacks.get(tabId)?.onSessionStart(body)
-  })
-}
-
 // beforeunload for scrollback (sync save)
 let beforeUnloadRegistered = false
 function ensureBeforeUnloadHandler(): void {
@@ -230,7 +205,7 @@ export default function AiToolTab({ tabId, toolType, visible, sessionId, pane, p
   )
   const requiresActivation = isHookTab && lazyLoadEnabled && hadPriorActivity === true
   const activationDecisionPending = isHookTab && lazyLoadEnabled && hadPriorActivity === null
-  const [userActivated, setUserActivated] = useState(false)
+  const [userActivated, setUserActivated] = useState(() => takeClaudeHandoff(tabId))
   const userActivatedRef = useRef(false)
   userActivatedRef.current = userActivated
   const scrollbackPreloadedRef = useRef(false)
@@ -488,8 +463,18 @@ export default function AiToolTab({ tabId, toolType, visible, sessionId, pane, p
           const kind = classifyNotification(body)
           logStatusDetail(`notification tab=${tabId} kind=${kind} message=${JSON.stringify(body.message ?? null)}`)
           const decision = applyStatus('hook-notification', kind)
-          // Only a real attention transition is inbox-worthy; a suppressed idle nudge
-          // must not wake a "snooze until it needs me" task.
+          // Only a real attention transition is inbox-worthy; the idle nudge must not
+          // wake a "snooze until it needs me" task. It only changes anything when Stop
+          // went missing, and then it is the "agent finished" event Stop would have been.
+          if (decision === 'attention') markTaskEvent(projectId, taskId, 'attention')
+          else if (decision === null) markTaskEvent(projectId, taskId)
+        },
+        onActivity: (statusEvent: AiStatusEvent | null) => {
+          // Any hook — even one that changes nothing — proves the agent is alive, so a
+          // long silent tool call no longer trips the stale-working watchdog.
+          restartStaleTimer()
+          if (!statusEvent) return
+          const decision = applyStatus(statusEvent)
           if (decision === 'attention') markTaskEvent(projectId, taskId, 'attention')
         },
         onSessionStart: (body: Record<string, unknown>) => {

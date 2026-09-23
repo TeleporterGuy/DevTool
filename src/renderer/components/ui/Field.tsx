@@ -8,9 +8,12 @@ const fieldCls =
 type InputProps = React.InputHTMLAttributes<HTMLInputElement>
 
 /** Standard text/number input — compact control height on the field surface. */
-export function Field({ className, ...rest }: InputProps): React.ReactElement {
-  return <input className={`${fieldCls} ${className ?? ''}`} {...rest} />
-}
+export const Field = React.forwardRef<HTMLInputElement, InputProps>(function Field(
+  { className, ...rest },
+  ref
+) {
+  return <input ref={ref} className={`${fieldCls} ${className ?? ''}`} {...rest} />
+})
 
 type SelectProps = React.SelectHTMLAttributes<HTMLSelectElement>
 

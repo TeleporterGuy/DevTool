@@ -447,6 +447,18 @@ export default function Settings({ onClose }: Props): React.ReactElement {
                 </SetBlock>
               </FormGroup>
             )}
+            <FormGroup>
+              <SetBlock label="New Claude tabs open as">
+                <SegCtl
+                  options={[{ value: 'terminal', label: 'Terminal' }, { value: 'chat', label: 'Chat' }] as const}
+                  value={config.claudeDefaultView}
+                  onChange={(claudeDefaultView) => updateConfig({ claudeDefaultView })}
+                />
+                <HelperText>
+                  Chat drives the same `claude` (your login, settings and hooks) in DevTool&apos;s own UI. Right-click a Claude tab to switch it between the two.
+                </HelperText>
+              </SetBlock>
+            </FormGroup>
             <Group>
               <GroupRow
                 label="Lazy-load Claude tabs"

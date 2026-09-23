@@ -1,20 +1,25 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { v4 as uuid } from 'uuid'
 import {
+  AI_TAB_META,
+  CLAUDE_CHAT_LABEL,
   buildWindowViewState,
   cloneWindowViewState,
   createDefaultWindowViewState,
   createHomeTask,
   createTaskViewState,
   ensureHomeTasks,
+  isEphemeralProject,
   isHomeTab,
   isHomeTask,
   isRemoteProject,
+  isSpentEphemeralProject,
   pinnedItemKey,
   pruneUnusedTags,
   reconcileTaskViewState,
   reconcileWindowViewState
 } from '../../shared/types'
+import { markClaudeHandoff } from '../components/claudeTabHandoff'
 import type {
   NotesRecord,
   PinnedItem,
@@ -49,9 +54,26 @@ import {
 import { createInteractionStampGate } from '../components/taskRecency'
 import { createTab, type CreateTabOptions } from '../components/newTaskTabs'
 import { useDirtyBufferStore, type DirtyBuffer } from '../context/DirtyBufferContext'
+import { dirBasename } from '../../shared/paths'
 
-export type ProjectUpdate = Partial<Pick<Project, 'directory' | 'aiToolArgs' | 'tunnel' | 'emoji' | 'icon' | 'tagIds'>>
+export type ProjectUpdate = Partial<Pick<Project, 'directory' | 'aiToolArgs' | 'tunnel' | 'emoji' | 'icon' | 'tagIds' | 'ephemeral'>>
 type AddTabOptions = CreateTabOptions
+
+/** The task literal every "add a task" path starts from. */
+function makeTask(name: string, initialTabs: Tab[], workspace?: WorkspaceConfig): Task {
+  return {
+    id: uuid(),
+    name,
+    ...(workspace ? { workspace } : {}),
+    tabs: { left: initialTabs, right: [] },
+    activeTab: { left: initialTabs[initialTabs.length - 1]?.id ?? null, right: null },
+    splitOpen: false,
+    splitRatio: 0.5,
+    // Creating a task is an interaction: without the stamp a brand-new task has
+    // no activity at all and sinks to the bottom of the inbox's active group.
+    lastInteractedAt: Date.now()
+  }
+}
 
 export function buildWindowTitle(projectName: string | null, taskName: string | null, taskIsHome?: boolean): string {
   if (projectName && taskName && !taskIsHome) {
@@ -1059,17 +1081,7 @@ export function useAppState() {
   // after this would read a `projectsRef` that hasn't seen the task yet and clobber
   // the view state written below.
   const addTask = useCallback((projectId: string, name: string, initialTabs: Tab[] = []) => {
-    const task: Task = {
-      id: uuid(),
-      name,
-      tabs: { left: initialTabs, right: [] },
-      activeTab: { left: initialTabs[initialTabs.length - 1]?.id ?? null, right: null },
-      splitOpen: false,
-      splitRatio: 0.5,
-      // Creating a task is an interaction: without the stamp a brand-new task has
-      // no activity at all and sinks to the bottom of the inbox's active group.
-      lastInteractedAt: Date.now()
-    }
+    const task = makeTask(name, initialTabs)
     mutateProjects(prev => ({
       ...prev,
       projects: prev.projects.map(project =>
@@ -1096,16 +1108,7 @@ export function useAppState() {
     workspace: WorkspaceConfig,
     initialTabs: Tab[] = []
   ) => {
-    const task: Task = {
-      id: uuid(),
-      name,
-      workspace,
-      tabs: { left: initialTabs, right: [] },
-      activeTab: { left: initialTabs[initialTabs.length - 1]?.id ?? null, right: null },
-      splitOpen: false,
-      splitRatio: 0.5,
-      lastInteractedAt: Date.now()
-    }
+    const task = makeTask(name, initialTabs, workspace)
     mutateProjects(prev => ({
       ...prev,
       projects: prev.projects.map(project =>
@@ -1117,6 +1120,60 @@ export function useAppState() {
     updateWindowViewState(prev => ({
       ...prev,
       selectedProjectId: projectId,
+      selectedTaskId: task.id,
+      taskStates: {
+        ...prev.taskStates,
+        [task.id]: createTaskViewState(task)
+      }
+    }))
+    return task
+  }, [mutateProjects, updateWindowViewState])
+
+  /**
+   * File a task against a bare directory. The hidden project that owns it is
+   * created — or reused, keyed on the path — in the *same* mutation as the task,
+   * so an empty ad-hoc project never reaches disk and the "prune the spent ones"
+   * sweep in storage can stay unconditional.
+   */
+  const addTaskInDirectory = useCallback((
+    directory: string,
+    name: string,
+    initialTabs: Tab[] = [],
+    workspace?: WorkspaceConfig
+  ) => {
+    const task = makeTask(name, initialTabs, workspace)
+    // Resolved before the mutation, not inside it: the updater is replayed against
+    // the synced snapshot as well as local state, so it has to be idempotent.
+    const existing = projectsRef.current.find(p => isEphemeralProject(p) && p.directory === directory)
+    const ownerId = existing?.id ?? uuid()
+    mutateProjects(prev => {
+      if (prev.projects.some(p => p.id === ownerId)) {
+        return {
+          ...prev,
+          projects: prev.projects.map(project =>
+            project.id === ownerId
+              ? incrementLifetimeStat({ ...project, tasks: [...project.tasks, task] }, 'tasksCreated')
+              : project
+          )
+        }
+      }
+      const { task: homeTask } = createHomeTask(ownerId)
+      const project: Project = {
+        id: ownerId,
+        name: dirBasename(directory),
+        directory,
+        ephemeral: true,
+        tasks: [homeTask, task]
+      }
+      return {
+        ...prev,
+        projects: [...prev.projects, incrementLifetimeStat(project, 'tasksCreated')],
+        projectOrder: [...prev.projectOrder, project.id]
+      }
+    })
+    updateWindowViewState(prev => ({
+      ...prev,
+      selectedProjectId: ownerId,
       selectedTaskId: task.id,
       taskStates: {
         ...prev.taskStates,
@@ -1157,20 +1214,33 @@ export function useAppState() {
       }
     }
 
-    mutateProjects(prev => ({
-      ...prev,
-      projects: prev.projects.map(project =>
+    // A hidden ad-hoc project exists only to give its tasks somewhere to live —
+    // once the last real one is gone it goes with them, in the same mutation so
+    // no empty record is ever written out.
+    const ownerRetired = !!project
+      && isEphemeralProject(project)
+      && !project.tasks.some(candidate => candidate.id !== taskId && !isHomeTask(candidate))
+    mutateProjects(prev => {
+      const withoutTask = prev.projects.map(project =>
         project.id === projectId
           ? { ...project, tasks: project.tasks.filter(task => task.id !== taskId) }
           : project
       )
-    }))
+      const spent = withoutTask.find(p => p.id === projectId && isSpentEphemeralProject(p))
+      if (!spent) return { ...prev, projects: withoutTask }
+      return {
+        ...prev,
+        projects: withoutTask.filter(p => p.id !== projectId),
+        projectOrder: prev.projectOrder.filter(id => id !== projectId)
+      }
+    })
 
     updateWindowViewState(prev => {
       const taskStates = { ...prev.taskStates }
       delete taskStates[taskId]
       return {
         ...prev,
+        selectedProjectId: ownerRetired && prev.selectedProjectId === projectId ? null : prev.selectedProjectId,
         selectedTaskId: prev.selectedTaskId === taskId ? null : prev.selectedTaskId,
         taskStates
       }
@@ -1462,6 +1532,45 @@ export function useAppState() {
               )
             }
           : project
+      )
+    }))
+  }, [mutateProjects])
+
+  /**
+   * Turn a Claude tab into the other kind — terminal ⇄ chat — on the same session.
+   * The old kind's process is ended first (through the same `tab-removed` teardown
+   * a close runs, which is what the mounted component listens for), so the new one
+   * resumes a session nothing else is writing to.
+   */
+  const convertClaudeTab = useCallback((projectId: string, taskId: string, pane: 'left' | 'right', tabId: string, to: 'claude' | 'claude-chat') => {
+    const project = projectsRef.current.find(candidate => candidate.id === projectId)
+    const tab = project?.tasks.find(task => task.id === taskId)?.tabs[pane].find(candidate => candidate.id === tabId)
+    if (!tab || tab.type === to || (tab.type !== 'claude' && tab.type !== 'claude-chat')) return
+    window.dispatchEvent(new CustomEvent('tab-removed', { detail: { tabId } }))
+    void window.api.scrollbackDelete(tabId)
+    markClaudeHandoff(tabId)
+    const defaultTitles = [AI_TAB_META.claude.label, CLAUDE_CHAT_LABEL]
+    const title = defaultTitles.includes(tab.title) ? (to === 'claude' ? AI_TAB_META.claude.label : CLAUDE_CHAT_LABEL) : tab.title
+    const sessionId = tab.sessionId ?? uuid()
+    mutateProjects(prev => ({
+      ...prev,
+      projects: prev.projects.map(candidate =>
+        candidate.id === projectId
+          ? {
+              ...candidate,
+              tasks: candidate.tasks.map(task =>
+                task.id === taskId
+                  ? {
+                      ...task,
+                      tabs: {
+                        ...task.tabs,
+                        [pane]: task.tabs[pane].map(existing => existing.id === tabId ? { ...existing, type: to, title, sessionId } : existing)
+                      }
+                    }
+                  : task
+              )
+            }
+          : candidate
       )
     }))
   }, [mutateProjects])
@@ -1977,6 +2086,7 @@ export function useAppState() {
     reorderProjects,
     addTask,
     addWorkspaceTask,
+    addTaskInDirectory,
     removeTask,
     renameTask,
     reorderTasks,
@@ -1991,6 +2101,7 @@ export function useAppState() {
     reopenClosedTab,
     updateTabUrl,
     updateTabSessionId,
+    convertClaudeTab,
     setActiveTab,
     moveTab,
     getTaskViewState: getTaskViewStateForTask,

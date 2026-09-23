@@ -24,6 +24,14 @@ export type AiStatusEvent =
   | 'hook-stopped'
   /** Claude's Notification hook / pi's agent_end. */
   | 'hook-notification'
+  /**
+   * Claude is blocked on you for something it can't proceed without: a permission
+   * dialog (PermissionRequest), a question or plan approval (AskUserQuestion /
+   * ExitPlanMode), or a turn that died on an API error (StopFailure).
+   */
+  | 'hook-needs-input'
+  /** The tool call Claude was blocked on has resolved — you answered it. */
+  | 'hook-input-resolved'
   /** Terminal bell (non-hook tools only). */
   | 'bell'
   /** The tab became visible. */
@@ -31,7 +39,13 @@ export type AiStatusEvent =
   /** The PTY exited. */
   | 'exit'
 
-export type AiNotificationKind = 'permission' | 'idle' | 'unknown'
+/**
+ * - permission: blocked on you (permission, elicitation, "agent needs input").
+ * - idle: the 60s "still waiting" nudge that follows every Stop.
+ * - info: informational only (login succeeded, an elicitation completed).
+ * - resumed: Claude picked the turn back up on its own (usage limit reset).
+ */
+export type AiNotificationKind = 'permission' | 'idle' | 'info' | 'resumed' | 'unknown'
 
 export interface AiStatusCtx {
   /** Claude/pi: status comes from hooks, so silence carries no meaning. */
@@ -45,17 +59,37 @@ export interface AiStatusCtx {
 export type AiStatusDecision = TabStatusValue | 'keep'
 
 /**
- * Claude's Notification hook fires both for permission prompts and for the 60s
- * "still waiting on you" nudge, and only `message` tells them apart. Adding a
- * newly observed string is one line here; order matters (first match wins), so
- * permission patterns come first.
+ * Claude Code sends a structured `notification_type` (matcher values in the hooks
+ * docs). It is authoritative when present; the message regexes below only cover
+ * older Claude builds and anything that posts a bare message.
+ */
+const NOTIFICATION_TYPES: Record<string, AiNotificationKind> = {
+  permission_prompt: 'permission',
+  elicitation_dialog: 'permission',
+  elicitation_url_dialog: 'permission',
+  agent_needs_input: 'permission',
+  idle_prompt: 'idle',
+  auth_success: 'info',
+  elicitation_complete: 'info',
+  elicitation_response: 'info',
+  agent_completed: 'info',
+  quota_auto_resume_stale: 'info',
+  quota_auto_resume_disabled: 'info',
+  quota_auto_resume_fired: 'resumed'
+}
+
+/**
+ * Message fallback. Order matters (first match wins), so permission patterns come
+ * first. Adding a newly observed string is one line here.
  */
 const NOTIFICATION_PATTERNS: { kind: AiNotificationKind; re: RegExp }[] = [
   { kind: 'permission', re: /needs? your permission/i },
   { kind: 'permission', re: /permission to use/i },
   { kind: 'permission', re: /\bapprov(e|al)\b/i },
   { kind: 'idle', re: /waiting for your input/i },
-  { kind: 'idle', re: /\bidle\b/i }
+  { kind: 'idle', re: /\bidle\b/i },
+  { kind: 'info', re: /login successful/i },
+  { kind: 'resumed', re: /continuing your task/i }
 ]
 
 /**
@@ -64,6 +98,8 @@ const NOTIFICATION_PATTERNS: { kind: AiNotificationKind; re: RegExp }[] = [
  * silently. Log the raw message (see statusDebug) to tighten this over time.
  */
 export function classifyNotification(body: Record<string, unknown> | undefined): AiNotificationKind {
+  const type = typeof body?.notification_type === 'string' ? body.notification_type : ''
+  if (type && NOTIFICATION_TYPES[type]) return NOTIFICATION_TYPES[type]
   const message = typeof body?.message === 'string' ? body.message : ''
   for (const { kind, re } of NOTIFICATION_PATTERNS) {
     if (re.test(message)) return kind
@@ -110,10 +146,29 @@ export function nextAiStatus(
       return null
 
     case 'hook-notification':
-      // The idle nudge is noise when you are already looking at the tab. A permission
-      // prompt is not: it can land while you read something else in the same tab.
-      if (ctx.notificationKind === 'idle' && ctx.visible && ctx.windowFocused) return 'keep'
+      switch (ctx.notificationKind) {
+        case 'idle':
+          // Claude sends this 60s after every Stop. Stop already said "done" and marked
+          // the task unread, so treating the nudge as attention is what dragged settled
+          // tasks back into "Needs you" a minute after they finished. The one thing it
+          // does prove is that the agent is not working — useful if Stop went missing.
+          return current === 'working' ? null : 'keep'
+        case 'info':
+          return 'keep'
+        case 'resumed':
+          return 'working'
+        default:
+          // permission prompts, elicitations and anything unrecognised (incl. pi's agent_end)
+          return 'attention'
+      }
+
+    case 'hook-needs-input':
       return 'attention'
+
+    case 'hook-input-resolved':
+      // You answered, so the agent is running again. Only lifts an 'attention' —
+      // it must not resurrect "working" after the turn ended.
+      return current === 'attention' ? 'working' : 'keep'
 
     case 'bell':
       return 'attention'

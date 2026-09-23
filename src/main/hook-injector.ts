@@ -7,8 +7,52 @@ const DEVTOOL_HOOK_MARKER = '__devtool_injected'
 
 interface HookEntry {
   matcher: string
-  hooks: { type: string; command: string }[]
+  hooks: { type: string; command: string; async?: boolean }[]
   [DEVTOOL_HOOK_MARKER]?: boolean
+}
+
+/**
+ * Claude events DevTool listens to, and the endpoint each posts to.
+ *
+ * The first four drive the status dot and run synchronously, as they always have.
+ * The rest only describe *what* the agent is doing (current tool, permission
+ * dialogs, API failures, subagents, compaction) and post to `activity`, where
+ * `hook_event_name` in the body tells them apart. They run `async` so a curl per
+ * tool call never slows Claude down — the price is that they may arrive slightly
+ * out of order, which `shared/agent-activity.ts` is written to tolerate.
+ */
+const HOOK_EVENTS: { event: string; endpoint: string; async?: boolean }[] = [
+  { event: 'SessionStart', endpoint: 'session-start' },
+  { event: 'UserPromptSubmit', endpoint: 'working' },
+  { event: 'Stop', endpoint: 'stopped' },
+  { event: 'Notification', endpoint: 'notification' },
+  { event: 'PreToolUse', endpoint: 'activity', async: true },
+  { event: 'PostToolUse', endpoint: 'activity', async: true },
+  { event: 'PostToolUseFailure', endpoint: 'activity', async: true },
+  { event: 'PermissionRequest', endpoint: 'activity', async: true },
+  { event: 'StopFailure', endpoint: 'activity', async: true },
+  { event: 'SubagentStart', endpoint: 'activity', async: true },
+  { event: 'SubagentStop', endpoint: 'activity', async: true },
+  { event: 'PreCompact', endpoint: 'activity', async: true },
+  { event: 'PostCompact', endpoint: 'activity', async: true },
+  { event: 'SessionEnd', endpoint: 'activity', async: true }
+]
+
+/** Which hook-server endpoint a Claude hook event belongs to (chat tabs deliver hooks in-process). */
+export function hookEndpointFor(event: string): string {
+  return HOOK_EVENTS.find((entry) => entry.event === event)?.endpoint ?? 'activity'
+}
+
+function buildDevtoolHooks(mkCommand: (endpoint: string) => string): Record<string, HookEntry[]> {
+  const hooks: Record<string, HookEntry[]> = {}
+  for (const { event, endpoint, async } of HOOK_EVENTS) {
+    hooks[event] = [{
+      matcher: '*',
+      hooks: [{ type: 'command', command: mkCommand(endpoint), ...(async ? { async: true } : {}) }],
+      [DEVTOOL_HOOK_MARKER]: true
+    }]
+  }
+  return hooks
 }
 
 export class HookInjector {
@@ -48,21 +92,9 @@ export class HookInjector {
   private buildHooks(): Record<string, HookEntry[]> {
     const curl = this.curlBin()
     const base = `http://localhost:${this.port}`
-    const mkHook = (endpoint: string): HookEntry => ({
-      matcher: '*',
-      hooks: [{
-        type: 'command',
-        command: `${curl} -s --max-time 5 -X POST ${base}/hook/${endpoint} -H "${HOOK_TAB_ID_HEADER}: $DEVTOOL_TAB_ID" -H "${HOOK_TOKEN_HEADER}: ${this.token}" -d @- 2>/dev/null; printf Success`
-      }],
-      [DEVTOOL_HOOK_MARKER]: true
-    })
-
-    return {
-      SessionStart: [mkHook('session-start')],
-      UserPromptSubmit: [mkHook('working')],
-      Stop: [mkHook('stopped')],
-      Notification: [mkHook('notification')]
-    }
+    return buildDevtoolHooks((endpoint) =>
+      `${curl} -s --max-time 5 -X POST ${base}/hook/${endpoint} -H "${HOOK_TAB_ID_HEADER}: $DEVTOOL_TAB_ID" -H "${HOOK_TOKEN_HEADER}: ${this.token}" -d @- 2>/dev/null; printf Success`
+    )
   }
 
   inject(projectDir: string, tabId: string): void {
@@ -208,12 +240,7 @@ export class HookInjector {
     const mkHookCmd = (endpoint: string): string =>
       `curl -s --max-time 5 -X POST ${base}/hook/${endpoint} -H "${HOOK_TAB_ID_HEADER}: $DEVTOOL_TAB_ID" -H "${HOOK_TOKEN_HEADER}: ${this.token}" -d @- 2>/dev/null; printf Success`
 
-    const devtoolHooks = {
-      SessionStart: [{ matcher: '*', hooks: [{ type: 'command', command: mkHookCmd('session-start') }], [DEVTOOL_HOOK_MARKER]: true }],
-      UserPromptSubmit: [{ matcher: '*', hooks: [{ type: 'command', command: mkHookCmd('working') }], [DEVTOOL_HOOK_MARKER]: true }],
-      Stop: [{ matcher: '*', hooks: [{ type: 'command', command: mkHookCmd('stopped') }], [DEVTOOL_HOOK_MARKER]: true }],
-      Notification: [{ matcher: '*', hooks: [{ type: 'command', command: mkHookCmd('notification') }], [DEVTOOL_HOOK_MARKER]: true }]
-    }
+    const devtoolHooks = buildDevtoolHooks(mkHookCmd)
 
     const hooksJsonB64 = Buffer.from(JSON.stringify(devtoolHooks)).toString('base64')
     const settingsPath = `${remoteDir}/.claude/settings.local.json`
