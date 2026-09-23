@@ -26,7 +26,7 @@ Company-deploy security snapshot (what this app actually is on a workstation): [
 
 Stay on **0.x** until the app is something you would tell a friend to unzip. **1.0.0** is that call, not “Phase 5 finished.”
 
-`package.json` is **0.5.0** (Phase 4 native notebooks). Phase 2 landed without tagging `0.4.0` and stayed **0.3.2**, so Phase 3 used that skipped minor instead of jumping to `0.5.0`. Shape:
+`package.json` is **0.5.0** (Phase 4 native notebooks). Phase 4.5 (agent context links) is next and tags as a patch, like 1.3 / 1.4. Phase 2 landed without tagging `0.4.0` and stayed **0.3.2**, so Phase 3 used that skipped minor instead of jumping to `0.5.0`. Shape:
 
 | Part | Meaning |
 | --- | --- |
@@ -45,7 +45,8 @@ Work inside a phase is `0.x.y`; shipping the phase is the next `0.(x+1).0`.
 | Phase 2 done | stayed `0.3.2` (no `0.4.0` tag on this fork) |
 | Phase 3 done | `0.4.0` |
 | Phase 4 done | `0.5.0` (native `.ipynb` tabs) |
-| Phase 5 (packaging) | `0.6.0`+ (NSIS / signing / updater as you tag them) |
+| Phase 4.5 (agent context links) | `0.5.1` (tagged; not a numbered bump) |
+| Phase 5 (packaging + app identity) | `0.6.0`+ (icon / name / NSIS / signing / updater as you tag them) |
 
 LSP is parked (see Ideas); it does not get a numbered phase or a minor. There is no Phase 6 until something else earns one. Phase 0.5 does not get a version. Ideas in the parking lot do not get a version until they are pulled into a phase.
 
@@ -58,8 +59,9 @@ Already useful, keep it:
 - Projects, tasks, two-pane tabs, command palette, inbox (`working` / `needs you` / settled / snooze).
 - Pi tab type: `pi` command, `--session-id`, bundled status extension (`-e`), hook server.
 - Claude/Codex tabs (keep working; not the focus of this fork).
+- Claude chat tab (Agent SDK, not a PTY) and agent activity in the sidebar — merged from upstream (`c4706c2`). Keep working; not the focus of this fork.
 - File tree → Monaco editor (syntax + save, no LSP).
-- Git status/diff/commit, worktrees, SSH remotes, embedded browser.
+- Git status/diff/commit, worktrees, SSH remotes (with idle ControlMaster reaping), embedded browser.
 
 Known gaps this fork must treat as work, not surprises:
 
@@ -242,7 +244,7 @@ Work items:
 
 Stay out of: config-dir `0700` for all of `~/.devtool`, scrollback `tabId` sanitizing, IPC cwd allow-list (deferred). Stay out of conda.
 
-**Verify:** unit tests cover 401/413, remote Pi path, `~/.ssh/known_hosts` / no `IdentitiesOnly`, required remote dir, and 0700 sockets. Local Pi/Claude status dots and a Windows Git Bash pass still need a machine check.
+**Verify:** unit tests cover 401/413, remote Pi path, `~/.ssh/known_hosts` / no `IdentitiesOnly`, required remote dir, and 0700 sockets. Machine check done: local Pi/Claude status dots and a Windows Git Bash pass.
 
 **Closeout:** landed. `package.json` stays **0.3.2** (no numbered bump this pass). Next is Phase 3 (conda spawn picker).
 
@@ -295,37 +297,69 @@ Work items:
 3. **Kernel** — `jupyter_client` + ipykernel in the **project default conda env**, with an optional per-notebook override in `metadata.devtool.condaEnv` (`getShellEnv` / same PATH as Pi/agent tabs). Toolbar env picker. Run cell / run all. Stream text, `text/plain`, PNG, and errors. Kernel status (idle / busy / dead) + restart.
 4. **Clear errors** — no conda env, missing `python`, or missing `jupyter_client` / `ipykernel` fail with an install hint, not a blank tab.
 
-Stay out of: full VS Code notebook parity (debug, variable explorer, collaborative, ipywidgets), JupyterLab as a managed server, inference settings in DevTool, LSP, packaging, agent context links (Ctrl+K/L-style — parking lot, not this closeout).
+Stay out of: full VS Code notebook parity (debug, variable explorer, collaborative, ipywidgets), JupyterLab as a managed server, inference settings in DevTool, LSP, packaging, agent context links (Ctrl+L / Ctrl+Shift+L — Phase 4.5, not this closeout).
 
 **Remote SSH notebooks** are out of this PR (local projects only). Say so in the tab if you open an `.ipynb` on a remote project.
 
-**Verify:** unit tests for parse/serialize, kernel message handling (mocked), conda python wiring, and execute/run-queue helpers. GitHub Actions `ubuntu-latest` runs typecheck + Vitest (live kernel skipped). `windows-latest` installs Miniconda + `ipykernel`/`jupyter_client` and runs the same suite plus live helper smoke (`NOTEBOOK_LIVE_REQUIRED=1`): conda/`python.exe` resolve, real `jupyter_client` spawn, execute stdout, queued second cell (Run all / Run-above at the kernel gate), interrupt, restart. Still **manual on a Windows box:** Electron UI — toolbar Run all / per-cell Run all above buttons and tooltips, Monaco, collapse, conda picker chrome. Local live smoke (Git Bash): `NOTEBOOK_LIVE=1 npm test -- tests/notebook-kernel.live.test.ts` with those packages in a conda env.
+**Verify:** unit tests for parse/serialize, kernel message handling (mocked), conda python wiring, and execute/run-queue helpers. GitHub Actions `ubuntu-latest` runs typecheck + Vitest (live kernel skipped). `windows-latest` installs Miniconda + `ipykernel`/`jupyter_client` and runs the same suite plus live helper smoke (`NOTEBOOK_LIVE_REQUIRED=1`): conda/`python.exe` resolve, real `jupyter_client` spawn, execute stdout, queued second cell (Run all / Run-above at the kernel gate), interrupt, restart. **Manual on a Windows box — done:** Electron UI — toolbar Run all / per-cell Run all above buttons and tooltips, Monaco, collapse, conda picker chrome. Local live smoke (Git Bash): `NOTEBOOK_LIVE=1 npm test -- tests/notebook-kernel.live.test.ts` with those packages in a conda env.
 
-**Closeout:** `package.json` is **0.5.0**. Next is Phase 5 (packaging). LSP stays parked. Agent context links from editor/notebook stay parked (not a Phase 4 leftover).
+**Closeout:** done. `package.json` is **0.5.0**. Next is Phase 4.5 (agent context links from editor/notebook), then Phase 5 (packaging + app identity). LSP stays parked.
 
 **Effort:** a focused pass on the existing Electron/React/Monaco tab patterns. Ships as **`0.5.0`**.
 
 ---
 
-## Phase 5 — Packaging / distribution
+## Phase 4.5 — Agent context links from editor/notebook (mid-phase) — next (`0.5.1`)
 
-Was going to sit behind language servers as a later phase. LSP is parked, so packaging is the next numbered phase after native notebooks. **Packaging only.**
+Cursor-style Ctrl+L (selection) / Ctrl+Shift+L (whole file), pulled out of the parking lot. Builds on Phase 4 (notebook tabs), Monaco, and the existing agent tabs. Not packaging, so it is a mid-phase patch tag like 1.3 / 1.4, not a minor.
 
-**Outcome:** Windows users who cannot `npm install` get a real install path, without dropping the portable folder. App no longer looks like stock Electron.
+**Outcome:** select lines in an editor tab (or a notebook cell), press Ctrl+L, and a **compact link** to that selection lands in the task's agent input — Pi / Claude / Codex terminal, or the Claude chat composer. The link is a reference the agent can resolve by reading the file, not the pasted text. Nothing is sent; the user keeps typing and presses Enter themselves.
+
+Work items:
+
+1. **Link format.** Workspace-relative path + line range for files (`@src/foo.ts:10-24`); path + cell id (plus line range inside the cell when there is a selection) for notebooks. Must round-trip on Windows (forward slashes, no drive letter for in-workspace paths). Pick one shape the agents actually resolve (Pi and Claude Code both understand `@path`); for cells, the agent reads the `.ipynb` JSON, so the cell id has to be the real nbformat `id`. Save-before-link or warn on a dirty buffer — the agent reads disk, not Monaco.
+2. **Target.** The task's most recently focused agent tab (Pi / Claude / Codex PTY, or Claude chat). No agent tab open → a small toast, not a silent no-op. Optional later: a picker when several agent tabs are open.
+3. **Insert, do not submit.** PTY: write the link text to the PTY with no trailing newline (bracketed paste so TUIs treat it as input). Chat: append to the composer draft. Focus moves to the target so the user can keep typing.
+4. **Shortcuts.** Active only in editor and notebook tabs (terminal Ctrl+L still clears the screen).
+   - **Ctrl+L** (macOS Cmd+L) — link the **selection**. No selection → the current line (editor) or the whole focused cell (notebook).
+   - **Ctrl+Shift+L** (macOS Cmd+Shift+L) — link the **whole file** (`@src/foo.ts`, `@analysis.ipynb`).
+   - **Not Ctrl+K:** that is DevTool's command palette (`src/renderer/palette/usePaletteHotkey.ts`, capture phase, wins over Monaco).
+   - **Not Ctrl+Alt+…:** on Windows Ctrl+Alt is AltGr, which layouts like Slovak need for `@`, `{`, `[`.
+   - These override two Monaco defaults inside DevTool: Ctrl+L (expand line selection) and Ctrl+Shift+L (select all occurrences; Ctrl+F2 still covers most of that). Same trade Cursor makes.
+   - Also a context-menu entry in the editor and on the notebook cell header, and file-tree right-click → link the whole file. List both shortcuts in the Phase 1.4 shortcut map with Windows labels.
+
+Stay out of: pasting full selection text into the PTY, a DevTool-side resolver/index for links, remote SSH notebooks (still local-only), inline edit (Cursor's Ctrl+K edit-in-place is not this — Ctrl+K stays the palette), LSP.
+
+**Verify:** unit tests for link formatting (paths with spaces, Windows paths, notebook cell ids, single-line vs range) and target selection. Manual on Windows: Pi in Git Bash receives the link without executing; Claude chat composer receives it; the agent reads the right lines/cell.
+
+**Effort:** a short pass. Ships as **`0.5.1`**.
+
+---
+
+## Phase 5 — Packaging, distribution, app identity
+
+Was going to sit behind language servers as a later phase. LSP is parked, so packaging is the next numbered phase after native notebooks (and the 4.5 context-links patch). **Packaging and making the app look like DevTool, not Electron.**
+
+**Outcome:** Windows users who cannot `npm install` get a real install path, without dropping the portable folder. The app no longer looks or identifies as stock Electron on any platform.
 
 Work items, in this order:
 
 1. **Keep the portable folder.** `npm run build:win` → `dist/win-unpacked` stays the no-admin escape hatch. Do not delete it when an installer lands. Recipients who cannot run Setup.exe still copy a folder and run `DevTool.exe`.
-2. **NSIS Setup.exe** via electron-builder (`--win nsis`, not `electron-winstaller`). Default **per-user** (no admin), Start Menu shortcut. Machine-wide / Program Files is optional later, not the default.
-3. **Authenticode signing** after the installer exists. Unsigned Setup.exe is a worse first impression than an unsigned folder; do not ship NSIS as the recommended path until signing is in reach, unless IT already accepts unsigned.
-4. **Auto-update** (GitHub Releases + electron-updater, or equivalent) after signing. Unsigned auto-update is not worth it.
-5. **App icon** — replace the Electron/default icon on the exe, installer, and Start Menu.
+2. **App icon.** There is none today (nothing in `build/`; exe, Dock, taskbar, and window all show the Electron icon). Add a source icon under `build/` (`icon.png` 1024², plus generated `icon.ico` / `icon.icns`) and wire it for electron-builder (`win` / `mac` / `linux`), `BrowserWindow` `icon` on Windows/Linux, and the NSIS installer + Start Menu shortcut. Dev runs: set the Dock icon via `app.dock.setIcon` on macOS.
+3. **App name — stop identifying as "Electron".** Seen on macOS: the bold menu-bar app name says **Electron**. Cause: the macOS menu bar uses the bundle's `CFBundleName`, not the menu label; `npm run dev` runs `node_modules/electron/dist/Electron.app`, whose `Info.plist` says `Electron` (and `app.name` falls back to package `name`, lowercase `devtool`). Fix: extend `scripts/patch-dev-electron-plist.mjs` to set `CFBundleName` / `CFBundleDisplayName` to `DevTool`, and call `app.setName('DevTool')` early in main. Packaged macOS builds get `productName` — confirm the menu bar, About panel, and Activity Monitor say DevTool. Windows: `win.signAndEditExecutable` is `false`, so `DevTool.exe` keeps Electron's version resources (Task Manager / file properties say "Electron", Electron icon) — turn exe editing on (rcedit) even before signing, and call `app.setAppUserModelId('com.devtool.app')` so taskbar grouping and notifications say DevTool.
+4. **NSIS Setup.exe** via electron-builder (`--win nsis`, not `electron-winstaller`). Default **per-user** (no admin), Start Menu shortcut. Machine-wide / Program Files is optional later, not the default.
+5. **Authenticode signing** after the installer exists. Unsigned Setup.exe is a worse first impression than an unsigned folder; do not ship NSIS as the recommended path until signing is in reach, unless IT already accepts unsigned.
+6. **Auto-update** (GitHub Releases + electron-updater, or equivalent) after signing. Unsigned auto-update is not worth it.
+
+Items 2–3 are small and independent of the certificate; they can tag as `0.5.x` before the installer lands.
 
 Software Center / MSI may be a **separate IT artifact**, not this phase’s default output.
 
 Stay out of: language servers, conda GUI, a second Windows shell, reviving JupyterLab-in-browser.
 
-**Effort:** installer first is days to a couple of weeks; signing + updater depend on the certificate. Ships as **`0.6.0`+** (tag slices as you actually copy them).
+**Verify:** on Windows — exe icon, taskbar, Task Manager name, Start Menu shortcut, installer per-user without admin, portable folder still runs. On macOS — `npm run dev` menu bar and Dock say DevTool with the DevTool icon; packaged `build:mac` the same.
+
+**Effort:** icon + name are an evening; installer is days to a couple of weeks; signing + updater depend on the certificate. Ships as **`0.6.0`+** (tag slices as you actually copy them).
 
 ---
 
@@ -342,8 +376,8 @@ Parking lot. Do not start these instead of the numbered phases. Several items al
 | JupyterLab in a browser tab | Dropped. PR #9 closed unmerged. Not Phase 4. |
 | Language servers (Python, Markdown) | Parked. Monaco covers edit/view; analysis belongs in Pi. Optional sugar only if Monaco-without-Pi is painful. No minor reserved. |
 | Native notebook cells + kernel | Phase 4 (`0.5.0`) |
-| Agent context links from editor/notebook (Ctrl+K/L-style) | Parking lot. After Phase 4. No phase reserved. |
-| Windows installer + Authenticode + auto-update + app icon | Phase 5 |
+| Agent context links from editor/notebook (Ctrl+L / Ctrl+Shift+L) | Phase 4.5 (`0.5.1`) |
+| Windows installer + Authenticode + auto-update + app icon + app name (not "Electron") | Phase 5 |
 | Open workspace in VS Code / Cursor | Phase 1.2 |
 | Spyder as an external IDE | after Phase 3 |
 | Config-dir `0700`, scrollback id, IPC cwd allow-list | Parking lot (deferred; not packaging) |
@@ -354,7 +388,7 @@ Parking lot. Do not start these instead of the numbered phases. Several items al
 
 **Native `.ipynb` cells in a tab** (kernel via `jupyter_client` in the conda env). This **is** Phase 4 (`0.5.0`). Browser JupyterLab is not a substitute and was dropped.
 
-**Agent context links from editor/notebook** (Ctrl+K / Ctrl+L–style). Parking lot, later version — **not** Phase 4 / `0.5.0`. Builds on native notebooks + Monaco + Pi/Codex/Claude tabs. Selected lines, cells, or files would be added to the **active agent terminal as compact links** (path + line range, or notebook cell id), not pasted in full, so the agent (or DevTool) can resolve context without flooding the PTY. No phase number reserved. Do not start this instead of Phase 5 packaging.
+**Agent context links from editor/notebook** (Ctrl+L / Ctrl+Shift+L). Pulled into **Phase 4.5** (`0.5.1`). See that section.
 
 **TypeScript/JavaScript LSP** if the Node zip is the runtime. Same parking lot as Python/Markdown LSP, not a follow-on phase.
 
@@ -386,7 +420,8 @@ Keep upstream `master` as a remote (`upstream`) and rebase or merge periodically
 8. Hook authentication + SSH trust (Phase 2). **Done** in `0.3.2` (no minor bump).
 9. Conda env picker on spawn (Phase 3). **Done** in `0.4.0`.
 10. Native in-app `.ipynb` notebooks (Phase 4). **Done** in `0.5.0`. Not a JupyterLab browser launcher.
-11. Packaging (Phase 5): keep portable `dist/win-unpacked`, then per-user NSIS Setup.exe + Start Menu, then Authenticode, then auto-update, app icon. Ships as `0.6.0`+. Do not insert LSP or agent context links between 10 and 11. Do not revive browser JupyterLab.
+11. Agent context links from editor/notebook (Phase 4.5): Ctrl+L (selection, or current line / cell) and Ctrl+Shift+L (whole file) insert a compact `@path:lines` / cell / file link into the agent terminal or Claude chat. Tags `0.5.1`.
+12. Packaging + app identity (Phase 5): keep portable `dist/win-unpacked`, app icon, app name (not "Electron" in the macOS menu bar / Windows Task Manager), then per-user NSIS Setup.exe + Start Menu, then Authenticode, then auto-update. Ships as `0.6.0`+. Do not insert LSP between 11 and 12. Do not revive browser JupyterLab.
 
 Skip a step only if the previous phase already includes it by accident (e.g. PATH work that makes conda trivial).
 
@@ -426,9 +461,10 @@ Work machine constraints to re-test every phase: Git Bash, portable Node zip, Pi
 | 1.4 | `0.3.2` (shipped) | Existing shortcuts listed and shown as Windows keys | a short pass |
 | 2 | stayed `0.3.2` (no `0.4.0` tag) | Hook secret + Pi extension off `/tmp`; SSH uses `~/.ssh/known_hosts` | ~1 week |
 | 3 | `0.4.0` (shipped) | Conda picker on spawn | 1–2 weeks |
-| 4 | `0.5.0` (this phase) | Native `.ipynb` tabs (Monaco cells + conda kernel) | a focused pass |
-| 5 | `0.6.0`+ | Portable folder kept; per-user NSIS Setup.exe; then Authenticode; then auto-update; app icon | installer in days–weeks; signing/updater depend on the cert |
+| 4 | `0.5.0` (shipped) | Native `.ipynb` tabs (Monaco cells + conda kernel) | a focused pass |
+| 4.5 | `0.5.1` (next) | Ctrl+L selection (or line / cell) and Ctrl+Shift+L whole file → compact link in agent terminal / Claude chat | a short pass |
+| 5 | `0.6.0`+ | Portable folder kept; app icon + DevTool name; per-user NSIS Setup.exe; then Authenticode; then auto-update | icon/name an evening; installer days–weeks; signing/updater depend on the cert |
 
-Language servers stay in the parking lot. They are not a numbered phase. Agent context links from editor/notebook (Ctrl+K/L-style) are the same kind of parked later-maybe. There is no Phase 6 until something else earns one.
+Language servers stay in the parking lot. They are not a numbered phase. There is no Phase 6 until something else earns one.
 
 A year of evenings can yield a personal orchestrator. It will not become Cursor. That is success.
