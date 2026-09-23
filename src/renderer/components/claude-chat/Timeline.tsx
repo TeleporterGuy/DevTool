@@ -124,7 +124,7 @@ function StatusIcon({ status }: { status: ChatToolItem['status'] }): React.React
     case 'waiting':
       return <span className="w-3 h-3 flex items-center justify-center shrink-0"><span className="w-1.5 h-1.5 rounded-full bg-status-attention" /></span>
     case 'done':
-      return <Check size={12} className="shrink-0 text-success opacity-80" />
+      return <Check size={12} className="shrink-0 text-text-subtle" />
     case 'error':
       return <X size={12} className="shrink-0 text-danger" />
     case 'denied':
@@ -159,7 +159,7 @@ const ToolRow = memo(function ToolRow({ tool, inGroup }: { tool: ChatToolItem; i
     <div className="text-sm">
       <button type="button" className="chat-row-btn w-full" onClick={() => setOpen(!open)}>
         <StatusIcon status={tool.status} />
-        <span className={`truncate ${tool.status === 'denied' ? 'text-text-subtle line-through decoration-text-subtle/50' : 'text-text'}`}>{tool.label}</span>
+        <span className={`truncate ${tool.status === 'denied' ? 'text-text-subtle line-through decoration-text-subtle/50' : 'text-text-muted'}`}>{tool.label}</span>
         {meta && <span className="ml-auto pl-3 shrink-0 text-xs text-text-subtle tabular-nums">{meta}</span>}
       </button>
       {open && <ToolDetail tool={tool} />}
@@ -206,7 +206,7 @@ function ToolGroup({ tools }: { tools: ChatToolItem[] }): React.ReactElement {
     <div className="text-sm">
       <button type="button" className="chat-row-btn w-full" onClick={() => setOpen(!open)}>
         <StatusIcon status={running ? 'running' : failed ? 'error' : 'done'} />
-        <span className="text-text truncate">{summarizeGroup(tools)}</span>
+        <span className="text-text-muted truncate">{summarizeGroup(tools)}</span>
         <ChevronRight size={12} className={`ml-auto shrink-0 text-text-subtle transition-transform duration-(--motion-fast) ${open ? 'rotate-90' : ''}`} />
       </button>
       {open && (
