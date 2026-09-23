@@ -47,8 +47,9 @@ Work inside a phase is `0.x.y`; shipping the phase is the next `0.(x+1).0`.
 | Phase 4 done | `0.5.0` (native `.ipynb` tabs) |
 | Phase 4.5 (agent context links) | `0.5.1` (tagged; not a numbered bump) |
 | Phase 5 (packaging + app identity) | `0.6.0`+ (icon / name / NSIS / signing / updater as you tag them) |
+| Phase 6 (Pi chat tab) | `0.7.0` |
 
-LSP is parked (see Ideas); it does not get a numbered phase or a minor. There is no Phase 6 until something else earns one. Phase 0.5 does not get a version. Ideas in the parking lot do not get a version until they are pulled into a phase.
+LSP is parked (see Ideas); it does not get a numbered phase or a minor. Phase 6 is the Pi chat tab; there is no Phase 7 until something else earns one. Phase 0.5 does not get a version. Ideas in the parking lot do not get a version until they are pulled into a phase.
 
 ---
 
@@ -363,6 +364,33 @@ Stay out of: language servers, conda GUI, a second Windows shell, reviving Jupyt
 
 ---
 
+## Phase 6 — Pi chat tab (GUI over `pi --mode rpc`)
+
+Same idea as the Claude chat tab merged from upstream (`c4706c2`, `src/main/claude-chat/` + `src/renderer/components/claude-chat/`), but for Pi. An **extra tab type** next to the Pi TUI tab, not a replacement: extensions that draw their own TUI (`ctx.ui.custom()`) only work in the terminal.
+
+**Product bet:** this touches “Pi remains a CLI TUI in a tab.” Revisit the bet wording when implementation starts, not before. Pi still runs the agent; DevTool only renders it.
+
+**Outcome:** open a Pi chat tab on a task, get a timeline (streaming text, thinking, tool rows, notices), a composer, extension dialogs as cards, resume of Pi sessions, and the same inbox/sidebar status as the Pi TUI tab.
+
+**Transport:** `pi --mode rpc` — JSONL commands on stdin, responses + events on stdout ([Pi RPC docs](https://github.com/badlogic/pi-mono/blob/main/packages/coding-agent/docs/rpc.md), [commands](https://github.com/badlogic/pi-mono/blob/main/packages/coding-agent/docs/rpc-commands.md), [extension UI](https://github.com/badlogic/pi-mono/blob/main/packages/coding-agent/docs/rpc-extension-ui.md)). Plain pipes, no PTY — simpler on Windows than ConPTY + the `pi.cmd` wrapper. `prompt` returning is not completion; wait for `agent_settled`.
+
+Work items:
+
+1. **Main: Pi session.** One `pi --mode rpc` child per tab (like `chat-session.ts`), spawned with the Pi tab env (`shell-env.ts`: Git Bash PATH, Node directory, conda, `aiToolArgs`). Remote projects via ssh stdio, reusing `claude-chat/remote-spawn.ts`. Handle stderr, exit, restart, backpressure.
+2. **Shared: agent-neutral chat model.** Split `src/shared/claude-chat.ts` into a neutral `ChatState` / `ChatItem` / reducer plus per-agent adapters (Claude SDK messages, Pi RPC events). Map Pi `message_update` deltas → text/thinking, `tool_execution_*` → tool rows, queue events → queued user rows, retry/compaction → notices. Same snapshot-then-events flow so every window draws the same thing. Untyped JSON on purpose: a renamed field degrades a row, not the tab.
+3. **Prompt cards = extension UI.** Pi has no built-in permission prompts. `extension_ui_request` `confirm` → Allow/Deny card, `select` → choice list, `input` / `editor` → text card; answer with `extension_ui_response`. `notify` → notice row; `setStatus` / `setWidget` / `setTitle` → tab footer/status.
+4. **Composer.** `prompt` (with images); while running, `steer` vs `follow_up`; Stop → `abort`. Model picker from `get_available_models` / `set_model` and a thinking-level control (`set_thinking_level`) — Pi’s own configured models only, nothing stored in DevTool (Pi owns inference). Slash menu from `get_commands`. Phase 4.5 links (`@path:lines`) insert here too.
+5. **Sessions.** Resume with `switch_session` + `get_messages`; `new_session`; `set_session_name`. Fork / tree (`fork`, `get_tree`) later, not v1.
+6. **Usage + status.** Usage meter from `get_session_stats` (tokens / cost). Inbox + sidebar activity straight from RPC events (working / needs you on an open extension dialog / settled), not the injected `pi-status-extension.mjs`.
+
+Stay out of: replacing the Pi TUI tab, DevTool-side model/API config, rendering `ctx.ui.custom()` components, a Pi fork/tree UI in v1, reimplementing Pi features in Electron.
+
+**Verify:** unit tests for the Pi event → `ChatState` adapter (recorded RPC transcripts as fixtures), extension-UI request/response round-trip, and spawn env. Manual on Windows (Git Bash env, portable Node, conda) and one SSH remote: prompt, steer mid-run, abort, confirm dialog from an extension, resume, usage meter, inbox dot.
+
+**Effort:** renderer mostly reused from Claude chat; new work is the Pi session in main and the event adapter. Roughly 2–3 weeks of evenings. Ships as **`0.7.0`**.
+
+---
+
 ## Ideas (not sequenced)
 
 Parking lot. Do not start these instead of the numbered phases. Several items already have a home:
@@ -396,7 +424,7 @@ Parking lot. Do not start these instead of the numbered phases. Several items al
 
 **Search-in-files, extra pane layouts.** Parking lot.
 
-**Git tree.** A branch/commit graph in the UI (log, parents, maybe checkout). Useful for “where am I” without leaving DevTool. Phase 1 explicitly stays out of a git graph so the file explorer does not grow into an IDE. If it happens, it is later-maybe: read-only first, no rebase UI. Not packaging. No Phase 6 until something earns it.
+**Git tree.** A branch/commit graph in the UI (log, parents, maybe checkout). Useful for “where am I” without leaving DevTool. Phase 1 explicitly stays out of a git graph so the file explorer does not grow into an IDE. If it happens, it is later-maybe: read-only first, no rebase UI. Not packaging. Not numbered until something earns it.
 
 **Generate commit message with a specified agent.** Pre-fill the existing git commit box from Pi (or Claude/Codex) given the staged diff. Low confidence this needs a DevTool feature: you can already ask Pi in a tab to write the message and paste it. Only worth it if the commit UI is used a lot and the round-trip is annoying. Prefer “use the project’s default agent” over a per-commit picker.
 
@@ -422,6 +450,7 @@ Keep upstream `master` as a remote (`upstream`) and rebase or merge periodically
 10. Native in-app `.ipynb` notebooks (Phase 4). **Done** in `0.5.0`. Not a JupyterLab browser launcher.
 11. Agent context links from editor/notebook (Phase 4.5): Ctrl+L (selection, or current line / cell) and Ctrl+Shift+L (whole file) insert a compact `@path:lines` / cell / file link into the agent terminal or Claude chat. Tags `0.5.1`.
 12. Packaging + app identity (Phase 5): keep portable `dist/win-unpacked`, app icon, app name (not "Electron" in the macOS menu bar / Windows Task Manager), then per-user NSIS Setup.exe + Start Menu, then Authenticode, then auto-update. Ships as `0.6.0`+. Do not insert LSP between 11 and 12. Do not revive browser JupyterLab.
+13. Pi chat tab (Phase 6): `pi --mode rpc` in main, agent-neutral chat model shared with Claude chat, extension dialogs as cards. Ships as `0.7.0`.
 
 Skip a step only if the previous phase already includes it by accident (e.g. PATH work that makes conda trivial).
 
@@ -464,7 +493,8 @@ Work machine constraints to re-test every phase: Git Bash, portable Node zip, Pi
 | 4 | `0.5.0` (shipped) | Native `.ipynb` tabs (Monaco cells + conda kernel) | a focused pass |
 | 4.5 | `0.5.1` (next) | Ctrl+L selection (or line / cell) and Ctrl+Shift+L whole file → compact link in agent terminal / Claude chat | a short pass |
 | 5 | `0.6.0`+ | Portable folder kept; app icon + DevTool name; per-user NSIS Setup.exe; then Authenticode; then auto-update | icon/name an evening; installer days–weeks; signing/updater depend on the cert |
+| 6 | `0.7.0` | Pi chat tab over `pi --mode rpc` (timeline, composer, extension dialogs, resume) | 2–3 weeks of evenings |
 
-Language servers stay in the parking lot. They are not a numbered phase. There is no Phase 6 until something else earns one.
+Language servers stay in the parking lot. They are not a numbered phase. There is no Phase 7 until something else earns one.
 
 A year of evenings can yield a personal orchestrator. It will not become Cursor. That is success.
