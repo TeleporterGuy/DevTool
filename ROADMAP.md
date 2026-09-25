@@ -310,7 +310,7 @@ Stay out of: full VS Code notebook parity (debug, variable explorer, collaborati
 
 ---
 
-## Phase 4.5 — Agent context links from editor/notebook (mid-phase) — next (`0.5.1`)
+## Phase 4.5 — Agent context links from editor/notebook (mid-phase) — implemented on `phase-4.5-agent-links`, in hands-on testing (`0.5.1`)
 
 Cursor-style Ctrl+L (selection) / Ctrl+Shift+L (whole file), pulled out of the parking lot. Builds on Phase 4 (notebook tabs), Monaco, and the existing agent tabs. Not packaging, so it is a mid-phase patch tag like 1.3 / 1.4, not a minor.
 
@@ -318,7 +318,7 @@ Cursor-style Ctrl+L (selection) / Ctrl+Shift+L (whole file), pulled out of the p
 
 Work items:
 
-1. **Link format.** Workspace-relative path + line range for files (`@src/foo.ts:10-24`); path + cell id (plus line range inside the cell when there is a selection) for notebooks. Must round-trip on Windows (forward slashes, no drive letter for in-workspace paths). Pick one shape the agents actually resolve (Pi and Claude Code both understand `@path`); for cells, the agent reads the `.ipynb` JSON, so the cell id has to be the real nbformat `id`. Save-before-link or warn on a dirty buffer — the agent reads disk, not Monaco.
+1. **Link format.** A clean `@path` token (workspace-relative, forward slashes) with the range in words, so `@`-mention expansion in Claude Code / Pi is not broken by a suffix: `@src/foo.ts (lines 10-24)`, `@src/foo.ts (line 7)`, `@src/foo.ts`, `@analysis.ipynb (cell 3f9a1c, lines 3-5)`, `@analysis.ipynb (cell 3f9a1c)`. Paths with spaces are quoted (`@"my dir/foo.ts"`). For cells the agent reads the `.ipynb` JSON, so the cell id is the real nbformat `id`. Unsaved buffers are saved before linking (also a cell whose generated id is not on disk yet) — the agent reads disk, not Monaco. Helpers: `src/shared/agent-link.ts`.
 2. **Target.** The task's most recently focused agent tab (Pi / Claude / Codex PTY, or Claude chat). No agent tab open → a small toast, not a silent no-op. Optional later: a picker when several agent tabs are open.
 3. **Insert, do not submit.** PTY: write the link text to the PTY with no trailing newline (bracketed paste so TUIs treat it as input). Chat: append to the composer draft. Focus moves to the target so the user can keep typing.
 4. **Shortcuts.** Active only in editor and notebook tabs (terminal Ctrl+L still clears the screen).
@@ -491,7 +491,7 @@ Work machine constraints to re-test every phase: Git Bash, portable Node zip, Pi
 | 2 | stayed `0.3.2` (no `0.4.0` tag) | Hook secret + Pi extension off `/tmp`; SSH uses `~/.ssh/known_hosts` | ~1 week |
 | 3 | `0.4.0` (shipped) | Conda picker on spawn | 1–2 weeks |
 | 4 | `0.5.0` (shipped) | Native `.ipynb` tabs (Monaco cells + conda kernel) | a focused pass |
-| 4.5 | `0.5.1` (next) | Ctrl+L selection (or line / cell) and Ctrl+Shift+L whole file → compact link in agent terminal / Claude chat | a short pass |
+| 4.5 | `0.5.1` (in testing) | Ctrl+L selection (or line / cell) and Ctrl+Shift+L whole file → compact link in agent terminal / Claude chat | a short pass |
 | 5 | `0.6.0`+ | Portable folder kept; app icon + DevTool name; per-user NSIS Setup.exe; then Authenticode; then auto-update | icon/name an evening; installer days–weeks; signing/updater depend on the cert |
 | 6 | `0.7.0` | Pi chat tab over `pi --mode rpc` (timeline, composer, extension dialogs, resume) | 2–3 weeks of evenings |
 
