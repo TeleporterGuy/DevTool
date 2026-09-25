@@ -8,6 +8,8 @@ import FileTree, { type FileTreeHandle } from './FileTree'
 import FilesPanelHeader from './FilesPanelHeader'
 import GitStatus from './GitStatus'
 import NotesList from './NotesList'
+import { agentLinkPath, formatAgentLink } from '../../shared/agent-link'
+import { useLinkToAgent } from '../agentLink/linkToAgent'
 
 export default function FileBrowserPanel(): React.ReactElement | null {
   const {
@@ -38,6 +40,7 @@ export default function FileBrowserPanel(): React.ReactElement | null {
     && !isShellCommandProject(selectedProject)
     && !!selectedProject.directory
   const gitStatus = useGitStatus(effectiveDir, fileBrowserOpen && isLocalProject)
+  const linkToAgent = useLinkToAgent(selectedProjectId ?? '', selectedTaskId ?? '')
 
   useEffect(() => {
     setFilterQuery('')
@@ -151,6 +154,11 @@ export default function FileBrowserPanel(): React.ReactElement | null {
                   onRevealInTerminal={handleRevealInTerminal}
                   ideEditors={config?.externalEditors?.editors ?? []}
                   onOpenInIde={(editorId) => openWorkspaceInIde(editorId, effectiveDir)}
+                  onLinkToAgent={selectedTaskId
+                    ? (relativePath, isDirectory) => {
+                        linkToAgent(formatAgentLink({ path: agentLinkPath(effectiveDir, relativePath), isDirectory }))
+                      }
+                    : undefined}
                 />
               </div>
             </>

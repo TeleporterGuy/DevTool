@@ -12,7 +12,8 @@ import NotebookCellView from '../src/renderer/components/NotebookCell'
 void React
 
 const mocks = vi.hoisted(() => ({
-  commands: new Map<number, () => void>()
+  commands: new Map<number, () => void>(),
+  selection: null as null | { startLineNumber: number; startColumn: number; endLineNumber: number; endColumn: number }
 }))
 
 vi.mock('@monaco-editor/react', async () => {
@@ -24,6 +25,11 @@ vi.mock('@monaco-editor/react', async () => {
         addCommand: (keybinding: number, handler: () => void) => {
           mocks.commands.set(keybinding, handler)
         },
+        addAction: (action: { keybindings?: number[]; run: () => void }) => {
+          for (const keybinding of action.keybindings ?? []) mocks.commands.set(keybinding, action.run)
+          return { dispose: () => {} }
+        },
+        getSelection: () => mocks.selection,
         updateOptions: () => {},
         layout: () => {},
         getContentHeight: () => 64,
@@ -66,6 +72,7 @@ function renderCell(props: {
   onRunAbove?: () => void
   canRunAbove?: boolean
   runAboveTitle?: string
+  onLinkToAgent?: (kind: 'selection' | 'file', lines: { startLine: number; endLine: number } | null) => void
 }) {
   return render(
     <NotebookCellView
@@ -93,12 +100,14 @@ function renderCell(props: {
       onToggleCollapsed={noop}
       resetKey={0}
       suspendEditors={props.suspendEditors}
+      onLinkToAgent={props.onLinkToAgent}
     />
   )
 }
 
 afterEach(() => {
   mocks.commands.clear()
+  mocks.selection = null
   cleanup()
 })
 
@@ -271,5 +280,40 @@ describe('NotebookCell run above', () => {
     expect(button.title).toBe(NOTEBOOK_RUN_QUEUE_BUSY_TITLE)
     fireEvent.click(button)
     expect(onRunAbove).not.toHaveBeenCalled()
+  })
+})
+
+describe('NotebookCell agent links', () => {
+  const LINK_SELECTION_KEY = 2048 | 42
+  const LINK_FILE_KEY = 2048 | 1024 | 42
+
+  it('Ctrl+L with no selection links the whole cell', () => {
+    const onLinkToAgent = vi.fn()
+    renderCell({ isActive: true, onLinkToAgent })
+    mocks.selection = { startLineNumber: 1, startColumn: 4, endLineNumber: 1, endColumn: 4 }
+    mocks.commands.get(LINK_SELECTION_KEY)!()
+    expect(onLinkToAgent).toHaveBeenCalledWith('selection', null)
+  })
+
+  it('Ctrl+L with a selection passes the lines inside the cell', () => {
+    const onLinkToAgent = vi.fn()
+    renderCell({ isActive: true, onLinkToAgent })
+    mocks.selection = { startLineNumber: 2, startColumn: 1, endLineNumber: 3, endColumn: 6 }
+    mocks.commands.get(LINK_SELECTION_KEY)!()
+    expect(onLinkToAgent).toHaveBeenCalledWith('selection', { startLine: 2, endLine: 3 })
+  })
+
+  it('Ctrl+Shift+L links the notebook', () => {
+    const onLinkToAgent = vi.fn()
+    renderCell({ isActive: true, onLinkToAgent })
+    mocks.commands.get(LINK_FILE_KEY)!()
+    expect(onLinkToAgent).toHaveBeenCalledWith('file', null)
+  })
+
+  it('the header button links the whole cell', () => {
+    const onLinkToAgent = vi.fn()
+    renderCell({ isActive: false, onLinkToAgent })
+    fireEvent.click(screen.getByTitle(/Link cell to agent/))
+    expect(onLinkToAgent).toHaveBeenCalledWith('selection', null)
   })
 })

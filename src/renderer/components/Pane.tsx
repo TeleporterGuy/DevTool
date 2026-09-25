@@ -169,6 +169,7 @@ export default function Pane({
                 filePath={tab.filePath}
                 projectDir={projectDir}
                 projectId={projectId}
+                taskId={taskId}
                 effectiveTheme={effectiveTheme}
               />
             )

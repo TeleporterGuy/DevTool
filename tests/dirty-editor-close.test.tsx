@@ -34,6 +34,7 @@ vi.mock('@monaco-editor/react', async () => {
           forceRender(n => n + 1)
         },
         addCommand: () => {},
+        addAction: () => ({ dispose: () => {} }),
         updateOptions: () => {},
         layout: () => {}
       }

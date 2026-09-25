@@ -7,11 +7,22 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-libra
 void React
 
 const SAVE_KEYBINDING = 2048 | 49 // CtrlCmd + S
+const LINK_SELECTION_KEYBINDING = 2048 | 42 // CtrlCmd + L
+const LINK_FILE_KEYBINDING = 2048 | 1024 | 42 // CtrlCmd + Shift + L
 
 const mocks = vi.hoisted(() => ({
-  /** Monaco commands registered through `editor.addCommand`, by keybinding. */
+  /** Monaco commands and actions registered on the editor, by keybinding. */
   commands: new Map<number, () => void>(),
-  layoutCalls: { count: 0 }
+  layoutCalls: { count: 0 },
+  /** What `editor.getSelection()` returns (1-based, Monaco-style). */
+  selection: null as null | { startLineNumber: number; startColumn: number; endLineNumber: number; endColumn: number },
+  setActiveTab: (() => {}) as (...args: unknown[]) => void,
+  /** The task the editor belongs to, for agent links. */
+  task: {
+    id: 't1',
+    tabs: { left: [] as Array<{ id: string; type: string; title: string }>, right: [] as Array<{ id: string; type: string; title: string }> },
+    activeTab: { left: null as string | null, right: null as string | null }
+  }
 }))
 
 /**
@@ -42,6 +53,11 @@ vi.mock('@monaco-editor/react', async () => {
         addCommand: (keybinding: number, handler: () => void) => {
           mocks.commands.set(keybinding, handler)
         },
+        addAction: (action: { keybindings?: number[]; run: () => void }) => {
+          for (const keybinding of action.keybindings ?? []) mocks.commands.set(keybinding, action.run)
+          return { dispose: () => {} }
+        },
+        getSelection: () => mocks.selection,
         updateOptions: () => {},
         layout: () => {
           mocks.layoutCalls.count += 1
@@ -68,9 +84,14 @@ vi.mock('@monaco-editor/react', async () => {
   return { default: MockEditor }
 })
 
-// EditorTab only reads `config` off the app context.
+// EditorTab reads `config`, plus what agent links need to find the task's agent tab.
 vi.mock('../src/renderer/context/AppContext', () => ({
-  useApp: () => ({ config: null })
+  useApp: () => ({
+    config: null,
+    projects: [{ id: 'p1', tasks: [mocks.task] }],
+    getTaskViewState: (task: typeof mocks.task) => ({ activeTab: task.activeTab }),
+    setActiveTab: (...args: unknown[]) => mocks.setActiveTab(...args)
+  })
 }))
 
 import EditorTab from '../src/renderer/components/EditorTab'
@@ -120,6 +141,10 @@ async function triggerSave(): Promise<void> {
 beforeEach(() => {
   mocks.commands.clear()
   mocks.layoutCalls.count = 0
+  mocks.selection = null
+  mocks.setActiveTab = () => {}
+  mocks.task.tabs = { left: [], right: [] }
+  mocks.task.activeTab = { left: null, right: null }
   unhandledRejections = []
   process.on('unhandledRejection', recordRejection)
   ;(window as any).api = {
@@ -263,5 +288,106 @@ describe('EditorTab', () => {
       fireEvent.change(editor(), { target: { value: DISK_CONTENT } })
     })
     expect(screen.getByTitle('Unsaved changes')).toBeTruthy()
+  })
+
+  describe('agent links', () => {
+    let inserts: Array<{ tabId: string; text: string }>
+    const onInsert = (e: Event) => inserts.push((e as CustomEvent).detail)
+
+    beforeEach(() => {
+      inserts = []
+      window.addEventListener('agent-insert', onInsert)
+      mocks.task.tabs = {
+        left: [{ id: 'tab-1', type: 'editor', title: 'notes.txt' }],
+        right: [{ id: 'pi-1', type: 'pi', title: 'Pi' }]
+      }
+      mocks.task.activeTab = { left: 'tab-1', right: 'pi-1' }
+    })
+
+    afterEach(() => {
+      window.removeEventListener('agent-insert', onInsert)
+    })
+
+    async function press(keybinding: number): Promise<void> {
+      const run = mocks.commands.get(keybinding)
+      expect(run).toBeTypeOf('function')
+      await act(async () => {
+        run!()
+        await new Promise(resolve => setTimeout(resolve, 0))
+      })
+    }
+
+    it('Ctrl+L links the selected lines to the task agent tab and activates it', async () => {
+      const activated: unknown[][] = []
+      mocks.setActiveTab = (...args) => activated.push(args)
+      renderTab(true)
+      await waitFor(() => expect(editor().value).toBe(DISK_CONTENT))
+
+      mocks.selection = { startLineNumber: 1, startColumn: 3, endLineNumber: 2, endColumn: 4 }
+      await press(LINK_SELECTION_KEYBINDING)
+
+      expect(inserts).toEqual([{ tabId: 'pi-1', text: '@src/notes.txt (lines 1-2) ' }])
+      expect(activated).toEqual([['p1', 't1', 'right', 'pi-1']])
+      expect((window as any).api.fbWriteFile).not.toHaveBeenCalled()
+    })
+
+    it('Ctrl+L with no selection links the cursor line', async () => {
+      renderTab(true)
+      await waitFor(() => expect(editor().value).toBe(DISK_CONTENT))
+
+      mocks.selection = { startLineNumber: 2, startColumn: 5, endLineNumber: 2, endColumn: 5 }
+      await press(LINK_SELECTION_KEYBINDING)
+
+      expect(inserts.map(i => i.text)).toEqual(['@src/notes.txt (line 2) '])
+    })
+
+    it('Ctrl+Shift+L links the whole file', async () => {
+      renderTab(true)
+      await waitFor(() => expect(editor().value).toBe(DISK_CONTENT))
+
+      mocks.selection = { startLineNumber: 1, startColumn: 1, endLineNumber: 2, endColumn: 3 }
+      await press(LINK_FILE_KEYBINDING)
+
+      expect(inserts.map(i => i.text)).toEqual(['@src/notes.txt '])
+    })
+
+    it('saves an unsaved buffer before linking, because the agent reads disk', async () => {
+      renderTab(true)
+      await waitFor(() => expect(editor().value).toBe(DISK_CONTENT))
+      await act(async () => {
+        fireEvent.change(editor(), { target: { value: 'edited\ntext\n' } })
+      })
+
+      await press(LINK_FILE_KEYBINDING)
+      await flush()
+
+      expect((window as any).api.fbWriteFile).toHaveBeenCalledWith('/project', 'src/notes.txt', 'edited\ntext\n')
+      expect(inserts.map(i => i.text)).toEqual(['@src/notes.txt '])
+    })
+
+    it('sends nothing when the save fails', async () => {
+      ;(window as any).api.fbWriteFile = vi.fn().mockRejectedValue(new Error('EACCES'))
+      renderTab(true)
+      await waitFor(() => expect(editor().value).toBe(DISK_CONTENT))
+      await act(async () => {
+        fireEvent.change(editor(), { target: { value: 'edited' } })
+      })
+
+      await press(LINK_FILE_KEYBINDING)
+      await flush()
+
+      expect(inserts).toEqual([])
+      expect(unhandledRejections).toEqual([])
+    })
+
+    it('sends nothing when the task has no agent tab', async () => {
+      mocks.task.tabs = { left: [{ id: 'tab-1', type: 'editor', title: 'notes.txt' }], right: [] }
+      renderTab(true)
+      await waitFor(() => expect(editor().value).toBe(DISK_CONTENT))
+
+      await press(LINK_FILE_KEYBINDING)
+
+      expect(inserts).toEqual([])
+    })
   })
 })
