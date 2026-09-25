@@ -119,6 +119,39 @@ commandRegistry.register({
   }
 })
 
+// Ctrl+L / Ctrl+Shift+L are bound inside editor and notebook tabs (Monaco actions
+// and the notebook's own key handler); these entries make them findable and list
+// the shortcut. The palette gives focus back to the tab it came from before the
+// event arrives, and only a tab holding focus answers it.
+function selectedTaskHasFileTab(actions: any): boolean {
+  const project = actions.projects?.find((p: any) => p.id === actions.selectedProjectId)
+  const task = project?.tasks.find((t: any) => t.id === actions.selectedTaskId)
+  if (!task) return false
+  return [...task.tabs.left, ...task.tabs.right].some((t: any) => t.type === 'editor' || t.type === 'notebook')
+}
+
+function emitLinkToAgent(kind: 'selection' | 'file'): void {
+  window.setTimeout(() => paletteEvents.emit('link-to-agent', kind), 50)
+}
+
+commandRegistry.register({
+  id: 'cmd.linkSelectionToAgent',
+  title: 'Link Selection to Agent',
+  aliases: ['add to chat', 'link line', 'link cell', 'mention'],
+  shortcut: 'CmdOrCtrl+L',
+  when: ctx => selectedTaskHasFileTab(ctx.actions),
+  run: () => emitLinkToAgent('selection')
+})
+
+commandRegistry.register({
+  id: 'cmd.linkFileToAgent',
+  title: 'Link File to Agent',
+  aliases: ['add file to chat', 'link notebook', 'mention file'],
+  shortcut: 'CmdOrCtrl+Shift+L',
+  when: ctx => selectedTaskHasFileTab(ctx.actions),
+  run: () => emitLinkToAgent('file')
+})
+
 commandRegistry.register({
   id: 'cmd.toggleSidebar',
   title: 'Toggle Sidebar',
