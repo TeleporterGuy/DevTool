@@ -12,6 +12,10 @@ type EventMap = {
   'quit-app': void
   'switch-theme': 'dark' | 'light' | 'toggle'
   'palette-prefix-set': string
+  /** Palette-run Ctrl+L / Ctrl+Shift+L: the visible editor or notebook links to its task's agent. */
+  'link-to-agent': 'selection' | 'file'
+  /** Short message for the agent-link banner (no agent tab, save failed). */
+  'agent-link-notice': string
 }
 
 type Listener<K extends keyof EventMap> = EventMap[K] extends void
