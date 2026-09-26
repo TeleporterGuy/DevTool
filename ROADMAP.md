@@ -26,7 +26,7 @@ Company-deploy security snapshot (what this app actually is on a workstation): [
 
 Stay on **0.x** until the app is something you would tell a friend to unzip. **1.0.0** is that call, not “Phase 5 finished.”
 
-`package.json` is **0.5.0** (Phase 4 native notebooks). Phase 4.5 (agent context links) is next and tags as a patch, like 1.3 / 1.4. Phase 2 landed without tagging `0.4.0` and stayed **0.3.2**, so Phase 3 used that skipped minor instead of jumping to `0.5.0`. Shape:
+`package.json` is **0.5.1** (Phase 4.5 agent context links, a patch on Phase 4's `0.5.0`, like 1.3 / 1.4). Phase 2 landed without tagging `0.4.0` and stayed **0.3.2**, so Phase 3 used that skipped minor instead of jumping to `0.5.0`. Shape:
 
 | Part | Meaning |
 | --- | --- |
@@ -310,7 +310,7 @@ Stay out of: full VS Code notebook parity (debug, variable explorer, collaborati
 
 ---
 
-## Phase 4.5 — Agent context links from editor/notebook (mid-phase) — next (`0.5.1`)
+## Phase 4.5 — Agent context links from editor/notebook (mid-phase) — done (`0.5.1`)
 
 Cursor-style Ctrl+L (selection) / Ctrl+Shift+L (whole file), pulled out of the parking lot. Builds on Phase 4 (notebook tabs), Monaco, and the existing agent tabs. Not packaging, so it is a mid-phase patch tag like 1.3 / 1.4, not a minor.
 
@@ -318,7 +318,7 @@ Cursor-style Ctrl+L (selection) / Ctrl+Shift+L (whole file), pulled out of the p
 
 Work items:
 
-1. **Link format.** Workspace-relative path + line range for files (`@src/foo.ts:10-24`); path + cell id (plus line range inside the cell when there is a selection) for notebooks. Must round-trip on Windows (forward slashes, no drive letter for in-workspace paths). Pick one shape the agents actually resolve (Pi and Claude Code both understand `@path`); for cells, the agent reads the `.ipynb` JSON, so the cell id has to be the real nbformat `id`. Save-before-link or warn on a dirty buffer — the agent reads disk, not Monaco.
+1. **Link format.** A clean `@path` token (workspace-relative, forward slashes) with the range in words — `@src/foo.ts (lines 10-24)`, `@src/foo.ts (line 7)`, `@src/foo.ts`, `@analysis.ipynb (cell 4, id 3c8d9b5c, lines 9-21)`. Works as intended in Codex (and matches Cursor's Ctrl+L feel); Claude Code expands `@path` into the whole file, accepted for now. Cells are named by 1-based position, plus the nbformat `id` only when the file stores it; notebooks without stored ids (nbformat < 4.5) get stable stand-in ids (`cell-N`) instead of random ones that changed on every re-read. Paths with spaces are quoted. Unsaved buffers are saved before linking. Helpers: `src/shared/agent-link.ts`.
 2. **Target.** The task's most recently focused agent tab (Pi / Claude / Codex PTY, or Claude chat). No agent tab open → a small toast, not a silent no-op. Optional later: a picker when several agent tabs are open.
 3. **Insert, do not submit.** PTY: write the link text to the PTY with no trailing newline (bracketed paste so TUIs treat it as input). Chat: append to the composer draft. Focus moves to the target so the user can keep typing.
 4. **Shortcuts.** Active only in editor and notebook tabs (terminal Ctrl+L still clears the screen).
@@ -331,9 +331,13 @@ Work items:
 
 Stay out of: pasting full selection text into the PTY, a DevTool-side resolver/index for links, remote SSH notebooks (still local-only), inline edit (Cursor's Ctrl+K edit-in-place is not this — Ctrl+K stays the palette), LSP.
 
-**Verify:** unit tests for link formatting (paths with spaces, Windows paths, notebook cell ids, single-line vs range) and target selection. Manual on Windows: Pi in Git Bash receives the link without executing; Claude chat composer receives it; the agent reads the right lines/cell.
+**Verify:** unit tests for link formatting (paths with spaces, Windows paths, notebook cell ids, single-line vs range), stable stand-in cell ids, target selection, editor/notebook/composer wiring. Manual — done: Pi on Windows (Git Bash) and Codex on macOS receive the link without executing and read the right lines/cell; Claude Code receives it, attaches the whole file for `@path` and finds the section from the cell/lines (accepted).
 
-**Effort:** a short pass. Ships as **`0.5.1`**.
+Tried and dropped during testing: a bare `path (lines …)` without `@` (Claude attached nothing), and pasting the selected lines as a fenced snippet (not the Cursor/Codex feel wanted).
+
+**Closeout:** done. `package.json` is **0.5.1**. Next is Phase 5 (packaging + app identity).
+
+**Effort:** a short pass. Shipped as **`0.5.1`**.
 
 ---
 
@@ -491,7 +495,7 @@ Work machine constraints to re-test every phase: Git Bash, portable Node zip, Pi
 | 2 | stayed `0.3.2` (no `0.4.0` tag) | Hook secret + Pi extension off `/tmp`; SSH uses `~/.ssh/known_hosts` | ~1 week |
 | 3 | `0.4.0` (shipped) | Conda picker on spawn | 1–2 weeks |
 | 4 | `0.5.0` (shipped) | Native `.ipynb` tabs (Monaco cells + conda kernel) | a focused pass |
-| 4.5 | `0.5.1` (next) | Ctrl+L selection (or line / cell) and Ctrl+Shift+L whole file → compact link in agent terminal / Claude chat | a short pass |
+| 4.5 | `0.5.1` (shipped) | Ctrl+L selection (or line / cell) and Ctrl+Shift+L whole file → compact link in agent terminal / Claude chat | a short pass |
 | 5 | `0.6.0`+ | Portable folder kept; app icon + DevTool name; per-user NSIS Setup.exe; then Authenticode; then auto-update | icon/name an evening; installer days–weeks; signing/updater depend on the cert |
 | 6 | `0.7.0` | Pi chat tab over `pi --mode rpc` (timeline, composer, extension dialogs, resume) | 2–3 weeks of evenings |
 

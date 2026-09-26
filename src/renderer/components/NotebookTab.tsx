@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { flushSync } from 'react-dom'
-import { Eraser, Play, RotateCw, Square } from 'lucide-react'
+import { AtSign, Eraser, Play, RotateCw, Square } from 'lucide-react'
 import { DEFAULT_CONFIG } from '../../shared/types'
 import {
   addCellAt,
@@ -57,6 +57,9 @@ import NotebookCellView from './NotebookCell'
 import { scheduleResumeAfterNotebookReorder } from './notebookCellEditor'
 import ThemedSelect from './ThemedSelect'
 import { formatShortcutForApp } from '../../shared/shortcut-label'
+import { agentLinkPath, formatAgentLink } from '../../shared/agent-link'
+import { showAgentLinkNotice, useLinkToAgent } from '../agentLink/linkToAgent'
+import { paletteEvents } from '../palette/paletteEvents'
 
 interface Props {
   tabId: string
@@ -64,6 +67,7 @@ interface Props {
   filePath: string
   projectDir: string
   projectId: string
+  taskId: string
   effectiveTheme: 'dark' | 'light'
 }
 
@@ -81,6 +85,7 @@ export default function NotebookTab({
   filePath,
   projectDir,
   projectId,
+  taskId,
   effectiveTheme
 }: Props): React.ReactElement {
   const { config, projects } = useApp()
@@ -111,6 +116,11 @@ export default function NotebookTab({
 
   const docRef = useRef<NotebookDocument | null>(null)
   const savedRef = useRef<string | null>(null)
+  // The file as last read from or written to disk. Differs from `savedRef` (our
+  // own serialization) for notebooks written without cell ids: those get stand-in
+  // ids when parsed, which an agent reading the file will not find.
+  const diskTextRef = useRef<string | null>(null)
+  const rootRef = useRef<HTMLDivElement>(null)
   const dirtyRef = useRef(false)
   const requestIdRef = useRef(0)
   const executeSeqRef = useRef(0)
@@ -166,6 +176,7 @@ export default function NotebookTab({
         const serialized = serializeNotebook(parsed)
         if (!force && savedRef.current !== null && serialized === savedRef.current) return
         savedRef.current = serialized
+        diskTextRef.current = text
         docRef.current = parsed
         dirtyRef.current = false
         setDirty(false)
@@ -238,6 +249,7 @@ export default function NotebookTab({
     setSaveError(null)
     return window.api.fbWriteFile(projectDir, filePath, value).then(() => {
       savedRef.current = value
+      diskTextRef.current = value
       dirtyRef.current = serializeNotebook(docRef.current ?? current) !== value
       setDirty(dirtyRef.current)
       setSaveError(null)
@@ -278,6 +290,72 @@ export default function NotebookTab({
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [visible, saveContent])
+
+  // Ctrl+L links the cell (or the selection inside it), Ctrl+Shift+L the notebook.
+  // Unsaved changes are saved first — the agent reads the file. A cell is named by
+  // its position, plus its id only when the file on disk stores that id.
+  const linkToAgent = useLinkToAgent(projectId, taskId)
+  const linkNotebook = useCallback((
+    kind: 'selection' | 'file',
+    cellId: string | null,
+    lines: { startLine: number; endLine: number } | null
+  ) => {
+    void (async () => {
+      if (dirtyRef.current) {
+        try {
+          await writeBuffer()
+        } catch {
+          showAgentLinkNotice('Save failed, so no link was sent.')
+          return
+        }
+      }
+      const path = agentLinkPath(projectDir, filePath)
+      const index = cellId ? (docRef.current?.cells.findIndex((c) => c.id === cellId) ?? -1) : -1
+      if (kind === 'file' || index < 0) {
+        linkToAgent(formatAgentLink({ path }))
+        return
+      }
+      const idOnDisk = (diskTextRef.current ?? '').includes(`"${cellId}"`)
+      linkToAgent(formatAgentLink({
+        path,
+        cellNumber: index + 1,
+        ...(idOnDisk && cellId ? { cellId } : {}),
+        ...(lines ?? {})
+      }))
+    })()
+  }, [filePath, linkToAgent, projectDir, writeBuffer])
+
+  const activeCellIdRef = useRef<string | null>(null)
+  activeCellIdRef.current = activeCellId
+  const linkNotebookRef = useRef(linkNotebook)
+  linkNotebookRef.current = linkNotebook
+
+  // With a cell editor focused, its Monaco action handles the keys. Otherwise
+  // (an idle cell was clicked, or the toolbar) link the active cell / notebook —
+  // but only when focus is inside this notebook, so Ctrl+L still reaches a
+  // terminal in the other pane.
+  useEffect(() => {
+    if (!visible) return
+    const onKey = (event: KeyboardEvent) => {
+      if (!(event.metaKey || event.ctrlKey) || event.altKey || event.key.toLowerCase() !== 'l') return
+      const target = event.target instanceof Element ? event.target : null
+      if (!target || !rootRef.current?.contains(target)) return
+      if (target.closest('.monaco-editor') || target.closest('input, textarea, select')) return
+      event.preventDefault()
+      event.stopPropagation()
+      linkNotebookRef.current(event.shiftKey ? 'file' : 'selection', activeCellIdRef.current, null)
+    }
+    window.addEventListener('keydown', onKey, true)
+    return () => window.removeEventListener('keydown', onKey, true)
+  }, [visible])
+
+  useEffect(() => {
+    if (!visible) return
+    return paletteEvents.on('link-to-agent', (kind) => {
+      if (!rootRef.current?.contains(document.activeElement)) return
+      linkNotebookRef.current(kind, activeCellIdRef.current, null)
+    })
+  }, [visible])
 
   const startKernel = useCallback(() => {
     setKernelError(null)
@@ -555,7 +633,12 @@ export default function NotebookTab({
   const runQueueBusy = notebookRunQueueBusy(runningIds.size)
 
   return (
-    <div style={{ position: 'absolute', inset: 0, display: visible ? 'flex' : 'none', flexDirection: 'column' }}>
+    <div
+      ref={rootRef}
+      tabIndex={-1}
+      className="outline-none"
+      style={{ position: 'absolute', inset: 0, display: visible ? 'flex' : 'none', flexDirection: 'column' }}
+    >
       <div className="flex items-center gap-1.5 px-2 py-1 border-b border-hair bg-surface-2 shrink-0">
         <button
           type="button"
@@ -630,6 +713,14 @@ export default function NotebookTab({
           ]}
         />
         <span className="ml-2 flex min-w-0 flex-1 items-center justify-end gap-1.5">
+          <button
+            type="button"
+            className="bg-transparent border-0 text-text-muted cursor-pointer px-1.5 py-1 rounded-md text-xs hover:bg-surface-3 hover:text-text"
+            onClick={() => linkNotebook('file', null, null)}
+            title={`Link notebook to agent (${formatShortcutForApp('CmdOrCtrl+Shift+L')})`}
+          >
+            <AtSign size={12} />
+          </button>
           <span className="min-w-0 truncate text-2xs text-text-subtle" title={filePath}>{filePath}</span>
           <span
             title={dirty ? 'Unsaved changes' : undefined}
@@ -663,6 +754,7 @@ export default function NotebookTab({
               effectiveTheme={effectiveTheme}
               suspendEditors={suspendEditors}
               onFocus={() => setActiveCellId(cell.id)}
+              onLinkToAgent={(kind, lines) => linkNotebook(kind, cell.id, lines)}
               onChangeSource={(source) => {
                 const current = docRef.current
                 if (!current) return

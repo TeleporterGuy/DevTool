@@ -18,6 +18,7 @@ import type { TunnelConfig, TunnelState } from '../../shared/types'
 
 import { joinWorkspaceDir } from '../../shared/workspace-path'
 import { formatShortcutForApp } from '../../shared/shortcut-label'
+import { paletteEvents } from '../palette/paletteEvents'
 
 function FileBrowserTabButton({
   icon,
@@ -86,6 +87,21 @@ export default function ContentArea(): React.ReactElement {
   const [tunnelStates, setTunnelStates] = useState<Record<string, TunnelState>>({})
   const [tunnelPopupOpen, setTunnelPopupOpen] = useState(false)
   const [openInIdeError, setOpenInIdeError] = useState<string | null>(null)
+  const [agentLinkNotice, setAgentLinkNotice] = useState<string | null>(null)
+
+  // Ctrl+L found nothing to link to (no agent tab) or could not save first.
+  useEffect(() => {
+    let timer: number | undefined
+    const off = paletteEvents.on('agent-link-notice', (message) => {
+      setAgentLinkNotice(message)
+      window.clearTimeout(timer)
+      timer = window.setTimeout(() => setAgentLinkNotice(null), 4000)
+    })
+    return () => {
+      off()
+      window.clearTimeout(timer)
+    }
+  }, [])
 
   useEffect(() => {
     window.api.onSshStatusChanged((projectId: string, status: string) => {
@@ -483,6 +499,11 @@ export default function ContentArea(): React.ReactElement {
       {openInIdeError && (
         <div role="alert" className="px-2 py-1 text-sm text-danger bg-surface-2 border-b-[0.5px] border-border">
           {openInIdeError}
+        </div>
+      )}
+      {agentLinkNotice && (
+        <div role="status" className="px-2 py-1 text-sm text-text-muted bg-surface-2 border-b-[0.5px] border-border">
+          {agentLinkNotice}
         </div>
       )}
 

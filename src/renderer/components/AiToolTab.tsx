@@ -29,6 +29,8 @@ import { sanitizeRestoredScrollback } from './scrollbackReplay'
 import { disarmXtermDocMouseListeners } from './xtermDisposal'
 import '@xterm/xterm/css/xterm.css'
 import { buildXtermTheme } from './terminalThemes'
+import { noteAgentTabFocused } from '../agentLink/agentTabRecency'
+import { onAgentInsert } from '../agentLink/linkToAgent'
 
 const ENABLE_XTERM_WEBGL = false
 
@@ -147,6 +149,9 @@ export default function AiToolTab({ tabId, toolType, visible, sessionId, pane, p
   const statusStore = useTabStatusStore()
   const initializedRef = useRef(false)
   const spawnedRef = useRef(false)
+  // Agent links (Ctrl+L) that arrived before the PTY was spawned or while its
+  // scrollback was replaying; pasted once input would reach the process.
+  const pendingInsertsRef = useRef<string[]>([])
   const focusClaimRef = useRef(false)
   const activityTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const staleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -428,6 +433,7 @@ export default function AiToolTab({ tabId, toolType, visible, sessionId, pane, p
 
     term.element?.addEventListener('focusin', () => {
       focusClaimRef.current = true
+      noteAgentTabFocused(taskId, tabId)
       const currentEntry = terminals.get(tabId)
       if (!currentEntry) return
       currentEntry.fitAddon.fit()
@@ -667,6 +673,7 @@ export default function AiToolTab({ tabId, toolType, visible, sessionId, pane, p
                 entry.pendingData = []
               }
               entry.term.scrollToBottom()
+              flushAgentInserts()
             }
 
             const restoredScrollback = sanitizeRestoredScrollback(attachResult.scrollback)
@@ -704,9 +711,25 @@ export default function AiToolTab({ tabId, toolType, visible, sessionId, pane, p
     return () => ro.disconnect()
   }, [tabId, toolType, config, sessionId, projectDir, sshReady, userActivated, activationDecisionPending, visible])
 
+  // Agent links (Ctrl+L from an editor/notebook): paste into the TUI's input — as
+  // a bracketed paste when the TUI enabled it, never with a newline — and focus.
+  const flushAgentInserts = useCallback((): void => {
+    const entry = terminals.get(tabId)
+    if (!entry || !spawnedRef.current || entry.restoring) return
+    const texts = pendingInsertsRef.current.splice(0)
+    for (const text of texts) pasteIntoTerminal(entry.term, text)
+    if (texts.length > 0) entry.term.focus()
+  }, [tabId])
+
+  useEffect(() => onAgentInsert(tabId, (text) => {
+    pendingInsertsRef.current.push(text)
+    flushAgentInserts()
+  }), [tabId, flushAgentInserts])
+
   // Focus + re-fit on visibility change, clear attention
   useEffect(() => {
     if (visible) {
+      noteAgentTabFocused(taskId, tabId)
       if (!isClaudeTab) {
         suppressUntilRef.current = Date.now() + 500
       }
@@ -726,7 +749,7 @@ export default function AiToolTab({ tabId, toolType, visible, sessionId, pane, p
     } else {
       focusClaimRef.current = false
     }
-  }, [visible, tabId, isClaudeTab, applyStatus])
+  }, [visible, tabId, taskId, isClaudeTab, applyStatus])
 
   // Update font when config or zoom changes
   useEffect(() => {

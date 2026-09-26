@@ -530,3 +530,40 @@ describe('kernel message handling', () => {
     expect(applyKernelEventToOutputs([], { event: 'execute_reply', id: 'c1', status: 'ok', execution_count: 2 })).toBeNull()
   })
 })
+
+describe('cell ids for notebooks that store none (nbformat < 4.5)', () => {
+  const legacy = JSON.stringify({
+    nbformat: 4,
+    nbformat_minor: 2,
+    metadata: {},
+    cells: [
+      { cell_type: 'markdown', metadata: {}, source: ['# Title'] },
+      { cell_type: 'code', metadata: {}, source: ['x = 1'], outputs: [], execution_count: null }
+    ]
+  })
+
+  it('gives the same stand-in ids on every parse, so re-reads do not churn them', () => {
+    const first = parseNotebook(legacy).cells.map(c => c.id)
+    const second = parseNotebook(legacy).cells.map(c => c.id)
+    expect(first).toEqual(['cell-0', 'cell-1'])
+    expect(second).toEqual(first)
+    expect(serializeNotebook(parseNotebook(legacy))).toBe(serializeNotebook(parseNotebook(legacy)))
+  })
+
+  it('keeps stored ids and makes repeated ones unique', () => {
+    const doc = parseNotebook(JSON.stringify({
+      nbformat: 4,
+      nbformat_minor: 5,
+      metadata: {},
+      cells: [
+        { id: 'a', cell_type: 'code', metadata: {}, source: [], outputs: [], execution_count: null },
+        { id: 'a', cell_type: 'code', metadata: {}, source: [], outputs: [], execution_count: null },
+        { cell_type: 'code', metadata: {}, source: [], outputs: [], execution_count: null }
+      ]
+    }))
+    const ids = doc.cells.map(c => c.id)
+    expect(ids[0]).toBe('a')
+    expect(ids[2]).toBe('cell-2')
+    expect(new Set(ids).size).toBe(3)
+  })
+})

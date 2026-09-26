@@ -27,4 +27,15 @@ describe('palette menu shortcut labels', () => {
     expect(formatShortcut('CmdOrCtrl+Shift+E', 'win32')).toBe('Ctrl+Shift+E')
     expect(formatShortcut('CmdOrCtrl+Alt+I', 'win32')).toBe('Ctrl+Alt+I')
   })
+
+  it('lists the agent-link shortcuts with Windows and macOS labels', () => {
+    const selection = commandRegistry.getById('cmd.linkSelectionToAgent')?.shortcut
+    const file = commandRegistry.getById('cmd.linkFileToAgent')?.shortcut
+    expect(selection).toBe('CmdOrCtrl+L')
+    expect(file).toBe('CmdOrCtrl+Shift+L')
+    expect(formatShortcut(selection!, 'win32')).toBe('Ctrl+L')
+    expect(formatShortcut(file!, 'win32')).toBe('Ctrl+Shift+L')
+    expect(formatShortcut(selection!, 'darwin')).toBe('⌘L')
+    expect(formatShortcut(file!, 'darwin')).toBe('⌘⇧L')
+  })
 })

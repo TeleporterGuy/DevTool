@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import Editor from '@monaco-editor/react'
 import type { editor } from 'monaco-editor'
-import { Check, ChevronDown, ChevronRight, ChevronUp, Play, Plus, Trash2 } from 'lucide-react'
+import { AtSign, Check, ChevronDown, ChevronRight, ChevronUp, Play, Plus, Trash2 } from 'lucide-react'
 import type { AppConfig } from '../../shared/types'
 import {
   isNotebookCellCollapsed,
@@ -19,6 +19,8 @@ import {
   highlightNotebookCodeHtml,
   NOTEBOOK_CODE_PREVIEW_CODE_CLASS
 } from './notebookCodePreview'
+import { selectionLines } from '../../shared/agent-link'
+import { formatShortcutForApp } from '../../shared/shortcut-label'
 
 interface Props {
   cell: NotebookCell
@@ -46,11 +48,18 @@ interface Props {
   onToggleCollapsed: () => void
   resetKey: number
   suspendEditors?: boolean
+  /**
+   * Ctrl+L / Ctrl+Shift+L (and the header button): link this cell — `lines` is the
+   * selection inside it, null for the whole cell — or the whole notebook to the agent.
+   */
+  onLinkToAgent?: (kind: 'selection' | 'file', lines: { startLine: number; endLine: number } | null) => void
 }
 
 const RUN_KEY = 2048 | 3
 const RUN_AND_NEXT_KEY = 2048 | 1024 | 3
 const ESCAPE_KEY = 9 // Monaco KeyCode.Escape
+const LINK_SELECTION_KEY = 2048 | 42 // CtrlCmd + L
+const LINK_FILE_KEY = 2048 | 1024 | 42 // CtrlCmd + Shift + L
 
 function safeMonacoCall(fn: () => void): void {
   try {
@@ -167,7 +176,8 @@ export default function NotebookCellView({
   onFinishMarkdownEdit,
   onToggleCollapsed,
   resetKey,
-  suspendEditors = false
+  suspendEditors = false,
+  onLinkToAgent
 }: Props): React.ReactElement {
   const [height, setHeight] = useState(64)
   const editorRef = useRef<editor.IStandaloneCodeEditor | null>(null)
@@ -176,6 +186,8 @@ export default function NotebookCellView({
   const onRunAndNextRef = useRef(onRunAndNext)
   const onChangeSourceRef = useRef(onChangeSource)
   const onFinishMarkdownEditRef = useRef(onFinishMarkdownEdit)
+  const onLinkToAgentRef = useRef(onLinkToAgent)
+  onLinkToAgentRef.current = onLinkToAgent
   const cellTypeRef = useRef(cell.cellType)
   const collapsed = isNotebookCellCollapsed(cell)
   const sourcePreview = notebookCellSourcePreview(cell.source)
@@ -231,6 +243,26 @@ export default function NotebookCellView({
     ed.addCommand(RUN_AND_NEXT_KEY, () => onRunAndNextRef.current())
     ed.addCommand(ESCAPE_KEY, () => {
       if (cellTypeRef.current === 'markdown') onFinishMarkdownEditRef.current()
+    })
+    ed.addAction({
+      id: 'devtool.linkSelectionToAgent',
+      label: 'Link Selection to Agent',
+      keybindings: [LINK_SELECTION_KEY],
+      contextMenuGroupId: 'navigation',
+      contextMenuOrder: 0,
+      run: () => {
+        const sel = ed.getSelection()
+        const empty = !sel || (sel.startLineNumber === sel.endLineNumber && sel.startColumn === sel.endColumn)
+        onLinkToAgentRef.current?.('selection', empty ? null : selectionLines(sel))
+      }
+    })
+    ed.addAction({
+      id: 'devtool.linkFileToAgent',
+      label: 'Link Notebook to Agent',
+      keybindings: [LINK_FILE_KEY],
+      contextMenuGroupId: 'navigation',
+      contextMenuOrder: 0.1,
+      run: () => onLinkToAgentRef.current?.('file', null)
     })
     const applyHeight = () => {
       // Content-size events can fire while Monaco is disposing during a cell reorder.
@@ -323,6 +355,16 @@ export default function NotebookCellView({
           </span>
         ) : (
           <span className="flex-1" />
+        )}
+        {onLinkToAgent && (
+          <button
+            type="button"
+            className={btnCls}
+            onClick={() => onLinkToAgent('selection', null)}
+            title={`Link cell to agent (${formatShortcutForApp('CmdOrCtrl+L')})`}
+          >
+            <AtSign size={14} />
+          </button>
         )}
         <button type="button" className={btnCls} onClick={onAddBelow} title="Add cell below">
           <Plus size={14} />
