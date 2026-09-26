@@ -317,7 +317,7 @@ describe('EditorTab', () => {
       })
     }
 
-    it('Ctrl+L links the selected lines to the task agent tab and activates it', async () => {
+    it('Ctrl+L sends the selected lines to the task agent tab and activates it', async () => {
       const activated: unknown[][] = []
       mocks.setActiveTab = (...args) => activated.push(args)
       renderTab(true)
@@ -326,19 +326,19 @@ describe('EditorTab', () => {
       mocks.selection = { startLineNumber: 1, startColumn: 3, endLineNumber: 2, endColumn: 4 }
       await press(LINK_SELECTION_KEYBINDING)
 
-      expect(inserts).toEqual([{ tabId: 'pi-1', text: 'src/notes.txt (lines 1-2) ' }])
+      expect(inserts).toEqual([{ tabId: 'pi-1', text: 'src/notes.txt (lines 1-2):\n```\nline one\nline two\n```\n' }])
       expect(activated).toEqual([['p1', 't1', 'right', 'pi-1']])
       expect((window as any).api.fbWriteFile).not.toHaveBeenCalled()
     })
 
-    it('Ctrl+L with no selection links the cursor line', async () => {
+    it('Ctrl+L with no selection sends the cursor line', async () => {
       renderTab(true)
       await waitFor(() => expect(editor().value).toBe(DISK_CONTENT))
 
       mocks.selection = { startLineNumber: 2, startColumn: 5, endLineNumber: 2, endColumn: 5 }
       await press(LINK_SELECTION_KEYBINDING)
 
-      expect(inserts.map(i => i.text)).toEqual(['src/notes.txt (line 2) '])
+      expect(inserts.map(i => i.text)).toEqual(['src/notes.txt (line 2):\n```\nline two\n```\n'])
     })
 
     it('Ctrl+Shift+L links the whole file', async () => {

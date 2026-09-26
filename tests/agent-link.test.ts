@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { agentLinkPath, formatAgentLink, pickAgentTarget, selectionLines } from '../src/shared/agent-link'
+import { MAX_SNIPPET_CHARS, agentLinkPath, formatAgentLink, formatAgentSnippet, pickAgentTarget, selectionLines, sliceLines } from '../src/shared/agent-link'
 import type { Tab } from '../src/shared/types'
 
 describe('formatAgentLink', () => {
@@ -36,6 +36,40 @@ describe('formatAgentLink', () => {
   it('ends a directory link with a slash', () => {
     expect(formatAgentLink({ path: 'src/lib', isDirectory: true })).toBe('@src/lib/ ')
     expect(formatAgentLink({ path: 'src/lib/', isDirectory: true })).toBe('@src/lib/ ')
+  })
+})
+
+describe('formatAgentSnippet', () => {
+  it('sends the selected lines under a header naming them', () => {
+    expect(formatAgentSnippet({ path: 'src/foo.ts', startLine: 2, endLine: 3, text: 'a()\nb()\n', language: 'typescript' }))
+      .toBe('src/foo.ts (lines 2-3):\n```typescript\na()\nb()\n```\n')
+  })
+
+  it('names a notebook cell as a 1-based position of the total, plus its id', () => {
+    expect(formatAgentSnippet({ path: 'nb.ipynb', cellNumber: 1, cellCount: 5, cellId: '6cf3d1c6', text: 'import panel', language: 'python' }))
+      .toBe('nb.ipynb (cell 1 of 5, id 6cf3d1c6):\n```python\nimport panel\n```\n')
+  })
+
+  it('uses a fence longer than any backtick run inside the text', () => {
+    const snippet = formatAgentSnippet({ path: 'README.md', startLine: 1, text: 'see:\n```js\nx\n```', language: 'markdown' })!
+    expect(snippet.startsWith('README.md (line 1):\n````markdown\n')).toBe(true)
+    expect(snippet.endsWith('\n````\n')).toBe(true)
+  })
+
+  it('normalizes CRLF', () => {
+    expect(formatAgentSnippet({ path: 'a.txt', startLine: 1, endLine: 2, text: 'x\r\ny' }))
+      .toBe('a.txt (lines 1-2):\n```\nx\ny\n```\n')
+  })
+
+  it('gives up on very large selections so a pointer is sent instead', () => {
+    expect(formatAgentSnippet({ path: 'big.txt', startLine: 1, text: 'x'.repeat(MAX_SNIPPET_CHARS + 1) })).toBeNull()
+  })
+})
+
+describe('sliceLines', () => {
+  it('returns an inclusive 1-based range', () => {
+    expect(sliceLines('a\nb\nc\nd', 2, 3)).toBe('b\nc')
+    expect(sliceLines('a\r\nb', 2, 2)).toBe('b')
   })
 })
 

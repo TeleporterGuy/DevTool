@@ -711,15 +711,34 @@ export default function AiToolTab({ tabId, toolType, visible, sessionId, pane, p
     return () => ro.disconnect()
   }, [tabId, toolType, config, sessionId, projectDir, sshReady, userActivated, activationDecisionPending, visible])
 
-  // Agent links (Ctrl+L from an editor/notebook): paste into the TUI's input — as
-  // a bracketed paste when the TUI enabled it, never with a newline — and focus.
+  // Agent links (Ctrl+L from an editor/notebook): paste into the TUI's input and
+  // focus. A multi-line snippet waits until the TUI has turned on bracketed paste —
+  // before that (still starting up) each newline would reach it as Enter.
+  const insertRetryRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const flushAgentInserts = useCallback((): void => {
+    if (insertRetryRef.current) {
+      clearTimeout(insertRetryRef.current)
+      insertRetryRef.current = null
+    }
     const entry = terminals.get(tabId)
     if (!entry || !spawnedRef.current || entry.restoring) return
-    const texts = pendingInsertsRef.current.splice(0)
-    for (const text of texts) pasteIntoTerminal(entry.term, text)
-    if (texts.length > 0) entry.term.focus()
+    let pasted = false
+    while (pendingInsertsRef.current.length > 0) {
+      const text = pendingInsertsRef.current[0]
+      if (text.includes('\n') && !entry.term.modes.bracketedPasteMode) break
+      pendingInsertsRef.current.shift()
+      pasteIntoTerminal(entry.term, text)
+      pasted = true
+    }
+    if (pasted) entry.term.focus()
+    if (pendingInsertsRef.current.length > 0) {
+      insertRetryRef.current = setTimeout(flushAgentInserts, 250)
+    }
   }, [tabId])
+
+  useEffect(() => () => {
+    if (insertRetryRef.current) clearTimeout(insertRetryRef.current)
+  }, [])
 
   useEffect(() => onAgentInsert(tabId, (text) => {
     pendingInsertsRef.current.push(text)
