@@ -1,7 +1,10 @@
-import { app, BrowserWindow, Menu, systemPreferences } from 'electron'
+import { app, BrowserWindow, Menu, shell, systemPreferences } from 'electron'
 import { join } from 'path'
+import { pathToFileURL } from 'url'
 import { resolveShellEnv } from './shell-env'
 import { AppRuntime } from './app-runtime'
+import { CONFIG_DIR } from './config-dir'
+import { acquireInstanceLock } from './instance-lock'
 import type { WindowGeometry, WindowViewState } from '../shared/types'
 
 if (process.env.DEVTOOL_CDP_PORT) {
@@ -26,6 +29,73 @@ app.on('web-contents-created', (_event, contents) => {
 })
 
 let appRuntime: AppRuntime | null = null
+let releaseInstanceLock: (() => void) | null = null
+
+const RENDERER_INDEX_PATH = join(__dirname, '../renderer/index.html')
+
+/** The only document a main window may show: the dev server in dev, the bundled index in prod. */
+function isAppUrl(url: string): boolean {
+  let parsed: URL
+  try {
+    parsed = new URL(url)
+  } catch {
+    return false
+  }
+  if (process.env.ELECTRON_RENDERER_URL) {
+    try {
+      return parsed.origin === new URL(process.env.ELECTRON_RENDERER_URL).origin
+    } catch {
+      return false
+    }
+  }
+  return parsed.protocol === 'file:' && parsed.pathname === pathToFileURL(RENDERER_INDEX_PATH).pathname
+}
+
+/** Same rule as the `open-external` IPC handler: only http(s) leaves the app. */
+function openExternalIfWeb(url: string): void {
+  try {
+    const parsed = new URL(url)
+    if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
+      void shell.openExternal(parsed.toString()).catch(() => {})
+    }
+  } catch {
+    // not a URL: drop it
+  }
+}
+
+/**
+ * The main renderer holds the full `window.api`; a stray link click or window.open
+ * must never swap it for remote content. <webview> guests are separate webContents
+ * and are not affected by these handlers.
+ */
+function guardMainWindowNavigation(win: BrowserWindow): void {
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    openExternalIfWeb(url)
+    return { action: 'deny' }
+  })
+  win.webContents.on('will-navigate', (event, url) => {
+    if (isAppUrl(url)) return
+    event.preventDefault()
+    openExternalIfWeb(url)
+  })
+  win.webContents.on('will-redirect', (event, url, _isInPlace, isMainFrame) => {
+    if (isMainFrame && !isAppUrl(url)) event.preventDefault()
+  })
+}
+
+function focusExistingWindow(): void {
+  const windows = BrowserWindow.getAllWindows()
+  const win = BrowserWindow.getFocusedWindow() ?? windows[0]
+  if (!win) {
+    // macOS keeps the app alive with no windows; a relaunch should bring one back.
+    if (appRuntime) createWindow()
+    return
+  }
+  if (win.isMinimized()) win.restore()
+  win.show()
+  win.focus()
+  if (process.platform === 'darwin') app.focus({ steal: true })
+}
 
 function buildAppMenu(): void {
   const isMac = process.platform === 'darwin'
@@ -182,6 +252,7 @@ function createWindow(initialViewState?: WindowViewState | null, geometry?: Wind
     }
   })
 
+  guardMainWindowNavigation(mainWindow)
   appRuntime?.registerWindow(mainWindow, initialViewState ?? null)
   if (geometry?.isMaximized) {
     mainWindow.maximize()
@@ -236,13 +307,27 @@ function createWindow(initialViewState?: WindowViewState | null, geometry?: Wind
   if (process.env.ELECTRON_RENDERER_URL) {
     void mainWindow.loadURL(process.env.ELECTRON_RENDERER_URL)
   } else {
-    void mainWindow.loadFile(join(__dirname, '../renderer/index.html'))
+    void mainWindow.loadFile(RENDERER_INDEX_PATH)
   }
 
   return mainWindow
 }
 
 app.whenReady().then(async () => {
+  // Before anything reads or writes the config dir: a second instance on the same
+  // dir would clobber the first one's saves.
+  const lock = await acquireInstanceLock(CONFIG_DIR, () => {
+    if (app.isReady()) focusExistingWindow()
+  })
+  if (!lock.acquired) {
+    console.error(
+      `[instance-lock] DevTool is already running on ${CONFIG_DIR}` +
+      (lock.ownerPid ? ` (pid ${lock.ownerPid})` : '') + '; handing over and exiting'
+    )
+    app.exit(0)
+    return
+  }
+  releaseInstanceLock = lock.release
   await resolveShellEnv()
   if (process.platform === 'darwin') {
     // Trigger the macOS mic-access prompt so terminal subprocesses (e.g. Claude Code voice mode)
@@ -273,4 +358,10 @@ app.on('window-all-closed', () => {
 app.on('before-quit', () => {
   appRuntime?.prepareForQuit()
   void appRuntime?.shutdown()
+})
+
+// Released at process exit, not will-quit: shutdown still writes to the config dir,
+// and a crashed owner is detected as stale by the next launch anyway.
+process.on('exit', () => {
+  releaseInstanceLock?.()
 })
