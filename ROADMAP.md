@@ -26,7 +26,7 @@ Company-deploy security snapshot (what this app actually is on a workstation): [
 
 Stay on **0.x** until the app is something you would tell a friend to unzip. **1.0.0** is that call, not “Phase 5 finished.”
 
-`package.json` is **0.5.0** (Phase 4 native notebooks). Phase 4.5 (agent context links) is next and tags as a patch, like 1.3 / 1.4. Phase 2 landed without tagging `0.4.0` and stayed **0.3.2**, so Phase 3 used that skipped minor instead of jumping to `0.5.0`. Shape:
+`package.json` is **0.5.1** (Phase 4.5 agent context links, a patch on Phase 4's `0.5.0`, like 1.3 / 1.4). Phase 2 landed without tagging `0.4.0` and stayed **0.3.2**, so Phase 3 used that skipped minor instead of jumping to `0.5.0`. Shape:
 
 | Part | Meaning |
 | --- | --- |
@@ -310,7 +310,7 @@ Stay out of: full VS Code notebook parity (debug, variable explorer, collaborati
 
 ---
 
-## Phase 4.5 — Agent context links from editor/notebook (mid-phase) — implemented on `phase-4.5-agent-links`, in hands-on testing (`0.5.1`)
+## Phase 4.5 — Agent context links from editor/notebook (mid-phase) — done (`0.5.1`)
 
 Cursor-style Ctrl+L (selection) / Ctrl+Shift+L (whole file), pulled out of the parking lot. Builds on Phase 4 (notebook tabs), Monaco, and the existing agent tabs. Not packaging, so it is a mid-phase patch tag like 1.3 / 1.4, not a minor.
 
@@ -331,9 +331,13 @@ Work items:
 
 Stay out of: pasting full selection text into the PTY, a DevTool-side resolver/index for links, remote SSH notebooks (still local-only), inline edit (Cursor's Ctrl+K edit-in-place is not this — Ctrl+K stays the palette), LSP.
 
-**Verify:** unit tests for link formatting (paths with spaces, Windows paths, notebook cell ids, single-line vs range) and target selection. Manual on Windows: Pi in Git Bash receives the link without executing; Claude chat composer receives it; the agent reads the right lines/cell.
+**Verify:** unit tests for link formatting (paths with spaces, Windows paths, notebook cell ids, single-line vs range), stable stand-in cell ids, target selection, editor/notebook/composer wiring. Manual — done: Pi on Windows (Git Bash) and Codex on macOS receive the link without executing and read the right lines/cell; Claude Code receives it, attaches the whole file for `@path` and finds the section from the cell/lines (accepted).
 
-**Effort:** a short pass. Ships as **`0.5.1`**.
+Tried and dropped during testing: a bare `path (lines …)` without `@` (Claude attached nothing), and pasting the selected lines as a fenced snippet (not the Cursor/Codex feel wanted).
+
+**Closeout:** done. `package.json` is **0.5.1**. Next is Phase 5 (packaging + app identity).
+
+**Effort:** a short pass. Shipped as **`0.5.1`**.
 
 ---
 
@@ -491,7 +495,7 @@ Work machine constraints to re-test every phase: Git Bash, portable Node zip, Pi
 | 2 | stayed `0.3.2` (no `0.4.0` tag) | Hook secret + Pi extension off `/tmp`; SSH uses `~/.ssh/known_hosts` | ~1 week |
 | 3 | `0.4.0` (shipped) | Conda picker on spawn | 1–2 weeks |
 | 4 | `0.5.0` (shipped) | Native `.ipynb` tabs (Monaco cells + conda kernel) | a focused pass |
-| 4.5 | `0.5.1` (in testing) | Ctrl+L selection (or line / cell) and Ctrl+Shift+L whole file → compact link in agent terminal / Claude chat | a short pass |
+| 4.5 | `0.5.1` (shipped) | Ctrl+L selection (or line / cell) and Ctrl+Shift+L whole file → compact link in agent terminal / Claude chat | a short pass |
 | 5 | `0.6.0`+ | Portable folder kept; app icon + DevTool name; per-user NSIS Setup.exe; then Authenticode; then auto-update | icon/name an evening; installer days–weeks; signing/updater depend on the cert |
 | 6 | `0.7.0` | Pi chat tab over `pi --mode rpc` (timeline, composer, extension dialogs, resume) | 2–3 weeks of evenings |
 
