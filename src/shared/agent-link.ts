@@ -5,14 +5,13 @@ import type { Tab } from './types'
  * Agent context links (Phase 4.5): a compact reference to a file, a line range or
  * a notebook cell that is typed into an agent's input instead of the text itself.
  *
- * Only whole-file links carry `@`. Claude Code expands `@path` into the full file
- * content (its docs have no line-range form), so a selection written as `@path`
- * would attach the whole file. A bare path + range is a pointer the agent reads
- * itself; Codex and Pi treat both forms as plain text.
+ * The `@path` token is kept clean — Claude Code and Pi treat `@path` as a file
+ * mention, and a suffix glued onto it (`:10-24`, `#L10`) can stop that from
+ * resolving. The range follows in plain words:
  *
  *   @src/foo.ts                              whole file (Ctrl+Shift+L)
- *   src/foo.ts (lines 10-24)                 selection
- *   analysis.ipynb (cell 4, id 3c8d9b5c, lines 3-5)
+ *   @src/foo.ts (lines 10-24)                selection
+ *   @analysis.ipynb (cell 4, id 3c8d9b5c, lines 3-5)
  */
 export interface AgentLinkTarget {
   /** Path as the agent should see it (workspace-relative, `/` separators). */
@@ -39,7 +38,7 @@ export function formatAgentLink({ path, startLine, endLine, cellNumber, cellId, 
     const end = endLine ?? startLine
     parts.push(end > startLine ? `lines ${startLine}-${end}` : `line ${startLine}`)
   }
-  return parts.length > 0 ? `${quoted} (${parts.join(', ')}) ` : `@${quoted} `
+  return parts.length > 0 ? `@${quoted} (${parts.join(', ')}) ` : `@${quoted} `
 }
 
 /** A Monaco-style selection: 1-based lines and columns. */
