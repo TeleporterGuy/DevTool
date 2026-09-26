@@ -3,27 +3,30 @@ import { agentLinkPath, formatAgentLink, pickAgentTarget, selectionLines } from 
 import type { Tab } from '../src/shared/types'
 
 describe('formatAgentLink', () => {
-  it('links a whole file as a bare @path', () => {
+  it('links a whole file as an @ mention', () => {
     expect(formatAgentLink({ path: 'src/foo.ts' })).toBe('@src/foo.ts ')
   })
 
-  it('puts a line range after the path, in words', () => {
-    expect(formatAgentLink({ path: 'src/foo.ts', startLine: 10, endLine: 24 })).toBe('@src/foo.ts (lines 10-24) ')
+  it('writes a selection as a bare path + range, so Claude does not attach the whole file', () => {
+    expect(formatAgentLink({ path: 'src/foo.ts', startLine: 10, endLine: 24 })).toBe('src/foo.ts (lines 10-24) ')
   })
 
   it('says "line" for a single line', () => {
-    expect(formatAgentLink({ path: 'src/foo.ts', startLine: 7, endLine: 7 })).toBe('@src/foo.ts (line 7) ')
-    expect(formatAgentLink({ path: 'src/foo.ts', startLine: 7 })).toBe('@src/foo.ts (line 7) ')
+    expect(formatAgentLink({ path: 'src/foo.ts', startLine: 7, endLine: 7 })).toBe('src/foo.ts (line 7) ')
+    expect(formatAgentLink({ path: 'src/foo.ts', startLine: 7 })).toBe('src/foo.ts (line 7) ')
   })
 
-  it('names the notebook cell, with and without lines', () => {
-    expect(formatAgentLink({ path: 'analysis.ipynb', cellId: '3f9a1c' })).toBe('@analysis.ipynb (cell 3f9a1c) ')
-    expect(formatAgentLink({ path: 'analysis.ipynb', cellId: '3f9a1c', startLine: 3, endLine: 5 }))
-      .toBe('@analysis.ipynb (cell 3f9a1c, lines 3-5) ')
+  it('names a notebook cell by position, plus its id when known', () => {
+    expect(formatAgentLink({ path: 'nb.ipynb', cellNumber: 4 })).toBe('nb.ipynb (cell 4) ')
+    expect(formatAgentLink({ path: 'nb.ipynb', cellNumber: 4, cellId: '3c8d9b5c' })).toBe('nb.ipynb (cell 4, id 3c8d9b5c) ')
+    expect(formatAgentLink({ path: 'nb.ipynb', cellNumber: 4, cellId: '3c8d9b5c', startLine: 9, endLine: 21 }))
+      .toBe('nb.ipynb (cell 4, id 3c8d9b5c, lines 9-21) ')
+    expect(formatAgentLink({ path: 'nb.ipynb', cellId: 'abc' })).toBe('nb.ipynb (cell id abc) ')
   })
 
-  it('quotes paths with whitespace so the mention stays one token', () => {
-    expect(formatAgentLink({ path: 'my dir/foo.ts', startLine: 3 })).toBe('@"my dir/foo.ts" (line 3) ')
+  it('quotes paths with whitespace so the path stays one token', () => {
+    expect(formatAgentLink({ path: 'my dir/foo.ts', startLine: 3 })).toBe('"my dir/foo.ts" (line 3) ')
+    expect(formatAgentLink({ path: 'my dir/foo.ts' })).toBe('@"my dir/foo.ts" ')
   })
 
   it('uses forward slashes for Windows-style input', () => {

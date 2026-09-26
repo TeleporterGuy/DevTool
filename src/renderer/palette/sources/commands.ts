@@ -3,6 +3,7 @@ import { commandRegistry } from '../CommandRegistry'
 import { paletteEvents } from '../paletteEvents'
 import { AI_TAB_TYPES, AI_TAB_META, isHomeTask, isShellCommandProject, pinnedItemKey, type AiTabType, type PinnedItem } from '../../../shared/types'
 import { shortcutPlatform } from '../../../shared/shortcut-label'
+import { claudeTabType } from '../../components/newTaskTabs'
 
 function currentPinTargets(actions: any): { project: PinnedItem | null; task: PinnedItem | null; isPinned: (item: PinnedItem) => boolean } {
   const { selectedProjectId, selectedTaskId, projects, pinnedItems } = actions
@@ -102,9 +103,9 @@ for (const aiType of AI_TAB_TYPES) {
       return true
     },
     run: ctx => {
-      const { selectedProjectId, selectedTaskId } = ctx.actions
+      const { selectedProjectId, selectedTaskId, config } = ctx.actions
       if (!selectedProjectId || !selectedTaskId) return
-      ctx.actions.addTab(selectedProjectId, selectedTaskId, 'left', aiType)
+      ctx.actions.addTab(selectedProjectId, selectedTaskId, 'left', claudeTabType(aiType, config?.claudeDefaultView ?? 'terminal'))
     }
   })
 }

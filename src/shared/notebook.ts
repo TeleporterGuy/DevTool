@@ -487,7 +487,10 @@ function parseCellType(value: unknown): NotebookCellType {
 function parseCell(raw: unknown, index: number): NotebookCell {
   const record = asRecord(raw) ?? {}
   const cellType = parseCellType(record.cell_type)
-  const id = typeof record.id === 'string' && record.id.trim() ? record.id : `cell-${index}-${newCellId()}`
+  // nbformat < 4.5 files store no ids. The stand-in must be the same every time the
+  // file is parsed: the tab re-reads the file on a timer, and a random id would
+  // churn the document (and break agent links to the cell) on every read.
+  const id = typeof record.id === 'string' && record.id.trim() ? record.id : `cell-${index}`
   const executionCount = typeof record.execution_count === 'number' ? record.execution_count : null
   return {
     id,
@@ -525,7 +528,14 @@ export function parseNotebook(text: string): NotebookDocument {
   }
 
   const cellsRaw = Array.isArray(record.cells) ? record.cells : []
-  const cells = cellsRaw.map(parseCell)
+  const seen = new Set<string>()
+  const cells = cellsRaw.map(parseCell).map((cell, index) => {
+    // A stored id that repeats (or clashes with a stand-in) still needs a unique key.
+    let id = cell.id
+    for (let n = 1; seen.has(id); n++) id = `${cell.id}-${index}-${n}`
+    seen.add(id)
+    return id === cell.id ? cell : { ...cell, id }
+  })
   return {
     nbformat: NOTEBOOK_NBFORMAT,
     nbformatMinor: typeof record.nbformat_minor === 'number' ? record.nbformat_minor : NOTEBOOK_NBFORMAT_MINOR,

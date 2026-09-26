@@ -326,7 +326,7 @@ describe('EditorTab', () => {
       mocks.selection = { startLineNumber: 1, startColumn: 3, endLineNumber: 2, endColumn: 4 }
       await press(LINK_SELECTION_KEYBINDING)
 
-      expect(inserts).toEqual([{ tabId: 'pi-1', text: '@src/notes.txt (lines 1-2) ' }])
+      expect(inserts).toEqual([{ tabId: 'pi-1', text: 'src/notes.txt (lines 1-2) ' }])
       expect(activated).toEqual([['p1', 't1', 'right', 'pi-1']])
       expect((window as any).api.fbWriteFile).not.toHaveBeenCalled()
     })
@@ -338,7 +338,7 @@ describe('EditorTab', () => {
       mocks.selection = { startLineNumber: 2, startColumn: 5, endLineNumber: 2, endColumn: 5 }
       await press(LINK_SELECTION_KEYBINDING)
 
-      expect(inserts.map(i => i.text)).toEqual(['@src/notes.txt (line 2) '])
+      expect(inserts.map(i => i.text)).toEqual(['src/notes.txt (line 2) '])
     })
 
     it('Ctrl+Shift+L links the whole file', async () => {

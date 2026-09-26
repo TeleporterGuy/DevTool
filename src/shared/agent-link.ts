@@ -5,35 +5,41 @@ import type { Tab } from './types'
  * Agent context links (Phase 4.5): a compact reference to a file, a line range or
  * a notebook cell that is typed into an agent's input instead of the text itself.
  *
- * The `@path` token is kept clean on purpose — Claude Code and Pi both treat
- * `@path` as a file mention, and a suffix glued onto it (`:10-24`, `#L10`) can
- * stop that from resolving. The range follows in plain words:
+ * Only whole-file links carry `@`. Claude Code expands `@path` into the full file
+ * content (its docs have no line-range form), so a selection written as `@path`
+ * would attach the whole file. A bare path + range is a pointer the agent reads
+ * itself; Codex and Pi treat both forms as plain text.
  *
- *   @src/foo.ts (lines 10-24)
- *   @analysis.ipynb (cell 3f9a1c, lines 3-5)
+ *   @src/foo.ts                              whole file (Ctrl+Shift+L)
+ *   src/foo.ts (lines 10-24)                 selection
+ *   analysis.ipynb (cell 4, id 3c8d9b5c, lines 3-5)
  */
 export interface AgentLinkTarget {
   /** Path as the agent should see it (workspace-relative, `/` separators). */
   path: string
   startLine?: number
   endLine?: number
-  /** nbformat cell id, for notebook links. */
+  /** 1-based position of the notebook cell — always valid, even without stored ids. */
+  cellNumber?: number
+  /** nbformat cell id, only when the file on disk stores it. */
   cellId?: string
   isDirectory?: boolean
 }
 
-export function formatAgentLink({ path, startLine, endLine, cellId, isDirectory }: AgentLinkTarget): string {
+export function formatAgentLink({ path, startLine, endLine, cellNumber, cellId, isDirectory }: AgentLinkTarget): string {
   let p = path.replace(/\\/g, '/')
   if (isDirectory && !p.endsWith('/')) p += '/'
-  const token = /\s/.test(p) ? `@"${p}"` : `@${p}`
+  const quoted = /\s/.test(p) ? `"${p}"` : p
 
   const parts: string[] = []
-  if (cellId) parts.push(`cell ${cellId}`)
+  if (cellNumber !== undefined && cellId) parts.push(`cell ${cellNumber}, id ${cellId}`)
+  else if (cellNumber !== undefined) parts.push(`cell ${cellNumber}`)
+  else if (cellId) parts.push(`cell id ${cellId}`)
   if (startLine !== undefined) {
     const end = endLine ?? startLine
     parts.push(end > startLine ? `lines ${startLine}-${end}` : `line ${startLine}`)
   }
-  return parts.length > 0 ? `${token} (${parts.join(', ')}) ` : `${token} `
+  return parts.length > 0 ? `${quoted} (${parts.join(', ')}) ` : `@${quoted} `
 }
 
 /** A Monaco-style selection: 1-based lines and columns. */

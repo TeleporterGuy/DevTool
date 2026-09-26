@@ -117,8 +117,8 @@ export default function NotebookTab({
   const docRef = useRef<NotebookDocument | null>(null)
   const savedRef = useRef<string | null>(null)
   // The file as last read from or written to disk. Differs from `savedRef` (our
-  // own serialization) for notebooks written without cell ids: those get ids when
-  // parsed, which the agent will only find once we have saved them.
+  // own serialization) for notebooks written without cell ids: those get stand-in
+  // ids when parsed, which an agent reading the file will not find.
   const diskTextRef = useRef<string | null>(null)
   const rootRef = useRef<HTMLDivElement>(null)
   const dirtyRef = useRef(false)
@@ -292,8 +292,8 @@ export default function NotebookTab({
   }, [visible, saveContent])
 
   // Ctrl+L links the cell (or the selection inside it), Ctrl+Shift+L the notebook.
-  // Saves first when needed: the agent reads the file, and a cell id it cannot find
-  // on disk is no use to it.
+  // Unsaved changes are saved first — the agent reads the file. A cell is named by
+  // its position, plus its id only when the file on disk stores that id.
   const linkToAgent = useLinkToAgent(projectId, taskId)
   const linkNotebook = useCallback((
     kind: 'selection' | 'file',
@@ -301,8 +301,7 @@ export default function NotebookTab({
     lines: { startLine: number; endLine: number } | null
   ) => {
     void (async () => {
-      const cellMissingOnDisk = kind === 'selection' && cellId !== null && !(diskTextRef.current ?? '').includes(`"${cellId}"`)
-      if (dirtyRef.current || cellMissingOnDisk) {
+      if (dirtyRef.current) {
         try {
           await writeBuffer()
         } catch {
@@ -311,9 +310,18 @@ export default function NotebookTab({
         }
       }
       const path = agentLinkPath(projectDir, filePath)
-      linkToAgent(formatAgentLink(
-        kind === 'file' || !cellId ? { path } : { path, cellId, ...(lines ?? {}) }
-      ))
+      const index = cellId ? (docRef.current?.cells.findIndex((c) => c.id === cellId) ?? -1) : -1
+      if (kind === 'file' || index < 0) {
+        linkToAgent(formatAgentLink({ path }))
+        return
+      }
+      const idOnDisk = (diskTextRef.current ?? '').includes(`"${cellId}"`)
+      linkToAgent(formatAgentLink({
+        path,
+        cellNumber: index + 1,
+        ...(idOnDisk && cellId ? { cellId } : {}),
+        ...(lines ?? {})
+      }))
     })()
   }, [filePath, linkToAgent, projectDir, writeBuffer])
 
