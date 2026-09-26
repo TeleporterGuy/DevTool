@@ -1,0 +1,355 @@
+import os from 'os'
+import { AI_TAB_META, type AppConfig, type SshConfig } from '../shared/types'
+import type { PtyManager } from './pty-manager'
+import type { ScrollbackStorage } from './scrollback-storage'
+import type { SshConnectionManager } from './ssh-connection-manager'
+import type { HookInjector } from './hook-injector'
+import type { TabActivityRegistry } from './tab-activity-registry'
+import { agentCommandOverride, conptySpawnArgv, isAiAgentCommand, resolveAgentCommand } from './resolve-agent-command'
+import { isLocalInteractiveTerminal, resolveLocalTerminalSpawn } from './resolve-local-terminal'
+import {
+  buildRemotePiExtensionScript,
+  piExtensionLocalPath,
+  piExtensionRemotePath
+} from './pi-extension-injector'
+
+export const MAX_SCROLLBACK_CHARS = 2_000_000
+
+export function trimScrollback(scrollback: string): string {
+  if (scrollback.length <= MAX_SCROLLBACK_CHARS) return scrollback
+  return scrollback.slice(-MAX_SCROLLBACK_CHARS)
+}
+
+interface PtyRuntime {
+  attachedWindowIds: Set<number>
+  controllerWindowId: number | null
+  cols: number
+  rows: number
+  scrollback: string
+  exitCode: number | null
+}
+
+export interface PtyAttachResult {
+  cols: number
+  rows: number
+  scrollback: string
+  exitCode: number | null
+}
+
+export interface PtySpawnRequest {
+  id: string
+  shell: string
+  cwd: string
+  cols: number
+  rows: number
+  args?: string[]
+  extraEnv?: Record<string, string>
+  projectId?: string
+  sshConfig?: SshConfig
+}
+
+export interface PtySessionsDeps {
+  ptyManager: PtyManager
+  scrollbackStorage: ScrollbackStorage
+  activityRegistry: TabActivityRegistry
+  sshManager: () => SshConnectionManager
+  hookInjector: () => HookInjector
+  hookPort: () => number
+  hookToken: () => string
+  getConfig: () => AppConfig
+  /** Push the tab's current agent activity to every window. */
+  broadcastAgentActivity: (tabId: string) => void
+  sendToWindow: (windowId: number, channel: string, ...args: unknown[]) => void
+  log: (message: string) => void
+}
+
+/**
+ * Terminal tabs' processes, owned by main so they outlive the window showing
+ * them: several windows can attach to one PTY, one of which (the last to type
+ * or resize) controls its size.
+ */
+export class PtySessions {
+  private readonly runtimes = new Map<string, PtyRuntime>()
+
+  constructor(private readonly deps: PtySessionsDeps) {}
+
+  has(tabId: string): boolean {
+    return this.runtimes.has(tabId)
+  }
+
+  attachedWindows(tabId: string): ReadonlySet<number> | undefined {
+    return this.runtimes.get(tabId)?.attachedWindowIds
+  }
+
+  /** Tabs whose process is still running, including ones no window currently shows. */
+  liveTabIds(): string[] {
+    const ids: string[] = []
+    for (const [tabId, runtime] of this.runtimes.entries()) {
+      if (runtime.exitCode === null) ids.push(tabId)
+    }
+    return ids
+  }
+
+  /** A window closed: it no longer sees any PTY, and hands control to another viewer. */
+  detachWindow(windowId: number): void {
+    for (const [tabId, runtime] of this.runtimes.entries()) {
+      runtime.attachedWindowIds.delete(windowId)
+      if (runtime.controllerWindowId === windowId) {
+        const nextController = runtime.attachedWindowIds.values().next().value ?? null
+        runtime.controllerWindowId = nextController
+        this.deps.log(`ptyControllerReassigned id=${tabId} windowId=${nextController ?? 'none'}`)
+      }
+    }
+  }
+
+  saveScrollback(tabId: string, data: string): void {
+    const scrollback = trimScrollback(data)
+    this.deps.scrollbackStorage.save(tabId, scrollback)
+    const runtime = this.runtimes.get(tabId)
+    if (runtime) runtime.scrollback = scrollback
+  }
+
+  loadScrollback(tabId: string): string | null {
+    const runtime = this.runtimes.get(tabId)
+    return runtime ? runtime.scrollback : this.deps.scrollbackStorage.load(tabId)
+  }
+
+  discardScrollback(tabId: string): void {
+    this.deps.scrollbackStorage.delete(tabId)
+  }
+
+  saveAllScrollback(): void {
+    for (const [tabId, runtime] of this.runtimes.entries()) {
+      this.deps.scrollbackStorage.save(tabId, runtime.scrollback)
+    }
+  }
+
+  /** Main-initiated teardown (task removal): no scrollback save, no activity change. */
+  discard(tabId: string): void {
+    this.deps.ptyManager.kill(tabId)
+    this.runtimes.delete(tabId)
+  }
+
+  killAll(): void {
+    this.deps.ptyManager.killAll()
+  }
+
+  write(windowId: number, id: string, data: string): void {
+    const runtime = this.runtimes.get(id)
+    if (!runtime || !runtime.attachedWindowIds.has(windowId)) return
+    this.claimControl(id, windowId)
+    this.deps.ptyManager.write(id, data)
+  }
+
+  resize(windowId: number, windowFocused: boolean, id: string, cols: number, rows: number): void {
+    const runtime = this.runtimes.get(id)
+    if (!runtime || !runtime.attachedWindowIds.has(windowId)) return
+    if (!windowFocused && runtime.controllerWindowId !== windowId) {
+      this.deps.log(`ptyResizeIgnored id=${id} windowId=${windowId} cols=${cols} rows=${rows}`)
+      return
+    }
+    this.claimControl(id, windowId)
+    runtime.cols = cols
+    runtime.rows = rows
+    this.broadcastToAttached(id, 'pty-size-sync', id, cols, rows)
+    this.deps.ptyManager.resize(id, cols, rows)
+  }
+
+  kill(id: string): void {
+    this.deps.log(`ptyKill id=${id}`)
+    const runtime = this.runtimes.get(id)
+    if (runtime) {
+      this.deps.scrollbackStorage.save(id, runtime.scrollback)
+    }
+    this.deps.ptyManager.kill(id)
+    this.runtimes.delete(id)
+    // No process, no activity: a status left at 'working' here would protect the
+    // task from cleanup for the rest of the session.
+    this.deps.activityRegistry.remove(id)
+    this.deps.broadcastAgentActivity(id)
+  }
+
+  attachOrCreate(windowId: number, request: PtySpawnRequest): PtyAttachResult {
+    const { id, cols, rows, projectId, sshConfig } = request
+    let runtime = this.runtimes.get(id)
+    // If the stored runtime's PTY has already exited and this tab is an SSH tab
+    // whose project is currently connected, drop the dead runtime so we respawn
+    // fresh.  Happens when a tab is hidden (renderer-side spawnedRef=false) while
+    // SSH master dies and auto-reconnects: the renderer's false→true respawn
+    // effect skips hidden tabs, so main is the only place left to detect and
+    // clean up the stranded dead slave — otherwise the user sees a frozen
+    // "Shared connection closed" in scrollback when they switch back to the tab.
+    if (runtime && runtime.exitCode !== null && sshConfig && projectId
+        && this.deps.sshManager().getStatus(projectId) === 'connected') {
+      this.deps.log(`ptyAttach refresh-dead id=${id} exitCode=${runtime.exitCode}`)
+      this.deps.ptyManager.kill(id)
+      this.deps.scrollbackStorage.delete(id)
+      this.runtimes.delete(id)
+      runtime = undefined
+    }
+    if (!runtime) {
+      this.deps.log(`ptyAttach create windowId=${windowId} id=${id}`)
+      runtime = {
+        attachedWindowIds: new Set<number>(),
+        controllerWindowId: windowId,
+        cols,
+        rows,
+        scrollback: this.deps.scrollbackStorage.load(id) ?? '',
+        exitCode: null
+      }
+      this.runtimes.set(id, runtime)
+      runtime.attachedWindowIds.add(windowId)
+      this.spawn(request)
+    } else {
+      this.deps.log(`ptyAttach reuse windowId=${windowId} id=${id} scrollback=${runtime.scrollback.length} exit=${runtime.exitCode}`)
+      runtime.attachedWindowIds.add(windowId)
+    }
+    return {
+      cols: runtime.cols,
+      rows: runtime.rows,
+      scrollback: runtime.scrollback,
+      exitCode: runtime.exitCode
+    }
+  }
+
+  private spawn({ id, shell, cwd, cols, rows, args, extraEnv, projectId, sshConfig }: PtySpawnRequest): void {
+    const { deps } = this
+    deps.log(`ptySpawn start id=${id} shell=${shell} cwd=${cwd}`)
+    // A fresh process for this tab: whatever the old one was doing (including
+    // 'exited') describes a process that no longer exists.
+    deps.activityRegistry.reset(id)
+    deps.broadcastAgentActivity(id)
+
+    // Capture the current runtime so callbacks can verify they belong to the
+    // right generation.  After a kill+respawn cycle the same `id` maps to a
+    // different runtime object — without this check the OLD process's delayed
+    // onData/onExit would pollute the NEW runtime (setting exitCode, pushing
+    // stale "Shared connection closed" output, etc.).
+    const expectedRuntime = this.runtimes.get(id)
+
+    const callbacks = {
+      onData: (data: string) => {
+        const runtime = this.runtimes.get(id)
+        if (!runtime || runtime !== expectedRuntime) return
+        runtime.scrollback = trimScrollback(runtime.scrollback + data)
+        this.broadcastToAttached(id, 'pty-data', id, data)
+        // Layer 3: a slave printing "Shared connection to <host> closed" means
+        // the master's tunnel is dead — force an immediate reconnect instead
+        // of waiting for the next health-check tick (up to 10s) and without
+        // trusting `-O check` (which returns true when the master process is
+        // alive but its TCP to the server has died).
+        if (sshConfig && projectId && /Shared connection to \S+ closed/.test(data)) {
+          deps.sshManager().triggerReconnect(projectId, sshConfig)
+        }
+      },
+      onExit: (exitCode: number) => {
+        const runtime = this.runtimes.get(id)
+        if (!runtime || runtime !== expectedRuntime) return
+        runtime.exitCode = exitCode
+        deps.activityRegistry.exited(id)
+        deps.broadcastAgentActivity(id)
+        deps.log(`ptyExit id=${id} exitCode=${exitCode}`)
+        this.broadcastToAttached(id, 'pty-exit', id, exitCode)
+      }
+    }
+
+    if (sshConfig && projectId) {
+      const sshManager = deps.sshManager()
+      if (sshManager.getStatus(projectId) !== 'connected') {
+        throw new Error('SSH connection not established')
+      }
+
+      const remoteCwd = cwd || sshConfig.remoteDir
+      const isClaudeRemote = shell === 'claude' && extraEnv?.DEVTOOL_TAB_ID
+      const isPiRemote = shell === AI_TAB_META.pi.command && extraEnv?.DEVTOOL_TAB_ID
+      let hookInjectPrefix = ''
+      let remoteArgs = args
+      let remoteEnv = extraEnv
+      if (isClaudeRemote) {
+        const remotePort = sshManager.getRemotePort(projectId)
+        if (remotePort) {
+          const hookInjector = deps.hookInjector()
+          hookInjector.remoteInject(projectId, remoteCwd, extraEnv.DEVTOOL_TAB_ID)
+          hookInjectPrefix = hookInjector.buildRemoteInjectScript(remoteCwd, remotePort) + ' && '
+          deps.log(`hookInjectRemote dir=${remoteCwd} port=${remotePort} tabId=${extraEnv?.DEVTOOL_TAB_ID}`)
+        }
+      } else if (isPiRemote) {
+        // pi loads the status extension via `-e`; write it to the remote host and
+        // point its callback at the reverse-tunnel port (reaches the local hook-server).
+        const remotePort = sshManager.getRemotePort(projectId)
+        if (remotePort) {
+          const remoteExtPath = piExtensionRemotePath()
+          hookInjectPrefix = buildRemotePiExtensionScript() + ' && '
+          remoteArgs = [...(args ?? []), '-e', remoteExtPath]
+          remoteEnv = {
+            ...extraEnv,
+            DEVTOOL_HOOK_PORT: String(remotePort),
+            DEVTOOL_HOOK_TOKEN: deps.hookToken()
+          }
+        }
+      }
+
+      const sshArgs = sshManager.buildSpawnArgs(projectId, sshConfig, shell, remoteArgs, remoteEnv, hookInjectPrefix, remoteCwd)
+      // Same binary as ControlMaster. On Windows that is Git ssh.exe (native
+      // OpenSSH cannot own the mux socket). ConPTY needs an absolute path.
+      const sshFile = sshManager.getSshCommand()
+      deps.log(`ptySpawn ssh id=${id} file=${sshFile}`)
+      deps.ptyManager.spawn(id, sshFile, os.tmpdir(), cols, rows, sshArgs, undefined, callbacks)
+    } else {
+      const isClaudeLocal = shell === 'claude' && extraEnv?.DEVTOOL_TAB_ID
+      const isPiLocal = shell === AI_TAB_META.pi.command && extraEnv?.DEVTOOL_TAB_ID
+      if (isClaudeLocal) {
+        // Hooks land in the dir Claude is actually started in (a workspace task's
+        // worktree, not the project root) — logged so a missing status is easy to
+        // trace back to the settings file it should have been written to.
+        deps.hookInjector().inject(cwd, extraEnv.DEVTOOL_TAB_ID)
+        deps.log(`hookInject dir=${cwd} tabId=${extraEnv?.DEVTOOL_TAB_ID}`)
+      }
+      let localArgs = args
+      let localEnv = extraEnv
+      if (isPiLocal) {
+        localArgs = [...(args ?? []), '-e', piExtensionLocalPath()]
+        localEnv = {
+          ...extraEnv,
+          DEVTOOL_HOOK_PORT: String(deps.hookPort()),
+          DEVTOOL_HOOK_TOKEN: deps.hookToken()
+        }
+      }
+      // Keep `shell` as `pi`/`claude`/`codex` for hook detection above. Resolve the
+      // actual file CreateProcess can open (Windows needs pi.cmd, not a bare `pi`).
+      let spawnFile = shell
+      let spawnArgs = localArgs ?? []
+      const config = deps.getConfig()
+      if (isAiAgentCommand(shell)) {
+        const override = agentCommandOverride(shell, config).trim()
+        spawnFile = resolveAgentCommand(override || shell)
+        const wrapped = conptySpawnArgv(spawnFile, spawnArgs)
+        spawnFile = wrapped.file
+        spawnArgs = wrapped.args
+        deps.log(`ptySpawn resolve id=${id} shell=${shell} file=${spawnFile} args=${spawnArgs.length}`)
+      } else if (isLocalInteractiveTerminal(shell, spawnArgs)) {
+        // Git Bash / $SHELL from Settings — do not inherit process.env.SHELL on Windows.
+        const resolved = resolveLocalTerminalSpawn(config)
+        spawnFile = resolved.file
+        spawnArgs = resolved.args
+        deps.log(`ptySpawn resolve id=${id} shell=${shell} file=${spawnFile} args=${spawnArgs.join(' ')}`)
+      }
+      deps.ptyManager.spawn(id, spawnFile, cwd, cols, rows, spawnArgs, localEnv, callbacks)
+    }
+  }
+
+  private claimControl(tabId: string, windowId: number): void {
+    const runtime = this.runtimes.get(tabId)
+    if (!runtime) return
+    if (runtime.controllerWindowId !== windowId) {
+      runtime.controllerWindowId = windowId
+      this.deps.log(`ptyController id=${tabId} windowId=${windowId}`)
+    }
+  }
+
+  private broadcastToAttached(tabId: string, channel: string, ...args: unknown[]): void {
+    const windowIds = this.runtimes.get(tabId)?.attachedWindowIds
+    if (!windowIds) return
+    for (const windowId of windowIds) this.deps.sendToWindow(windowId, channel, ...args)
+  }
+}

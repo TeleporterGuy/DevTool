@@ -1,0 +1,97 @@
+import { app, BrowserWindow, clipboard, dialog, nativeTheme, shell } from 'electron'
+import type { AppConfig, WindowViewState } from '../../shared/types'
+import { detectExternalEditors, openFolderInEditor } from '../external-ide'
+import type { IpcRegistrar } from './registrar'
+import { str, windowViewState } from './schemas'
+import { v } from './validate'
+
+export interface WindowDeps {
+  /** The view state main holds for `windowId`, or a fresh one for an unknown window. */
+  loadViewState: (windowId: number | null) => WindowViewState
+  saveViewState: (window: BrowserWindow, viewState: WindowViewState) => void
+  openWindow: (viewState: WindowViewState | null) => void
+  getConfig: () => AppConfig
+  /** Throws unless `folder` is a known local project/workspace directory. */
+  assertAllowedDirectory: (folder: string) => Promise<string>
+}
+
+/** Only web URLs leave the app through the OS browser. */
+export function parseExternalUrl(url: string): URL {
+  let parsed: URL
+  try {
+    parsed = new URL(url)
+  } catch {
+    throw new Error('Invalid URL')
+  }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    throw new Error('Only http and https URLs are allowed')
+  }
+  return parsed
+}
+
+/** Window state, native dialogs, clipboard, theme, external links and IDE launching. */
+export function registerWindowHandlers(ipc: IpcRegistrar, deps: WindowDeps): void {
+  ipc.handle('load-window-state', [], (event) => {
+    const window = BrowserWindow.fromWebContents(event.sender)
+    return deps.loadViewState(window ? window.id : null)
+  })
+
+  ipc.handle('save-window-state', [windowViewState], (event, viewState) => {
+    const window = BrowserWindow.fromWebContents(event.sender)
+    if (!window) return undefined
+    deps.saveViewState(window, viewState)
+    return undefined
+  })
+
+  ipc.handle('open-window', [v.optional(windowViewState)], (_event, viewState) => {
+    deps.openWindow(viewState ?? null)
+  })
+
+  ipc.handle('pick-directory', [], async (event) => {
+    // `showOpenDialog` is overloaded on arity, not on an optional owner, so the
+    // ownerless case has to be a separate call rather than passing undefined.
+    const owner = BrowserWindow.fromWebContents(event.sender)
+    const options: Electron.OpenDialogOptions = { properties: ['openDirectory'] }
+    const result = owner
+      ? await dialog.showOpenDialog(owner, options)
+      : await dialog.showOpenDialog(options)
+    return result.canceled ? null : result.filePaths[0]
+  })
+
+  ipc.handle('pick-file', [v.optional(v.string({ max: 500 }))], async (event, title) => {
+    const owner = BrowserWindow.fromWebContents(event.sender)
+    const options: Electron.OpenDialogOptions = {
+      title: title || 'Select file',
+      properties: ['openFile', 'showHiddenFiles']
+    }
+    const result = owner
+      ? await dialog.showOpenDialog(owner, options)
+      : await dialog.showOpenDialog(options)
+    return result.canceled ? null : result.filePaths[0]
+  })
+
+  ipc.handle('get-native-theme', [], () => nativeTheme.shouldUseDarkColors ? 'dark' : 'light')
+  ipc.handle('clipboard-write-text', [str], (_event, text) => {
+    clipboard.writeText(text)
+    return undefined
+  })
+  ipc.handle('clipboard-read-text', [], () => clipboard.readText())
+  ipc.handle('open-external', [str], async (_event, url) => {
+    await shell.openExternal(parseExternalUrl(url).toString())
+  })
+
+  ipc.handle('app:open-devtools', [], (event) => {
+    BrowserWindow.fromWebContents(event.sender)?.webContents.openDevTools()
+  })
+  ipc.handle('app:quit', [], () => app.quit())
+
+  ipc.handle('external-ide-detect', [], () => detectExternalEditors())
+  ipc.handle('open-in-ide', [v.string({ nonEmpty: true }), v.string({ nonEmpty: true })], async (_event, editorId, folder) => {
+    const editors = deps.getConfig().externalEditors?.editors ?? []
+    const editor = editors.find((item) => item.id === editorId)
+    if (!editor) throw new Error('That editor is not in Settings.')
+    await deps.assertAllowedDirectory(folder)
+    await openFolderInEditor(editor, folder)
+    return undefined
+  })
+}
