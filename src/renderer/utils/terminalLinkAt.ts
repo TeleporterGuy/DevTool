@@ -2,7 +2,7 @@ import type { Terminal } from '@xterm/xterm'
 
 /** Same pattern as @xterm/addon-web-links default. */
 export const WEB_LINK_REGEX =
-  /(https?|HTTPS?):[/]{2}[^\s"'!*(){}|\\\^<>`]*[^\s"':,.!?{}|\\\^~\[\]`()<>]/
+  /(https?|HTTPS?):[/]{2}[^\s"'!*(){}|\\^<>`]*[^\s"':,.!?{}|\\^~[\]`()<>]/
 
 export function findLinkInLine(line: string, col: number): string | null {
   const flags = WEB_LINK_REGEX.flags.includes('g') ? WEB_LINK_REGEX.flags : `${WEB_LINK_REGEX.flags}g`

@@ -99,7 +99,7 @@ export class WorkspaceManager {
 
       // Check if branch is merged. Same rule: a renamed or deleted base branch makes
       // `git branch --merged` fail, and that must never read as "merged".
-      let isUnmerged = false
+      let isUnmerged: boolean
       try {
         const { stdout } = await execFileAsync('git', ['-C', repoRoot, 'branch', '--merged', opts.baseBranch], { timeout: 5000 })
         const mergedBranches = stdout.split('\n').map(b => b.trim().replace(/^[*+] /, ''))

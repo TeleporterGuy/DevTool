@@ -9,10 +9,12 @@ import {
 
 describe('bucketByDay', () => {
   it('counts commits per local YYYY-MM-DD', () => {
+    // No offset: ISO date-times without one parse as local time, so the expected
+    // buckets hold in any TZ (CI runs in UTC).
     const isos = [
-      '2026-05-08T10:00:00+02:00',
-      '2026-05-08T22:30:00+02:00',
-      '2026-05-09T01:00:00+02:00'
+      '2026-05-08T10:00:00',
+      '2026-05-08T22:30:00',
+      '2026-05-09T01:00:00'
     ]
     const m = bucketByDay(isos)
     expect(m.get('2026-05-08')).toBe(2)

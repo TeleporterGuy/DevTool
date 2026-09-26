@@ -1,5 +1,4 @@
 import { describe, it, expect } from 'vitest'
-import path from 'path'
 import { buildReadRemoteFileArgs } from '../src/main/ssh-connection-manager'
 
 const SOCKET_DIR = '/tmp/devtool-sockets'

@@ -1,0 +1,90 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-latest, windows-latest]
+    env:
+      # workspace-manager tests `git commit` in temp repos; runners have no git identity.
+      GIT_AUTHOR_NAME: ci
+      GIT_AUTHOR_EMAIL: ci@example.invalid
+      GIT_COMMITTER_NAME: ci
+      GIT_COMMITTER_EMAIL: ci@example.invalid
+    steps:
+      - uses: actions/checkout@v4
+
+      # Node 24 LTS. Not 26: extract-zip@2/yauzl@2 in Electron's installer can
+      # silently half-unpack there (see CLAUDE.md, "Electron binary install").
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Cache Electron download
+        uses: actions/cache@v4
+        with:
+          # @electron/get default cache dirs (macOS, Linux, Windows).
+          path: |
+            ~/Library/Caches/electron
+            ~/.cache/electron
+            ~/AppData/Local/electron/Cache
+          key: electron-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('package-lock.json') }}
+          restore-keys: electron-${{ runner.os }}-${{ runner.arch }}-
+
+      # postinstall runs @electron/rebuild, which compiles node-pty from source.
+      # Its binding.gyp requests SpectreMitigation on Windows (MSB8040 without the
+      # Spectre-mitigated MSVC libs). Add the component only if the image lacks it.
+      - name: Ensure MSVC Spectre-mitigated libs (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $component = 'Microsoft.VisualStudio.Component.VC.Runtimes.x86.x64.Spectre'
+          $installPath = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          if (-not $installPath) { throw 'No Visual Studio install with the C++ toolset found' }
+          $has = & $vswhere -latest -products * -requires $component -property installationPath
+          if ($has) {
+            Write-Host "Spectre libs already present in $installPath"
+          } else {
+            Write-Host "Adding $component to $installPath"
+            $installer = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vs_installer.exe"
+            $p = Start-Process -FilePath $installer -Wait -PassThru -ArgumentList @(
+              'modify', '--installPath', "`"$installPath`"", '--add', $component,
+              '--quiet', '--norestart', '--nocache'
+            )
+            if ($p.ExitCode -ne 0 -and $p.ExitCode -ne 3010) { throw "vs_installer exited $($p.ExitCode)" }
+          }
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Lint
+        if: runner.os == 'Linux'
+        run: npm run lint
+
+      - name: Test
+        run: npm test
+
+      - name: Build
+        if: runner.os == 'Linux'
+        run: npm run build

@@ -117,7 +117,7 @@ Starts the app in development mode with hot reload. On Windows this still needs 
 ### Build
 
 ```bash
-npm run build          # Production JS/CSS bundle only
+npm run build          # Typecheck, then production JS/CSS bundle
 npm run build:win      # Portable Windows folder (dist/win-unpacked)
 npm run build:mac      # Package macOS app
 npm run build:linux    # Package Linux app
@@ -136,7 +136,13 @@ Builds and installs the app system-wide. Supports macOS (arm64) and Linux (x86_6
 ```bash
 npm test               # Run tests
 npm run test:watch     # Run tests in watch mode
+npm run typecheck      # tsc over src/ and tests/ (tsconfig.typecheck.json)
+npm run lint           # ESLint (eslint.config.mjs); warnings are allowed, errors fail
 ```
+
+`npm install` sets `git config core.hooksPath .githooks`, so commits run `.githooks/pre-commit`: ESLint on the staged JS/TS files plus a full typecheck. Skip it once with `git commit --no-verify`.
+
+CI (`.github/workflows/ci.yml`) runs typecheck and tests on macOS, Linux and Windows with Node 24, plus lint and `npm run build` on Linux. The Windows job adds the MSVC Spectre-mitigated libs to the runner's Visual Studio if they are missing, since `postinstall` compiles `node-pty`.
 
 ## License
 

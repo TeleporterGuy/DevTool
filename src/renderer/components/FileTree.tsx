@@ -409,6 +409,9 @@ const FileTree = React.forwardRef<FileTreeHandle, Props>(function FileTree({
         setDirectoryErrors((prev) => ({ ...prev, [relativePath]: message }))
         return undefined
       } finally {
+        // Intentional: a stale load (directory version changed) resolves to undefined even
+        // when the try block returned entries, matching the other stale-load early returns.
+        // eslint-disable-next-line no-unsafe-finally
         if (directoryVersion !== directoryVersionRef.current) return
         setLoadingDirs((prev) => {
           const next = new Set(prev)

@@ -175,7 +175,7 @@ describe('nextAiStatus', () => {
   describe('sequences', () => {
     it('a hidden Claude tab that merely prints never goes amber', () => {
       const ctx = hookTab({ visible: false })
-      let status = nextAiStatus(null, 'pty-data', ctx) as 'working'
+      const status = nextAiStatus(null, 'pty-data', ctx) as 'working'
       expect(status).toBe('working')
       expect(nextAiStatus(status, 'pty-quiet', ctx)).toBe('keep')
       expect(nextAiStatus(status, 'stale-working', ctx)).toBeNull()

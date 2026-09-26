@@ -63,7 +63,7 @@ describe('window view state', () => {
   })
 
   it('reconciles stale task state against shared projects', () => {
-    const state: WindowViewState = {
+    const state = {
       selectedProjectId: 'project-1',
       selectedTaskId: 'task-1',
       selectedTagIds: [],
@@ -80,7 +80,7 @@ describe('window view state', () => {
           splitRatio: 0.5
         }
       }
-    }
+    } as unknown as WindowViewState
 
     const next = reconcileWindowViewState(state, projects)
 
@@ -172,7 +172,7 @@ describe('window view state', () => {
         fileBrowserOpen: false,
         fileBrowserWidth: 250,
         fileBrowserActiveTab: 'files'
-      },
+      } as unknown as WindowViewState,
       projects
     )
 
