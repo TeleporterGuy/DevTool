@@ -57,7 +57,7 @@ import NotebookCellView from './NotebookCell'
 import { scheduleResumeAfterNotebookReorder } from './notebookCellEditor'
 import ThemedSelect from './ThemedSelect'
 import { formatShortcutForApp } from '../../shared/shortcut-label'
-import { agentLinkPath, formatAgentLink, formatAgentSnippet, sliceLines } from '../../shared/agent-link'
+import { agentLinkPath, formatAgentLink } from '../../shared/agent-link'
 import { showAgentLinkNotice, useLinkToAgent } from '../agentLink/linkToAgent'
 import { paletteEvents } from '../palette/paletteEvents'
 
@@ -291,10 +291,9 @@ export default function NotebookTab({
     return () => window.removeEventListener('keydown', onKey)
   }, [visible, saveContent])
 
-  // Ctrl+L sends the cell's source (or the selected lines of it) with a header;
-  // Ctrl+Shift+L sends `@path` for the notebook. Unsaved changes are saved first so
-  // what the agent may read on disk matches. A cell is named by its 1-based position
-  // ("cell 2 of 9"), plus its id only when the file on disk stores that id.
+  // Ctrl+L links the cell (or the selection inside it), Ctrl+Shift+L the notebook.
+  // Unsaved changes are saved first — the agent reads the file. A cell is named by
+  // its position, plus its id only when the file on disk stores that id.
   const linkToAgent = useLinkToAgent(projectId, taskId)
   const linkNotebook = useCallback((
     kind: 'selection' | 'file',
@@ -316,26 +315,13 @@ export default function NotebookTab({
         linkToAgent(formatAgentLink({ path }))
         return
       }
-      const cells = docRef.current?.cells ?? []
-      const cell = cells[index]
       const idOnDisk = (diskTextRef.current ?? '').includes(`"${cellId}"`)
-      const target = {
+      linkToAgent(formatAgentLink({
         path,
         cellNumber: index + 1,
-        cellCount: cells.length,
         ...(idOnDisk && cellId ? { cellId } : {}),
         ...(lines ?? {})
-      }
-      const language = cell.cellType === 'code'
-        ? String((docRef.current?.metadata as { language_info?: { name?: unknown } } | undefined)?.language_info?.name ?? 'python')
-        : cell.cellType === 'markdown' ? 'markdown' : ''
-      const snippet = formatAgentSnippet({
-        ...target,
-        text: lines ? sliceLines(cell.source, lines.startLine, lines.endLine) : cell.source,
-        language
-      })
-      if (snippet === null) showAgentLinkNotice('Cell too large to attach, so only a reference was sent.')
-      linkToAgent(snippet ?? formatAgentLink(target))
+      }))
     })()
   }, [filePath, linkToAgent, projectDir, writeBuffer])
 

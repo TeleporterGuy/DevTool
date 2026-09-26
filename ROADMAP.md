@@ -318,9 +318,9 @@ Cursor-style Ctrl+L (selection) / Ctrl+Shift+L (whole file), pulled out of the p
 
 Work items:
 
-1. **What is sent.** Ctrl+L sends the **selected lines themselves** (Cursor-style): a header naming them, then a fenced block — `src/foo.ts (lines 10-24):` or `analysis.ipynb (cell 4 of 9, id 3c8d9b5c, lines 9-21):` — ending on a new line for the question. Terminal agents fold a multi-line paste into a "[Pasted text]" chip. Snippets over 20k chars fall back to a pointer (`src/foo.ts (lines 10-24)`). Ctrl+Shift+L sends `@src/foo.ts` (Claude Code expands `@path` into the whole file; Codex/Pi read it as a path). History: a pure `@path (lines …)` pointer made Claude attach the whole file; a pointer without `@` attached nothing — testing showed the content is what is wanted. Cells are named by 1-based position of the total, plus the nbformat `id` only when the file stores it; notebooks without stored ids (nbformat < 4.5) get stable stand-in ids (`cell-N`) instead of random ones that changed on every re-read. Unsaved buffers are saved before linking. Helpers: `src/shared/agent-link.ts`.
+1. **Link format.** Only whole-file links are `@` mentions: `@src/foo.ts`. Selections and cells are a bare path + range — `src/foo.ts (lines 10-24)`, `analysis.ipynb (cell 4, id 3c8d9b5c, lines 9-21)` — because Claude Code expands `@path` into the full file (no documented range form), which attached whole files/notebooks for a 3-line selection in testing. Codex and Pi read both as plain text. Cells are named by 1-based position, plus the nbformat `id` only when the file stores it; notebooks without stored ids (nbformat < 4.5) get stable stand-in ids (`cell-N`) instead of random ones that changed on every re-read. Paths with spaces are quoted. Unsaved buffers are saved before linking — the agent reads disk, not Monaco. Helpers: `src/shared/agent-link.ts`.
 2. **Target.** The task's most recently focused agent tab (Pi / Claude / Codex PTY, or Claude chat). No agent tab open → a small toast, not a silent no-op. Optional later: a picker when several agent tabs are open.
-3. **Insert, do not submit.** PTY: paste as a bracketed paste; a multi-line snippet waits until the TUI has turned bracketed paste on (a TUI still starting would see each newline as Enter). Chat: append to the composer draft. Focus moves to the target so the user can keep typing.
+3. **Insert, do not submit.** PTY: write the link text to the PTY with no trailing newline (bracketed paste so TUIs treat it as input). Chat: append to the composer draft. Focus moves to the target so the user can keep typing.
 4. **Shortcuts.** Active only in editor and notebook tabs (terminal Ctrl+L still clears the screen).
    - **Ctrl+L** (macOS Cmd+L) — link the **selection**. No selection → the current line (editor) or the whole focused cell (notebook).
    - **Ctrl+Shift+L** (macOS Cmd+Shift+L) — link the **whole file** (`@src/foo.ts`, `@analysis.ipynb`).
@@ -329,7 +329,7 @@ Work items:
    - These override two Monaco defaults inside DevTool: Ctrl+L (expand line selection) and Ctrl+Shift+L (select all occurrences; Ctrl+F2 still covers most of that). Same trade Cursor makes.
    - Also a context-menu entry in the editor and on the notebook cell header, and file-tree right-click → link the whole file. List both shortcuts in the Phase 1.4 shortcut map with Windows labels.
 
-Stay out of: very large pastes (over the snippet cap a pointer is sent), a DevTool-side resolver/index for links, remote SSH notebooks (still local-only), inline edit (Cursor's Ctrl+K edit-in-place is not this — Ctrl+K stays the palette), LSP.
+Stay out of: pasting full selection text into the PTY, a DevTool-side resolver/index for links, remote SSH notebooks (still local-only), inline edit (Cursor's Ctrl+K edit-in-place is not this — Ctrl+K stays the palette), LSP.
 
 **Verify:** unit tests for link formatting (paths with spaces, Windows paths, notebook cell ids, single-line vs range) and target selection. Manual on Windows: Pi in Git Bash receives the link without executing; Claude chat composer receives it; the agent reads the right lines/cell.
 

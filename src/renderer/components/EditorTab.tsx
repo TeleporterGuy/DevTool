@@ -9,7 +9,7 @@ import { buildMonacoEditorOptions, getLanguageFromPath } from './monacoOptions'
 import { defineMonacoThemes, monacoThemeFor } from './monacoTheme'
 import MarkdownPreview from './MarkdownPreview'
 import { formatShortcutForApp } from '../../shared/shortcut-label'
-import { agentLinkPath, formatAgentLink, formatAgentSnippet, selectionLines, sliceLines } from '../../shared/agent-link'
+import { agentLinkPath, formatAgentLink, selectionLines } from '../../shared/agent-link'
 import { showAgentLinkNotice, useLinkToAgent } from '../agentLink/linkToAgent'
 import { paletteEvents } from '../palette/paletteEvents'
 
@@ -215,9 +215,8 @@ export default function EditorTab({ tabId, visible, filePath, projectDir, projec
     return () => dirtyBuffers.unregisterBuffer(tabId, token)
   }, [dirtyBuffers, tabId, filePath, dirty])
 
-  // Ctrl+L sends the selected lines (or the cursor line) with a header naming them;
-  // Ctrl+Shift+L sends `@path` for the whole file. Unsaved edits are saved first so
-  // the line numbers match what the agent finds on disk.
+  // Ctrl+L / Ctrl+Shift+L: save if needed (the agent reads disk), then send a
+  // compact link to the selection / file to the task's agent tab.
   const linkToAgent = useLinkToAgent(projectId, taskId)
   const linkRef = useRef<(kind: 'selection' | 'file') => void>(() => {})
   linkRef.current = (kind) => {
@@ -233,19 +232,7 @@ export default function EditorTab({ tabId, visible, filePath, projectDir, projec
       }
       const path = agentLinkPath(projectDir, filePath)
       const sel = kind === 'selection' ? ed?.getSelection() : null
-      if (!ed || !sel) {
-        linkToAgent(formatAgentLink({ path }))
-        return
-      }
-      const lines = selectionLines(sel)
-      const snippet = formatAgentSnippet({
-        path,
-        ...lines,
-        text: sliceLines(ed.getValue(), lines.startLine, lines.endLine),
-        language: getLanguageFromPath(filePath) === 'plaintext' ? '' : getLanguageFromPath(filePath)
-      })
-      if (snippet === null) showAgentLinkNotice('Selection too large to attach, so only a reference was sent.')
-      linkToAgent(snippet ?? formatAgentLink({ path, ...lines }))
+      linkToAgent(formatAgentLink(sel ? { path, ...selectionLines(sel) } : { path }))
     })()
   }
 
