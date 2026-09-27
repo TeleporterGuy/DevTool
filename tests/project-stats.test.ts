@@ -9,12 +9,14 @@ import {
 
 describe('bucketByDay', () => {
   it('counts commits per local YYYY-MM-DD', () => {
-    // Local Date constructors so the calendar day does not depend on the runner TZ
-    // (`+02:00` literals all land on 2026-05-08 under UTC).
-    const morning = new Date(2026, 4, 8, 10, 0, 0)
-    const evening = new Date(2026, 4, 8, 22, 30, 0)
-    const nextDay = new Date(2026, 4, 9, 1, 0, 0)
-    const m = bucketByDay([morning.toISOString(), evening.toISOString(), nextDay.toISOString()])
+    // No offset: ISO date-times without one parse as local time, so the expected
+    // buckets hold in any TZ (CI runs in UTC).
+    const isos = [
+      '2026-05-08T10:00:00',
+      '2026-05-08T22:30:00',
+      '2026-05-09T01:00:00'
+    ]
+    const m = bucketByDay(isos)
     expect(m.get('2026-05-08')).toBe(2)
     expect(m.get('2026-05-09')).toBe(1)
   })

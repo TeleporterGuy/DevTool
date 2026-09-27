@@ -1,4 +1,4 @@
-import React, { memo, useEffect, useMemo, useState } from 'react'
+import React, { createContext, memo, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import { Check, ChevronRight, CircleSlash, X } from 'lucide-react'
 import type { ChatImage, ChatItem, ChatToolItem } from '../../../shared/claude-chat'
 import { buildTimeline, summarizeGroup, type TimelineRow } from './timelineRows'
@@ -15,10 +15,41 @@ interface Props {
   turnStartedAt?: number
   /** Links in messages open as DevTool browser tabs. */
   onOpenLink: (url: string) => void
+  /** Tool calls whose task (a backgrounded agent or shell) still runs past its result. */
+  taskTools?: ReadonlySet<string>
+  /** Scroll to this tool call and flash it; a new `seq` asks again. */
+  focus?: TimelineFocus | null
 }
 
-export default function Timeline({ items, busy, compacting, waiting, turnStartedAt, onOpenLink }: Props): React.ReactElement {
+export interface TimelineFocus {
+  toolId: string
+  seq: number
+}
+
+interface TimelineContextValue {
+  taskTools: ReadonlySet<string>
+  focus: TimelineFocus | null
+  /** True the first time a row claims a focus request; rows remounting later don't re-scroll. */
+  claim: (focus: TimelineFocus) => boolean
+}
+
+const NO_TOOLS: ReadonlySet<string> = new Set()
+const TimelineContext = createContext<TimelineContextValue>({ taskTools: NO_TOOLS, focus: null, claim: () => false })
+
+const FLASH_MS = 1400
+
+export default function Timeline({ items, busy, compacting, waiting, turnStartedAt, onOpenLink, taskTools = NO_TOOLS, focus = null }: Props): React.ReactElement {
   const rows = useMemo(() => buildTimeline(items, busy), [items, busy])
+  const claimed = useRef(-1)
+  const context = useMemo<TimelineContextValue>(() => ({
+    taskTools,
+    focus,
+    claim: (request) => {
+      if (claimed.current >= request.seq) return false
+      claimed.current = request.seq
+      return true
+    }
+  }), [taskTools, focus])
   const activeTool = useMemo(() => {
     for (let i = items.length - 1; i >= 0; i--) {
       const item = items[i]
@@ -29,19 +60,21 @@ export default function Timeline({ items, busy, compacting, waiting, turnStarted
   }, [items])
 
   return (
-    <div
-      className="flex flex-col gap-1.5"
-      onClick={(e) => {
-        const anchor = (e.target as HTMLElement).closest('a')
-        const href = anchor?.getAttribute('href')
-        if (!anchor || !href) return
-        e.preventDefault()
-        if (/^https?:\/\//i.test(href)) onOpenLink(href)
-      }}
-    >
-      {rows.map((row) => <Row key={row.key} row={row} />)}
-      {busy && <WorkingLine compacting={compacting} waiting={waiting} since={turnStartedAt} tool={activeTool} />}
-    </div>
+    <TimelineContext.Provider value={context}>
+      <div
+        className="flex flex-col gap-1.5"
+        onClick={(e) => {
+          const anchor = (e.target as HTMLElement).closest('a')
+          const href = anchor?.getAttribute('href')
+          if (!anchor || !href) return
+          e.preventDefault()
+          if (/^https?:\/\//i.test(href)) onOpenLink(href)
+        }}
+      >
+        {rows.map((row) => <Row key={row.key} row={row} />)}
+        {busy && <WorkingLine compacting={compacting} waiting={waiting} since={turnStartedAt} tool={activeTool} />}
+      </div>
+    </TimelineContext.Provider>
   )
 }
 
@@ -149,18 +182,52 @@ function toolMeta(tool: ChatToolItem): string | undefined {
   return undefined
 }
 
+/**
+ * A backgrounded agent or shell got its "running in the background" result
+ * straight away; while its task runs, the row says so instead of showing done.
+ */
+function inBackground(tool: ChatToolItem, taskTools: ReadonlySet<string>): boolean {
+  return tool.status === 'done' && taskTools.has(tool.id)
+}
+
+/** Scroll a row into view and flash it when the timeline is asked to focus its tool call. */
+function useFocusFlash(toolId: string): { ref: React.RefObject<HTMLDivElement | null>; flash: boolean } {
+  const { focus, claim } = useContext(TimelineContext)
+  const ref = useRef<HTMLDivElement>(null)
+  const [flash, setFlash] = useState(false)
+  useEffect(() => {
+    if (!focus || focus.toolId !== toolId || !claim(focus)) return
+    ref.current?.scrollIntoView?.({ block: 'center', behavior: 'smooth' })
+    setFlash(true)
+    const timer = window.setTimeout(() => setFlash(false), FLASH_MS)
+    return () => window.clearTimeout(timer)
+  }, [focus, toolId, claim])
+  return { ref, flash }
+}
+
 /** `inGroup`: the group row already shows the images. */
 const ToolRow = memo(function ToolRow({ tool, inGroup }: { tool: ChatToolItem; inGroup?: boolean }): React.ReactElement {
   const isTodo = tool.name === 'TodoWrite'
   const [open, setOpen] = useState(false)
+  const { taskTools } = useContext(TimelineContext)
+  const { ref, flash } = useFocusFlash(tool.id)
+  const background = inBackground(tool, taskTools)
   const meta = useMemo(() => toolMeta(tool), [tool])
   if (isTodo) return <TodoList tool={tool} />
   return (
-    <div className="text-sm">
+    <div
+      ref={ref}
+      data-tool-id={tool.id}
+      className={`text-sm rounded-sm transition-colors duration-(--motion-med) ${flash ? 'bg-sel' : ''}`}
+    >
       <button type="button" className="chat-row-btn w-full" onClick={() => setOpen(!open)}>
-        <StatusIcon status={tool.status} />
+        <StatusIcon status={background ? 'running' : tool.status} />
         <span className={`truncate ${tool.status === 'denied' ? 'text-text-subtle line-through decoration-text-subtle/50' : 'text-text-muted'}`}>{tool.label}</span>
-        {meta && <span className="ml-auto pl-3 shrink-0 text-xs text-text-subtle tabular-nums">{meta}</span>}
+        {(meta || background) && (
+          <span className="ml-auto pl-3 shrink-0 text-xs text-text-subtle tabular-nums">
+            {[background ? 'in background' : undefined, meta].filter(Boolean).join(' · ')}
+          </span>
+        )}
       </button>
       {open && <ToolDetail tool={tool} />}
       {!inGroup && tool.images && tool.images.length > 0 && <ToolImages images={tool.images} />}
@@ -199,7 +266,16 @@ function ToolImages({ images }: { images: ChatImage[] }): React.ReactElement {
 
 function ToolGroup({ tools }: { tools: ChatToolItem[] }): React.ReactElement {
   const [open, setOpen] = useState(false)
-  const running = tools.some((tool) => tool.status === 'running' || tool.status === 'pending')
+  const { taskTools, focus } = useContext(TimelineContext)
+  const openedFor = useRef(-1)
+  // Jumping to a call folded in here opens the group (once per request); the row
+  // itself then scrolls and flashes.
+  useEffect(() => {
+    if (!focus || openedFor.current >= focus.seq || !tools.some((tool) => tool.id === focus.toolId)) return
+    openedFor.current = focus.seq
+    setOpen(true)
+  }, [focus, tools])
+  const running = tools.some((tool) => tool.status === 'running' || tool.status === 'pending' || inBackground(tool, taskTools))
   const failed = tools.some((tool) => tool.status === 'error')
   const images = useMemo(() => tools.flatMap((tool) => tool.images ?? []), [tools])
   return (

@@ -3,6 +3,18 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <!--
+    App CSP (main windows only; <webview> guests are separate documents and are not affected).
+    Monaco is bundled locally (src/renderer/monacoSetup.ts) with Vite-built workers, so scripts,
+    styles, fonts and workers are all 'self'.
+    connect-src cdn.jsdelivr.net: dashboardIcons.ts fetches the dashboard-icons metadata.json (data only).
+    img-src https:/http:: project icons (jsDelivr or any pasted icon URL) and remote images in
+    markdown/chat previews.
+    'wasm-unsafe-eval': @xterm/addon-image compiles its sixel decoder to WebAssembly.
+    In `electron-vite dev` the devtool-dev-csp plugin (electron.vite.config.ts) adds the inline
+    React refresh preamble and the HMR websocket.
+  -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data: blob: https: http:; media-src 'self' data: blob:; connect-src 'self' https://cdn.jsdelivr.net; worker-src 'self'; frame-src *; object-src 'none'; base-uri 'self'; form-action 'self'" />
   <title>DevTool</title>
 </head>
 <body>

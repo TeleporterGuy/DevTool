@@ -27,7 +27,7 @@ import type { CondaListResult } from '../shared/conda'
 import type { NotebookKernelCondaOverride, NotebookKernelEvent } from '../shared/notebook'
 import type { AgentActivity } from '../shared/agent-activity'
 import type { AiStatusEvent } from '../shared/ai-status'
-import type { ChatEvent, ChatImage, ChatPromptResponse, ChatSnapshot } from '../shared/claude-chat'
+import type { ChatEvent, ChatImage, ChatPromptResponse, ChatSideAnswer, ChatSnapshot } from '../shared/claude-chat'
 
 const api = {
   // Projects
@@ -199,7 +199,12 @@ const api = {
   chatDetach: (tabId: string): void => ipcRenderer.send('chat-detach', tabId),
   chatSend: (tabId: string, text: string, images?: ChatImage[]): Promise<void> =>
     ipcRenderer.invoke('chat-send', tabId, text, images),
+  chatSideQuestion: (tabId: string, question: string): Promise<ChatSideAnswer> =>
+    ipcRenderer.invoke('chat-side-question', tabId, question),
   chatInterrupt: (tabId: string): Promise<void> => ipcRenderer.invoke('chat-interrupt', tabId),
+  chatStopTask: (tabId: string, taskId: string): Promise<boolean> => ipcRenderer.invoke('chat-stop-task', tabId, taskId),
+  chatBackgroundTask: (tabId: string, toolUseId: string): Promise<boolean> =>
+    ipcRenderer.invoke('chat-background-task', tabId, toolUseId),
   chatRespond: (tabId: string, promptId: string, response: ChatPromptResponse): Promise<boolean> =>
     ipcRenderer.invoke('chat-respond', tabId, promptId, response),
   chatSetModel: (tabId: string, model?: string): Promise<void> => ipcRenderer.invoke('chat-set-model', tabId, model),

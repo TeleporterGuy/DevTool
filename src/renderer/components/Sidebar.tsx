@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react'
 import { useApp } from '../context/AppContext'
-import { useAllTabStatuses, useAllTabStatusSince, useTabStatusStore, type TabStatusValue } from '../context/TabStatusContext'
-import { isAgentTabType, isEphemeralProject, isHomeTask, isRemoteProject, isShellCommandProject, isWorkspaceTask, pinnedItemKey, projectMatchesTagFilter } from '../../shared/types'
+import { useAllTabStatuses, useAllTabStatusSince, useTabStatusStore } from '../context/TabStatusContext'
+import { isEphemeralProject, isHomeTask, isRemoteProject, isShellCommandProject, isWorkspaceTask, pinnedItemKey, projectMatchesTagFilter } from '../../shared/types'
 import type { Task, Project, PinnedItem, WorkspaceDeleteResult } from '../../shared/types'
 import AddRemoteProject from './AddRemoteProject'
 import CreateWorkspaceModal from './CreateWorkspaceModal'
@@ -13,154 +13,28 @@ import ProjectSwitcher from './ProjectSwitcher'
 import ActivityPanel from './ActivityPanel'
 import InboxPanel from './InboxPanel'
 import NewTaskModal from './NewTaskModal'
-import { getReorderInsertIndex, getTaskDropIndex } from './sidebarDrag'
 import { buildRecencyStyle, computeTaskRecencyOpacity, sortTasksByRecency } from './taskRecency'
-import { isSettled, isSnoozed, isUnread, snoozePresets, taskActivity } from './inbox'
+import { isSettled, isSnoozed, isUnread, taskActivity } from './inbox'
 import { useAllAgentActivity } from '../agentActivity'
 import { newTaskInitialTabs } from './newTaskTabs'
 import { useResizeHandle } from '../hooks/useResizeHandle'
-import { useMenuPosition } from '../hooks/useMenuPosition'
 import { ChevronRight, Filter, Plus, Search, Settings as SettingsIcon, Plug, SquarePen, Terminal as TerminalIcon, X, Cog } from 'lucide-react'
 import { RowActions, RowAction, menuCls, menuItemCls } from './ui'
 import { paletteEvents } from '../palette/paletteEvents'
-import { dashboardIconUrl, fetchDashboardIconsMetadata, type DashboardIconsMetadata } from './dashboardIcons'
+import { fetchDashboardIconsMetadata, type DashboardIconsMetadata } from './dashboardIcons'
 import { formatShortcutForApp } from '../../shared/shortcut-label'
-
-type DragState = {
-  type: 'project' | 'task'
-  id: string
-  index: number
-  projectId?: string
-}
-
-type DropTarget =
-  | { type: 'between-projects'; index: number }
-  | { type: 'between-tasks'; projectId: string; index: number }
-  | null
-
-function getTaskStatus(task: Task, allStatuses: Record<string, TabStatusValue>): TabStatusValue {
-  const aiTabIds = [...task.tabs.left, ...task.tabs.right]
-    .filter((t) => isAgentTabType(t.type))
-    .map((t) => t.id)
-  if (aiTabIds.length === 0) return null
-  const statuses = aiTabIds.map((id) => allStatuses[id]).filter(Boolean)
-  if (statuses.includes('attention')) return 'attention'
-  if (statuses.includes('working')) return 'working'
-  if (statuses.includes('exited')) return 'exited'
-  return null
-}
-
-function getProjectStatus(tasks: Task[], allStatuses: Record<string, TabStatusValue>): TabStatusValue {
-  const statuses = tasks.map((t) => getTaskStatus(t, allStatuses)).filter(Boolean)
-  if (statuses.includes('attention')) return 'attention'
-  if (statuses.includes('working')) return 'working'
-  if (statuses.includes('exited')) return 'exited'
-  return null
-}
-
-/** Rows carry mx-1.5 (6px); project name starts 64px from the sidebar edge:
-    6 (mx) + 10 (px-2.5) + 12 (chevron) + 8 (gap) + 20 (icon) + 8 (gap).
-    Task rows indent to it with pl (inside mx), drop indicators with ml (no mx). */
-const TASK_ROW_PL = 'pl-[58px]'
-const TASK_ROW_ML = 'ml-[64px]'
-
-/** Icon buttons in the sidebar header strip (search / filter / add). */
-const headerIconCls = 'relative flex items-center bg-transparent border-0 text-text-muted cursor-pointer px-1.5 py-1 rounded-md hover:bg-surface-3 hover:text-text transition-colors duration-(--motion-fast)'
-
-function getProjectInitials(name: string): string {
-  const trimmed = name.trim()
-  if (!trimmed) return '?'
-  const words = trimmed.split(/[\s\-_/]+/).filter(Boolean)
-  if (words.length >= 2) {
-    const a = words[0]?.replace(/[^a-zA-Z0-9]/g, '')[0]
-    const b = words[1]?.replace(/[^a-zA-Z0-9]/g, '')[0]
-    if (a && b) return (a + b).toUpperCase()
-  }
-  const letters = (words[0] ?? trimmed).replace(/[^a-zA-Z0-9]/g, '')
-  if (!letters) return '?'
-  return letters.slice(0, 2).toUpperCase()
-}
-
-function ProjectIconSlot({
-  project,
-  theme,
-  metadata,
-}: {
-  project: Project
-  theme: 'dark' | 'light'
-  metadata: DashboardIconsMetadata | null
-}): React.ReactElement {
-  const [iconFailed, setIconFailed] = useState(false)
-  const iconUrl = project.icon && !iconFailed
-    ? dashboardIconUrl(project.icon, { theme, metadata: metadata ?? undefined })
-    : null
-
-  return (
-    <span className="w-5 shrink-0 flex items-center justify-center">
-      {iconUrl ? (
-        <img
-          src={iconUrl}
-          alt=""
-          className="w-3.5 h-3.5 object-contain"
-          onError={() => setIconFailed(true)}
-        />
-      ) : project.emoji ? (
-        <span className="text-base leading-none">{project.emoji}</span>
-      ) : (
-        <span
-          className="w-3.5 h-3.5 rounded-sm bg-surface-3 text-text-muted text-[8px] font-semibold leading-none flex items-center justify-center"
-          title={project.name}
-        >
-          {getProjectInitials(project.name)}
-        </span>
-      )}
-    </span>
-  )
-}
-
-/** One half of the Projects | Inbox segmented control in the sidebar header. */
-function SidebarTabButton({
-  label,
-  active,
-  badge,
-  onClick
-}: {
-  label: string
-  active: boolean
-  badge?: number
-  onClick: () => void
-}): React.ReactElement {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={[
-        'flex items-center gap-1 bg-transparent border-0 p-0 cursor-pointer',
-        'text-2xs font-bold uppercase tracking-[0.06em]',
-        'transition-colors duration-(--motion-fast)',
-        active ? 'text-text' : 'text-text-subtle hover:text-text-muted'
-      ].join(' ')}
-    >
-      <span>{label}</span>
-      {badge !== undefined && badge > 0 && (
-        <span className="px-1 rounded-full bg-status-attention text-2xs font-bold text-accent-ink leading-[1.4] tabular-nums">
-          {badge}
-        </span>
-      )}
-    </button>
-  )
-}
-
-function TaskStatusDot({ task, allStatuses }: { task: Task; allStatuses: Record<string, TabStatusValue> }): React.ReactElement | null {
-  const status = getTaskStatus(task, allStatuses)
-  if (!status) return null
-  const dotClass = status === 'working'
-    ? 'bg-status-working status-pulse'
-    : status === 'attention'
-    ? 'bg-status-attention shadow-[0_0_3px_var(--color-status-attention)]'
-    : 'bg-status-exited'
-  return <span className={`w-1.5 h-1.5 rounded-full shrink-0 group-hover:hidden ${dotClass}`} />
-}
+import {
+  TASK_ROW_ML,
+  TASK_ROW_PL,
+  ProjectIconSlot,
+  SidebarTabButton,
+  TaskStatusDot,
+  getProjectStatus,
+  headerIconCls,
+  type SidebarContextMenuState
+} from './sidebar/SidebarParts'
+import SidebarContextMenu from './sidebar/SidebarContextMenu'
+import { usePinnedDrag, useSidebarTreeDrag } from './sidebar/useSidebarDrag'
 
 export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { switcherRequested?: boolean; onSwitcherConsumed?: () => void }): React.ReactElement {
   const {
@@ -168,7 +42,7 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
     pinnedItems, togglePinnedItem, setPinnedOrder,
     selectedProjectId, selectedTaskId, selectedTagIds,
     switchToTask, selectProjectHome,
-    addProject, addRemoteProject, connectSsh, addShellCommandProject, addTag, removeProject, renameProject, updateProject,
+    addProject, addRemoteProject, addShellCommandProject, addTag, renameProject, updateProject,
     addTask, addWorkspaceTask, addTaskInDirectory, removeTask, renameTask,
     reorderProjects, reorderTasks, getProjectDir,
     config, updateConfig,
@@ -178,7 +52,7 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
     sidebarWidth, setSidebarWidth,
     sidebarProjectsCollapsed, toggleSidebarProjectsCollapsed,
     sidebarTab, setSidebarTab,
-    settleTask, unsettleTask, snoozeTask, unsnoozeTask, markTaskUnread, markTaskVisited
+    settleTask, unsettleTask
   } = useApp()
   const resizeHandle = useResizeHandle({ width: sidebarWidth, onWidthChange: setSidebarWidth, edge: 'right' })
   const allStatuses = useAllTabStatuses()
@@ -238,9 +112,7 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
     }
   }, [switchToTask, tabStatusStore])
 
-  const [contextMenu, setContextMenu] = useState<{
-    x: number; y: number; type: 'project' | 'task'; projectId: string; taskId?: string
-  } | null>(null)
+  const [contextMenu, setContextMenu] = useState<SidebarContextMenuState | null>(null)
   // The snooze presets replace the menu body rather than fly out sideways — a
   // nested flyout would run off the edge of a 240px sidebar.
   const [snoozeSubmenu, setSnoozeSubmenu] = useState(false)
@@ -248,10 +120,6 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
     setContextMenu(null)
     setSnoozeSubmenu(false)
   }, [])
-  // Keeps the popup inside the window — a right-click near the bottom of the
-  // sidebar would otherwise render items below the edge, unreachable.
-  const contextMenuPos = useMenuPosition<HTMLDivElement>(contextMenu)
-  const snoozeMenuPos = useMenuPosition<HTMLDivElement>(contextMenu)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [addMenuOpen, setAddMenuOpen] = useState(false)
   const [filterMenuOpen, setFilterMenuOpen] = useState(false)
@@ -263,10 +131,6 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editValue, setEditValue] = useState('')
   const editRef = useRef<HTMLInputElement>(null)
-  const [dragState, setDragState] = useState<DragState | null>(null)
-  const dragStateRef = useRef<DragState | null>(null)
-  const [dropTarget, setDropTarget] = useState<DropTarget>(null)
-  const dropTargetRef = useRef<DropTarget>(null)
   const [workspaceModalProjectId, setWorkspaceModalProjectId] = useState<string | null>(null)
   const [newTaskOpen, setNewTaskOpen] = useState(false)
   const [duplicateProjectId, setDuplicateProjectId] = useState<string | null>(null)
@@ -343,20 +207,12 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
   }, [editingId])
 
   useEffect(() => {
-    dragStateRef.current = dragState
-  }, [dragState])
-
-  useEffect(() => {
     let cancelled = false
     fetchDashboardIconsMetadata()
       .then((m) => { if (!cancelled) setIconMetadata(m) })
       .catch(() => { /* CDN unreachable — icons fall back to slug-as-given */ })
     return () => { cancelled = true }
   }, [])
-
-  useEffect(() => {
-    dropTargetRef.current = dropTarget
-  }, [dropTarget])
 
   useEffect(() => {
     const dismiss = () => { closeContextMenu(); setAddMenuOpen(false); setFilterMenuOpen(false) }
@@ -549,123 +405,10 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
     setContextMenu({ x: e.clientX, y: e.clientY, type: 'task', projectId, taskId })
   }, [])
 
-  const DRAG_THRESHOLD = 5
+  const { dragState, dropTarget, handleDragMouseDown } = useSidebarTreeDrag({
+    editingId, projectOrder, treeProjectIds, reorderTasks, reorderProjects
+  })
 
-  const handleDragMouseDown = useCallback((
-    e: React.MouseEvent,
-    type: 'project' | 'task',
-    id: string,
-    index: number,
-    projectId?: string
-  ) => {
-    if (e.button !== 0 || editingId) return
-    const startY = e.clientY
-    const startX = e.clientX
-    let dragging = false
-
-    const onMouseMove = (ev: MouseEvent) => {
-      if (!dragging) {
-        if (Math.abs(ev.clientY - startY) + Math.abs(ev.clientX - startX) < DRAG_THRESHOLD) return
-        dragging = true
-        const nextDragState: DragState = { type, id, index, projectId }
-        dragStateRef.current = nextDragState
-        setDragState(nextDragState)
-      }
-
-      const sidebarList = document.querySelector('.sidebar-list')
-      if (!sidebarList) return
-
-      if (type === 'task' && projectId) {
-        const items = sidebarList.querySelectorAll<HTMLElement>(
-          `.sidebar-project[data-project-id="${projectId}"] .task-item`
-        )
-        const bestIndex = getTaskDropIndex(
-          Array.from(items).map((item) => {
-            const rect = item.getBoundingClientRect()
-            return {
-              id: item.dataset.taskId ?? '',
-              index: Number(item.dataset.taskIndex ?? '-1'),
-              top: rect.top,
-              height: rect.height
-            }
-          }),
-          ev.clientY,
-          id
-        )
-        const nextDropTarget: DropTarget = { type: 'between-tasks', projectId, index: bestIndex }
-        dropTargetRef.current = nextDropTarget
-        setDropTarget(nextDropTarget)
-        return
-      }
-
-      const projectItems = sidebarList.querySelectorAll<HTMLElement>('[data-drag-type="project"]')
-      let newTarget: typeof dropTarget = null
-
-      for (let i = 0; i < projectItems.length; i++) {
-        const item = projectItems[i]
-        const rect = item.getBoundingClientRect()
-        if (ev.clientY < rect.top || ev.clientY > rect.bottom) continue
-
-        const itemId = item.dataset.dragId!
-        const listIdx = treeProjectIds.indexOf(itemId)
-        if (listIdx < 0) break
-        const midY = rect.top + rect.height / 2
-        const insertIdx = ev.clientY > midY ? listIdx + 1 : listIdx
-        newTarget = { type: 'between-projects', index: insertIdx }
-        break
-      }
-
-      if (!newTarget) {
-        newTarget = { type: 'between-projects', index: treeProjectIds.length }
-      }
-
-      dropTargetRef.current = newTarget
-      setDropTarget(newTarget)
-    }
-
-    const onMouseUp = () => {
-      document.removeEventListener('mousemove', onMouseMove)
-      document.removeEventListener('mouseup', onMouseUp)
-      document.body.style.cursor = ''
-
-      if (!dragging) return
-
-      const currentDragState = dragStateRef.current
-      const currentDropTarget = dropTargetRef.current
-
-      if (currentDragState && currentDropTarget) {
-        if (currentDragState.type === 'task' && currentDragState.projectId && currentDropTarget.type === 'between-tasks') {
-          const toIndex = getReorderInsertIndex(currentDragState.index, currentDropTarget.index)
-          if (toIndex !== null) {
-            reorderTasks(currentDragState.projectId, currentDragState.index, toIndex)
-          }
-        } else if (currentDragState.type === 'project' && currentDropTarget.type === 'between-projects') {
-          const fromIdx = projectOrder.indexOf(currentDragState.id)
-          const orderDropIndex = currentDropTarget.index >= treeProjectIds.length
-            ? projectOrder.length
-            : projectOrder.indexOf(treeProjectIds[currentDropTarget.index] ?? '')
-          if (orderDropIndex >= 0) {
-            const toIdx = getReorderInsertIndex(fromIdx, orderDropIndex)
-            if (toIdx !== null) {
-              reorderProjects(fromIdx, toIdx)
-            }
-          }
-        }
-      }
-
-      dragStateRef.current = null
-      dropTargetRef.current = null
-      setDragState(null)
-      setDropTarget(null)
-    }
-
-    document.addEventListener('mousemove', onMouseMove)
-    document.addEventListener('mouseup', onMouseUp)
-  }, [editingId, projectOrder, treeProjectIds, reorderTasks, reorderProjects])
-
-  const [pinDragIndex, setPinDragIndex] = useState<number | null>(null)
-  const [pinDropIndex, setPinDropIndex] = useState<number | null>(null)
-  const pinDropIndexRef = useRef<number | null>(null)
   const [expandedPinnedProjectIds, setExpandedPinnedProjectIds] = useState<string[]>([])
   const togglePinnedProjectExpansion = useCallback((projectId: string) => {
     setExpandedPinnedProjectIds(prev =>
@@ -673,61 +416,7 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
     )
   }, [])
 
-  const handlePinMouseDown = useCallback((e: React.MouseEvent, key: string, index: number) => {
-    if (e.button !== 0) return
-    const startY = e.clientY
-    const startX = e.clientX
-    let dragging = false
-
-    const onMouseMove = (ev: MouseEvent) => {
-      if (!dragging) {
-        if (Math.abs(ev.clientY - startY) + Math.abs(ev.clientX - startX) < DRAG_THRESHOLD) return
-        dragging = true
-        setPinDragIndex(index)
-      }
-      const list = document.querySelector('.sidebar-pinned-list')
-      if (!list) return
-      const items = list.querySelectorAll<HTMLElement>('[data-pin-key]')
-      const bestIndex = getTaskDropIndex(
-        Array.from(items).map((item) => {
-          const rect = item.getBoundingClientRect()
-          return {
-            id: item.dataset.pinKey ?? '',
-            index: Number(item.dataset.pinIndex ?? '-1'),
-            top: rect.top,
-            height: rect.height
-          }
-        }),
-        ev.clientY,
-        key
-      )
-      pinDropIndexRef.current = bestIndex
-      setPinDropIndex(bestIndex)
-    }
-
-    const onMouseUp = () => {
-      document.removeEventListener('mousemove', onMouseMove)
-      document.removeEventListener('mouseup', onMouseUp)
-      if (dragging) {
-        const dropIndex = pinDropIndexRef.current
-        if (dropIndex !== null) {
-          const toIndex = getReorderInsertIndex(index, dropIndex)
-          if (toIndex !== null) {
-            const next = resolvedPins.map(pin => pin.item)
-            const [moved] = next.splice(index, 1)
-            next.splice(toIndex, 0, moved)
-            setPinnedOrder(next)
-          }
-        }
-      }
-      pinDropIndexRef.current = null
-      setPinDragIndex(null)
-      setPinDropIndex(null)
-    }
-
-    document.addEventListener('mousemove', onMouseMove)
-    document.addEventListener('mouseup', onMouseUp)
-  }, [resolvedPins, setPinnedOrder])
+  const { pinDragIndex, pinDropIndex, handlePinMouseDown } = usePinnedDrag(resolvedPins, setPinnedOrder)
 
   const renderProject = (project: Project) => {
     const isExpanded = expandedProjects.has(project.id)
@@ -1201,155 +890,20 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
       )}
       </>)}
 
-      {contextMenu && snoozeSubmenu && contextMenu.type === 'task' && (
-        <div ref={snoozeMenuPos.ref} className={`fixed z-(--z-menu) ${menuCls}`} style={snoozeMenuPos.style} onMouseDown={(e) => e.stopPropagation()}>
-          {snoozePresets(Date.now()).map(preset => (
-            <button
-              key={preset.id}
-              className={`${menuItemCls} flex items-center gap-6 justify-between`}
-              onClick={() => {
-                snoozeTask(contextMenu.projectId, contextMenu.taskId!, {
-                  until: preset.until,
-                  untilAttention: preset.untilAttention
-                })
-                closeContextMenu()
-              }}
-            >
-              <span>{preset.label}</span>
-              {preset.hint && <span className="text-text-subtle text-xs tabular-nums">{preset.hint}</span>}
-            </button>
-          ))}
-        </div>
-      )}
-
-      {contextMenu && !snoozeSubmenu && (
-        <div ref={contextMenuPos.ref} className={`fixed z-(--z-menu) ${menuCls}`} style={contextMenuPos.style} onMouseDown={(e) => e.stopPropagation()}>
-          <>
-            {contextMenu.type === 'task' && (() => {
-              const task = findTask(contextMenu.projectId, contextMenu.taskId!)
-              if (!task) return null
-              const settled = isSettled(task)
-              const snoozed = isSnoozed(task, Date.now())
-              return (
-                <div className="border-b border-hair pb-1 mb-1">
-                  <button className={menuItemCls} onClick={() => {
-                    handleToggleSettled(contextMenu.projectId, contextMenu.taskId!)
-                    closeContextMenu()
-                  }}>{settled ? 'Unsettle' : 'Settle'}</button>
-                  {snoozed ? (
-                    <button className={menuItemCls} onClick={() => {
-                      unsnoozeTask(contextMenu.projectId, contextMenu.taskId!)
-                      closeContextMenu()
-                    }}>Wake now</button>
-                  ) : (
-                    <button
-                      className={`${menuItemCls} flex items-center gap-6 justify-between`}
-                      onClick={() => setSnoozeSubmenu(true)}
-                    >
-                      <span>Snooze</span>
-                      <ChevronRight size={11} className="text-text-subtle" />
-                    </button>
-                  )}
-                  {isUnread(task) ? (
-                    <button className={menuItemCls} onClick={() => {
-                      markTaskVisited(contextMenu.projectId, contextMenu.taskId!)
-                      closeContextMenu()
-                    }}>Mark read</button>
-                  ) : (
-                    <button className={menuItemCls} onClick={() => {
-                      markTaskUnread(contextMenu.projectId, contextMenu.taskId!)
-                      closeContextMenu()
-                    }}>Mark unread</button>
-                  )}
-                </div>
-              )
-            })()}
-            <button className={menuItemCls} onClick={() => {
-                const id = contextMenu.type === 'project' ? contextMenu.projectId : contextMenu.taskId!
-                const item = contextMenu.type === 'project'
-                  ? projects.find((p) => p.id === id)
-                  : projects.find((p) => p.id === contextMenu.projectId)?.tasks.find((t) => t.id === id)
-                beginEdit(id, item?.name ?? '', contextMenu.type === 'task' ? contextMenu.projectId : undefined)
-                setContextMenu(null)
-              }}>Rename</button>
-              {(() => {
-                const item: PinnedItem = contextMenu.type === 'project'
-                  ? { type: 'project', projectId: contextMenu.projectId }
-                  : { type: 'task', projectId: contextMenu.projectId, taskId: contextMenu.taskId! }
-                const pinned = isPinned(item)
-                const noun = contextMenu.type === 'project' ? 'project' : 'task'
-                return (
-                  <button className={menuItemCls} onClick={() => {
-                    togglePinnedItem(item)
-                    setContextMenu(null)
-                  }}>{pinned ? `Unpin ${noun}` : `Pin ${noun}`}</button>
-                )
-              })()}
-              {/* Promote the hidden project a "task in a directory" is filed under:
-                  clearing the flag is all it takes for the tree to show it. */}
-              {contextMenu.type === 'task' && (() => {
-                const project = projects.find(p => p.id === contextMenu.projectId)
-                if (!project || !isEphemeralProject(project)) return null
-                return (
-                  <button className={menuItemCls} onClick={() => {
-                    updateProject(project.id, { ephemeral: undefined })
-                    setProjectExpanded(project.id, true)
-                    setContextMenu(null)
-                  }}>Save as project</button>
-                )
-              })()}
-              {contextMenu.type === 'project' && (
-                <button className={menuItemCls} onClick={() => {
-                  setDuplicateProjectId(contextMenu.projectId)
-                  setContextMenu(null)
-                }}>Duplicate</button>
-              )}
-              {contextMenu.type === 'project' && (
-                <button className={menuItemCls} onClick={() => {
-                  setProjectSettingsId(contextMenu.projectId)
-                  setContextMenu(null)
-                }}>Settings</button>
-              )}
-              {contextMenu.type === 'project' && (() => {
-                const project = projects.find(p => p.id === contextMenu.projectId)
-                if (!project || !isRemoteProject(project)) return null
-                return (
-                  <button className={menuItemCls} onClick={() => {
-                    connectSsh(project.id, project.ssh!).catch(() => {})
-                    setContextMenu(null)
-                  }}>Reconnect SSH</button>
-                )
-              })()}
-              <button className={`${menuItemCls} text-danger`} onClick={() => {
-                if (contextMenu.type === 'project') removeProject(contextMenu.projectId)
-                else handleDeleteTask(contextMenu.projectId, contextMenu.taskId!)
-                setContextMenu(null)
-              }}>Delete</button>
-              {contextMenu.type === 'project' && (() => {
-                const project = projects.find(p => p.id === contextMenu.projectId)
-                if (!project) return null
-                const details: { label: string; value: string }[] = []
-                if (isShellCommandProject(project)) {
-                  details.push({ label: 'Command', value: project.shellCommand!.command })
-                } else if (isRemoteProject(project)) {
-                  details.push({ label: 'Connection', value: `${project.ssh!.username}@${project.ssh!.host}:${project.ssh!.port}` })
-                  details.push({ label: 'Dir', value: project.ssh!.remoteDir || '(remote home)' })
-                } else {
-                  details.push({ label: 'Dir', value: project.directory })
-                }
-                return (
-                  <div className="border-t border-hair mt-1 px-2.5 pt-1.5 pb-1">
-                    {details.map(d => (
-                      <div key={d.label} className="text-text-subtle text-xs leading-snug overflow-hidden text-ellipsis whitespace-nowrap max-w-[260px] select-text cursor-text" title={d.value}>
-                        <span className="opacity-70">{d.label}:</span> {d.value}
-                      </div>
-                    ))}
-                  </div>
-                )
-              })()}
-          </>
-        </div>
-      )}
+      <SidebarContextMenu
+        contextMenu={contextMenu}
+        snoozeSubmenu={snoozeSubmenu}
+        setSnoozeSubmenu={setSnoozeSubmenu}
+        closeContextMenu={closeContextMenu}
+        setContextMenu={setContextMenu}
+        findTask={findTask}
+        handleToggleSettled={handleToggleSettled}
+        handleDeleteTask={handleDeleteTask}
+        beginEdit={beginEdit}
+        isPinned={isPinned}
+        setDuplicateProjectId={setDuplicateProjectId}
+        setProjectSettingsId={setProjectSettingsId}
+      />
 
       <div className="px-3 py-2 border-t border-hair">
         <button className="bg-transparent border-0 text-text-muted cursor-pointer px-2 py-1 rounded-md hover:bg-surface-3 hover:text-text [-webkit-app-region:no-drag] text-base transition-colors duration-(--motion-fast)" onClick={() => setSettingsOpen(true)} title="Settings"><SettingsIcon size={16} /></button>

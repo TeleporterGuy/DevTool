@@ -1,10 +1,11 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import { Storage } from '../src/main/storage'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { Storage, atomicWriteFileSync } from '../src/main/storage'
 import {
   DEFAULT_CONFIG,
   createDefaultWindowViewState,
   isRemoteProject,
   type ProjectsData,
+  type WindowSessionState,
   type WindowViewState
 } from '../src/shared/types'
 import fs from 'fs'
@@ -108,7 +109,7 @@ describe('Storage', () => {
         id: '1', name: 'Test', directory: '/tmp', tasks: []
       }]
     }
-    storage.saveProjects(projects)
+    storage.saveProjects(projects as unknown as ProjectsData)
     const loaded = storage.loadProjects()
     expect(loaded.projects).toHaveLength(1)
     expect(loaded.projects[0].name).toBe('Test')
@@ -123,8 +124,11 @@ describe('Storage', () => {
         tasks: [],
         condaEnvName: 'ml',
         condaEnvPrefix: 'C:\\Users\\me\\miniconda3\\envs\\ml'
-      }]
-    })
+      }],
+      tags: [],
+      projectOrder: [],
+      pinnedItems: []
+    } as unknown as ProjectsData)
     const loaded = storage.loadProjects().projects[0]
     expect(loaded.condaEnvName).toBe('ml')
     expect(loaded.condaEnvPrefix).toBe('C:\\Users\\me\\miniconda3\\envs\\ml')
@@ -148,7 +152,7 @@ describe('Storage', () => {
         ssh: { host: 'dev.example.com', port: 22, username: 'deploy', remoteDir: '/home/deploy/app' }
       }]
     }
-    storage.saveProjects(projects)
+    storage.saveProjects(projects as unknown as ProjectsData)
     const loaded = storage.loadProjects()
     expect(loaded.projects[0].ssh).toBeDefined()
     expect(loaded.projects[0].ssh!.host).toBe('dev.example.com')
@@ -165,7 +169,7 @@ describe('Storage', () => {
         ssh: { host: 'dev.example.com', port: 2222, username: 'deploy', keyFile: '/home/user/.ssh/id_ed25519', remoteDir: '/opt/app' }
       }]
     }
-    storage.saveProjects(projects)
+    storage.saveProjects(projects as unknown as ProjectsData)
     const loaded = storage.loadProjects()
     expect(loaded.projects[0].ssh!.keyFile).toBe('/home/user/.ssh/id_ed25519')
     expect(loaded.projects[0].ssh!.port).toBe(2222)
@@ -182,7 +186,7 @@ describe('Storage', () => {
         tunnel: { host: 'localhost', sourcePort: 3000, destinationPort: 8080 }
       }]
     }
-    storage.saveProjects(projects)
+    storage.saveProjects(projects as unknown as ProjectsData)
     const loaded = storage.loadProjects()
     expect(loaded.projects[0].tunnel).toEqual({
       host: 'localhost',
@@ -267,7 +271,7 @@ describe('Storage', () => {
         }]
       }]
     }
-    storage.saveProjects(projects)
+    storage.saveProjects(projects as unknown as ProjectsData)
     const loaded = storage.loadProjects()
     expect(loaded.projects[0].tasks[0].tabs.left[0].sessionId).toBe('sess-abc-123')
   })
@@ -312,7 +316,7 @@ describe('Storage', () => {
       }]
     }
 
-    storage.saveWindowSession(session)
+    storage.saveWindowSession(session as unknown as WindowSessionState)
     const loaded = storage.loadWindowSession(projectsData)
 
     // reconcileWindowViewState adds default file browser fields
@@ -645,5 +649,130 @@ describe('Storage', () => {
     const remaining = fs.readdirSync(backupsDir).sort()
     expect(remaining).toHaveLength(10)
     expect(remaining[0]).toBe('projects-2026-01-04.json')
+  })
+
+  describe('data safety', () => {
+    const projectsFile = () => path.join(testDir, 'projects.json')
+    const backupsDir = () => path.join(testDir, 'backups')
+    const sampleProjects = (name: string): ProjectsData => ({
+      projects: [{ id: 'p1', name, path: '/tmp/p1', tasks: [], tagIds: [] } as unknown as ProjectsData['projects'][number]],
+      tags: [],
+      projectOrder: ['p1'],
+      pinnedItems: []
+    })
+    let errorSpy: ReturnType<typeof vi.spyOn>
+
+    beforeEach(() => {
+      errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    })
+    afterEach(() => {
+      errorSpy.mockRestore()
+    })
+
+    it('atomicWriteFileSync replaces the target and leaves no temp files', () => {
+      const target = path.join(testDir, 'x.json')
+      fs.writeFileSync(target, 'old')
+      atomicWriteFileSync(target, 'new')
+      expect(fs.readFileSync(target, 'utf-8')).toBe('new')
+      expect(fs.readdirSync(testDir)).toEqual(['x.json'])
+    })
+
+    it('atomicWriteFileSync leaves the original intact when the write fails', () => {
+      const target = path.join(testDir, 'x.json')
+      fs.writeFileSync(target, 'old')
+      const spy = vi.spyOn(fs, 'renameSync').mockImplementation(() => { throw new Error('boom') })
+      try {
+        expect(() => atomicWriteFileSync(target, 'new')).toThrow('boom')
+      } finally {
+        spy.mockRestore()
+      }
+      expect(fs.readFileSync(target, 'utf-8')).toBe('old')
+      expect(fs.readdirSync(testDir)).toEqual(['x.json'])
+    })
+
+    it('saves projects, config and window session without leaving temp files', () => {
+      storage.saveProjects(sampleProjects('A'))
+      storage.saveConfig({ ...DEFAULT_CONFIG })
+      storage.saveWindowSession({ windows: [] })
+      expect(fs.readdirSync(testDir).sort()).toEqual(['config.json', 'projects.json', 'window-session.json'])
+      expect(storage.loadProjects().projects[0].name).toBe('A')
+    })
+
+    it('treats a missing projects.json as a fresh start without logging', () => {
+      expect(storage.loadProjects()).toEqual({ projects: [], tags: [], projectOrder: [], pinnedItems: [] })
+      expect(errorSpy).not.toHaveBeenCalled()
+      expect(fs.readdirSync(testDir)).toEqual([])
+    })
+
+    it('restores a corrupt projects.json from the newest parseable backup', () => {
+      fs.mkdirSync(backupsDir())
+      fs.writeFileSync(path.join(backupsDir(), 'projects-2026-01-01.json'), JSON.stringify(sampleProjects('older')))
+      fs.writeFileSync(path.join(backupsDir(), 'projects-2026-01-02.json'), JSON.stringify(sampleProjects('newest-good')))
+      fs.writeFileSync(path.join(backupsDir(), 'projects-2026-01-03.json'), '{"projects": [tru')
+      fs.writeFileSync(projectsFile(), '{"projects": [{"id": "p1", "na')
+
+      const loaded = storage.loadProjects()
+      expect(loaded.projects.map(p => p.name)).toEqual(['newest-good'])
+      // The bad file is kept for inspection, and projects.json is the restored copy.
+      const corrupt = fs.readdirSync(testDir).filter(f => f.startsWith('projects.json.corrupt-'))
+      expect(corrupt).toHaveLength(1)
+      expect(fs.readFileSync(path.join(testDir, corrupt[0]), 'utf-8')).toBe('{"projects": [{"id": "p1", "na')
+      expect(JSON.parse(fs.readFileSync(projectsFile(), 'utf-8')).projects[0].name).toBe('newest-good')
+      expect(errorSpy).toHaveBeenCalled()
+    })
+
+    it('treats an empty or non-object projects.json as corrupt', () => {
+      fs.mkdirSync(backupsDir())
+      fs.writeFileSync(path.join(backupsDir(), 'projects-2026-01-01.json'), JSON.stringify(sampleProjects('good')))
+      fs.writeFileSync(projectsFile(), '')
+      expect(storage.loadProjects().projects.map(p => p.name)).toEqual(['good'])
+      fs.writeFileSync(projectsFile(), 'null')
+      expect(storage.loadProjects().projects.map(p => p.name)).toEqual(['good'])
+    })
+
+    it('falls back to empty data for a corrupt projects.json with no usable backup, keeping the bad file', () => {
+      fs.writeFileSync(projectsFile(), '{not json')
+      expect(storage.loadProjects()).toEqual({ projects: [], tags: [], projectOrder: [], pinnedItems: [] })
+      expect(fs.existsSync(projectsFile())).toBe(false)
+      const corrupt = fs.readdirSync(testDir).filter(f => f.startsWith('projects.json.corrupt-'))
+      expect(corrupt).toHaveLength(1)
+      expect(errorSpy).toHaveBeenCalled()
+    })
+
+    it('moves a corrupt config.json aside instead of letting defaults overwrite it', () => {
+      fs.writeFileSync(path.join(testDir, 'config.json'), '{"fontSize": 1')
+      const config = storage.loadConfig()
+      expect(config).toEqual({ ...DEFAULT_CONFIG })
+      expect(fs.existsSync(path.join(testDir, 'config.json'))).toBe(false)
+      expect(fs.readdirSync(testDir).some(f => f.startsWith('config.json.corrupt-'))).toBe(true)
+    })
+
+    it('backupProjectsOnStartup does not snapshot an unparseable projects.json', () => {
+      fs.writeFileSync(projectsFile(), '{"projects": [')
+      expect(storage.backupProjectsOnStartup()).toBe(false)
+      expect(fs.existsSync(backupsDir())).toBe(false)
+    })
+
+    it('backupProjectsOnStartup skips a snapshot identical to the newest one', () => {
+      fs.writeFileSync(projectsFile(), '{"projects":[]}')
+      expect(storage.backupProjectsOnStartup()).toBe(true)
+      expect(storage.backupProjectsOnStartup()).toBe(true)
+      expect(fs.readdirSync(backupsDir())).toHaveLength(1)
+
+      fs.writeFileSync(projectsFile(), '{"projects":[],"tags":[]}')
+      expect(storage.backupProjectsOnStartup()).toBe(true)
+      const snaps = fs.readdirSync(backupsDir()).sort()
+      expect(fs.readFileSync(path.join(backupsDir(), snaps[snaps.length - 1]), 'utf-8')).toBe('{"projects":[],"tags":[]}')
+    })
+
+    it('repeated launches on identical data do not rotate good backups out', () => {
+      fs.mkdirSync(backupsDir())
+      for (let i = 0; i < 10; i++) {
+        fs.writeFileSync(path.join(backupsDir(), `projects-2026-01-${String(i + 1).padStart(2, '0')}.json`), `{"v":${i}}`)
+      }
+      fs.writeFileSync(projectsFile(), '{"v":9}')
+      for (let i = 0; i < 5; i++) storage.backupProjectsOnStartup(10)
+      expect(fs.readdirSync(backupsDir()).sort()[0]).toBe('projects-2026-01-01.json')
+    })
   })
 })

@@ -62,6 +62,40 @@ export interface ChatPrompt {
 
 export type ChatProcessState = 'idle' | 'starting' | 'running' | 'exited'
 
+export type ChatTaskKind = 'subagent' | 'shell' | 'workflow' | 'monitor' | 'mcp' | 'other'
+export type ChatTaskStatus = 'running' | 'completed' | 'failed' | 'stopped'
+
+/**
+ * Work Claude has running beside the turn: a subagent, a shell (Bash, backgrounded
+ * or not), a workflow, a monitor. Folded from the SDK's `task_*` edges, with
+ * `background_tasks_changed` as the authority on which background ones still run.
+ */
+export interface ChatTask {
+  id: string
+  /** The Agent/Bash tool call that started it, when there is one. */
+  toolUseId?: string
+  kind: ChatTaskKind
+  /** The CLI's own task_type (`local_agent`, `local_bash`, …). */
+  taskType?: string
+  description: string
+  /** Shells: the command line. */
+  command?: string
+  /** Subagents: the agent type (`Explore`, `general-purpose`, …). */
+  agentType?: string
+  /** Running in the background rather than blocking its tool call. */
+  background: boolean
+  status: ChatTaskStatus
+  startedAt?: number
+  endedAt?: number
+  toolUses?: number
+  tokens?: number
+  lastTool?: string
+  summary?: string
+}
+
+/** How long a finished task stays listed with its outcome. */
+export const TASK_LINGER_MS = 60_000
+
 export interface ChatModelOption {
   value: string
   /** The wire id an alias resolves to ('haiku' → 'claude-haiku-4-5'), to match `system:init`'s model. */
@@ -126,6 +160,8 @@ export interface ChatState {
   streamMessage?: string
   /** Stop was pressed: the turn's error result is the interrupt, not a failure. */
   interrupting?: boolean
+  /** Running tasks, and finished ones for {@link TASK_LINGER_MS}, by task id. */
+  tasks: Record<string, ChatTask>
 }
 
 export type ChatEvent =
@@ -134,7 +170,7 @@ export type ChatEvent =
   | { t: 'sent'; uuid: string; text: string; images: number; at?: number }
   | { t: 'prompt'; prompt: ChatPrompt }
   | { t: 'prompt-done'; id: string; allowed: boolean }
-  | { t: 'process'; state: ChatProcessState; error?: string }
+  | { t: 'process'; state: ChatProcessState; error?: string; at?: number }
   | { t: 'notice'; text: string; tone: 'muted' | 'warning' | 'error' }
   | { t: 'meta'; models?: ChatModelOption[]; commands?: ChatCommand[]; info?: Partial<ChatSessionInfo>; usage?: ChatUsage }
   | { t: 'interrupting' }
@@ -176,7 +212,8 @@ export function emptyChatState(): ChatState {
     commands: [],
     usage: {},
     toolIndex: {},
-    openBlocks: {}
+    openBlocks: {},
+    tasks: {}
   }
 }
 
@@ -507,8 +544,194 @@ function applyUserMessage(draft: Draft, m: Json, history: boolean): Partial<Chat
   return {}
 }
 
-function applySystemMessage(draft: Draft, state: ChatState, m: Json): Partial<ChatState> {
+function num(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined
+}
+
+function taskKind(taskType: string | undefined, toolName: string | undefined, agentType: string | undefined): ChatTaskKind {
+  switch (taskType) {
+    case 'local_agent':
+    case 'remote_agent':
+    case 'in_process_teammate':
+      return 'subagent'
+    case 'local_bash':
+      return 'shell'
+    case 'local_workflow':
+      return 'workflow'
+    case 'mcp_task':
+      return 'mcp'
+  }
+  if (taskType?.startsWith('monitor')) return 'monitor'
+  if (toolName === 'Agent' || toolName === 'Task' || agentType) return 'subagent'
+  if (toolName === 'Bash' || toolName === 'PowerShell') return 'shell'
+  if (toolName === 'Monitor') return 'monitor'
+  return 'other'
+}
+
+function isTaskDone(task: ChatTask): boolean {
+  return task.status !== 'running'
+}
+
+/**
+ * Tasks with finished ones past their linger dropped, so a long session's map
+ * doesn't grow without end. `at` is the event's time; without one nothing ages.
+ */
+function pruneTasks(tasks: Record<string, ChatTask>, at: number | undefined): Record<string, ChatTask> {
+  if (at === undefined) return tasks
+  let out: Record<string, ChatTask> | null = null
+  for (const [id, task] of Object.entries(tasks)) {
+    if (!isTaskDone(task) || task.endedAt === undefined || task.endedAt + TASK_LINGER_MS >= at) continue
+    out ??= { ...tasks }
+    delete out[id]
+  }
+  return out ?? tasks
+}
+
+function finishTask(task: ChatTask, status: Exclude<ChatTaskStatus, 'running'>, at: number | undefined): ChatTask {
+  return { ...task, status, endedAt: task.endedAt ?? at }
+}
+
+function applyTaskMessage(draft: Draft, state: ChatState, m: Json, subtype: string, at: number | undefined): Partial<ChatState> {
+  const tasks = pruneTasks(state.tasks, at)
+  const id = str(m.task_id)
+  const existing = id ? tasks[id] : undefined
+  const put = (task: ChatTask): Partial<ChatState> => ({ tasks: { ...tasks, [task.id]: task } })
+  const drop = (): Partial<ChatState> => {
+    if (!id || !existing) return tasks === state.tasks ? {} : { tasks }
+    const next = { ...tasks }
+    delete next[id]
+    return { tasks: next }
+  }
+  const unchanged = (): Partial<ChatState> => tasks === state.tasks ? {} : { tasks }
+
+  switch (subtype) {
+    case 'task_started': {
+      if (!id) return unchanged()
+      if (m.ambient === true) return drop()
+      const toolUseId = str(m.tool_use_id)
+      const toolAt = draft.tool(toolUseId)
+      const tool = toolAt === undefined ? undefined : draft.items[toolAt]
+      const toolItem = tool?.kind === 'tool' ? tool : undefined
+      const agentType = str(m.subagent_type) ?? str(toolItem?.input.subagent_type)
+      const taskType = str(m.task_type)
+      const kind = taskKind(taskType, toolItem?.name, agentType)
+      const command = kind === 'shell' ? str(toolItem?.input.command) : undefined
+      const workflow = str(m.workflow_name)
+      const description = str(m.description)?.trim() || (workflow ? `Workflow ${workflow}` : '') || command || existing?.description || 'Task'
+      return put({
+        ...existing,
+        id,
+        ...(toolUseId ? { toolUseId } : {}),
+        kind,
+        ...(taskType ? { taskType } : {}),
+        description,
+        ...(command ? { command } : {}),
+        ...(agentType ? { agentType } : {}),
+        background: m.is_backgrounded === true || existing?.background === true,
+        // A resumed subagent registers again under its id: it runs anew.
+        status: 'running',
+        endedAt: undefined,
+        startedAt: existing && existing.status === 'running' ? existing.startedAt ?? at : at
+      })
+    }
+    case 'task_progress': {
+      if (!existing) return unchanged()
+      const usage = obj(m.usage)
+      const summary = str(m.summary)?.trim()
+      const lastTool = str(m.last_tool_name)
+      return put({
+        ...existing,
+        toolUses: num(usage?.tool_uses) ?? existing.toolUses,
+        tokens: num(usage?.total_tokens) ?? existing.tokens,
+        ...(lastTool ? { lastTool } : {}),
+        ...(summary ? { summary } : {})
+      })
+    }
+    case 'task_updated': {
+      if (!existing) return unchanged()
+      const patch = obj(m.patch) ?? {}
+      let next: ChatTask = { ...existing }
+      const description = str(patch.description)?.trim()
+      if (description) next.description = description
+      if (typeof patch.is_backgrounded === 'boolean') next.background = patch.is_backgrounded
+      const endedAt = num(patch.end_time) ?? at
+      switch (patch.status) {
+        case 'completed': next = finishTask(next, 'completed', endedAt); break
+        case 'failed': next = finishTask(next, 'failed', endedAt); break
+        case 'killed': next = finishTask(next, 'stopped', endedAt); break
+        case 'running':
+        case 'pending':
+        case 'paused':
+          next = { ...next, status: 'running', endedAt: undefined }
+          break
+      }
+      const error = str(patch.error)?.trim()
+      if (error) next.summary = error
+      return put(next)
+    }
+    case 'task_notification': {
+      if (m.ambient === true) return drop()
+      if (!existing) return unchanged()
+      const status = m.status === 'failed' ? 'failed' : m.status === 'stopped' ? 'stopped' : 'completed'
+      const usage = obj(m.usage)
+      const summary = str(m.summary)?.trim()
+      // The notification names the outcome, even after the level already ended it.
+      return put({
+        ...existing,
+        status,
+        endedAt: existing.endedAt ?? at,
+        toolUses: num(usage?.tool_uses) ?? existing.toolUses,
+        tokens: num(usage?.total_tokens) ?? existing.tokens,
+        ...(summary ? { summary } : {})
+      })
+    }
+    case 'background_tasks_changed': {
+      // A level signal with replace semantics: the background tasks alive right now.
+      const live = new Map<string, Json>()
+      for (const raw of Array.isArray(m.tasks) ? m.tasks : []) {
+        const entry = obj(raw)
+        const taskId = str(entry?.task_id)
+        if (entry && taskId) live.set(taskId, entry)
+      }
+      const next: Record<string, ChatTask> = {}
+      for (const [taskId, task] of Object.entries(tasks)) {
+        const entry = live.get(taskId)
+        if (entry?.ambient === true) continue
+        if (entry) {
+          next[taskId] = task.status === 'running' && !task.background ? { ...task, background: true } : task
+        } else if (task.background && task.status === 'running') {
+          // Gone from the level without its bookend (yet): it ended somehow.
+          next[taskId] = finishTask(task, 'completed', at)
+        } else {
+          next[taskId] = task
+        }
+      }
+      for (const [taskId, entry] of live) {
+        if (next[taskId] || tasks[taskId] || entry.ambient === true) continue
+        const taskType = str(entry.task_type)
+        next[taskId] = {
+          id: taskId,
+          kind: taskKind(taskType, undefined, undefined),
+          ...(taskType ? { taskType } : {}),
+          description: str(entry.description)?.trim() || 'Task',
+          background: true,
+          status: 'running',
+          startedAt: at
+        }
+      }
+      return { tasks: next }
+    }
+    default:
+      return unchanged()
+  }
+}
+
+const TASK_SUBTYPES = new Set(['task_started', 'task_progress', 'task_updated', 'task_notification', 'background_tasks_changed'])
+
+function applySystemMessage(draft: Draft, state: ChatState, m: Json, history: boolean, at: number | undefined): Partial<ChatState> {
   const subtype = str(m.subtype)
+  // Replayed history is over: none of its tasks run in this process.
+  const taskPatch = !history && subtype && TASK_SUBTYPES.has(subtype) ? applyTaskMessage(draft, state, m, subtype, at) : {}
   switch (subtype) {
     case 'init':
       return {
@@ -571,14 +794,29 @@ function applySystemMessage(draft: Draft, state: ChatState, m: Json): Partial<Ch
         const tone = m.status === 'failed' ? 'warning' : 'muted'
         draft.push({ kind: 'notice', id: draft.nextId(str(m.uuid)), text: summary, tone })
       }
-      return {}
+      return taskPatch
     }
     default:
-      return {}
+      return taskPatch
   }
 }
 
-function applyResult(draft: Draft, state: ChatState, m: Json): Partial<ChatState> {
+/**
+ * The turn ended, so a foreground task blocking one of its tool calls did too —
+ * unless it was moved to the background. Tasks started from inside a subagent
+ * (their tool call isn't a main-thread row) belong to that agent, not the turn.
+ */
+function endForegroundTasks(draft: Draft, tasks: Record<string, ChatTask>, interrupted: boolean, at: number | undefined): Record<string, ChatTask> {
+  let out: Record<string, ChatTask> | null = null
+  for (const [id, task] of Object.entries(tasks)) {
+    if (task.status !== 'running' || task.background || draft.tool(task.toolUseId) === undefined) continue
+    out ??= { ...tasks }
+    out[id] = finishTask(task, interrupted ? 'stopped' : 'completed', at)
+  }
+  return out ?? tasks
+}
+
+function applyResult(draft: Draft, state: ChatState, m: Json, at: number | undefined): Partial<ChatState> {
   for (const key of Object.keys(draft.openBlocks)) {
     const index = draft.openBlocks[key]
     draft.update(index, (item) => (item.kind === 'text' || item.kind === 'thinking') ? { ...item, streaming: false } : item)
@@ -591,10 +829,11 @@ function applyResult(draft: Draft, state: ChatState, m: Json): Partial<ChatState
     }
   })
   const subtype = str(m.subtype)
+  let interrupted = state.interrupting === true
   if (subtype && subtype !== 'success') {
     const errors = Array.isArray(m.errors) ? m.errors.filter((e): e is string => typeof e === 'string') : []
     const last = draft.items[draft.items.length - 1]
-    const interrupted = state.interrupting === true || errors.length === 0
+    interrupted = interrupted || errors.length === 0
       || errors.some((e) => /interrupt|abort/i.test(e))
       || (last?.kind === 'notice' && last.text === 'Interrupted')
     if (!interrupted) {
@@ -604,7 +843,8 @@ function applyResult(draft: Draft, state: ChatState, m: Json): Partial<ChatState
     const text = str(m.result)?.trim()
     if (text) draft.push({ kind: 'notice', id: draft.nextId(), text, tone: 'error' })
   }
-  return { busy: false, turnStartedAt: undefined, compacting: false, interrupting: false }
+  const tasks = endForegroundTasks(draft, pruneTasks(state.tasks, at), interrupted, at)
+  return { busy: false, turnStartedAt: undefined, compacting: false, interrupting: false, ...(tasks !== state.tasks ? { tasks } : {}) }
 }
 
 function applySdkMessage(state: ChatState, raw: unknown, at: number | undefined, history: boolean, draft: Draft): Partial<ChatState> {
@@ -625,9 +865,9 @@ function applySdkMessage(state: ChatState, raw: unknown, at: number | undefined,
     case 'user':
       return applyUserMessage(draft, m, history)
     case 'system':
-      return applySystemMessage(draft, state, m)
+      return applySystemMessage(draft, state, m, history, at)
     case 'result':
-      return history ? {} : applyResult(draft, state, m)
+      return history ? {} : applyResult(draft, state, m, at)
     default:
       return {}
   }
@@ -638,7 +878,8 @@ export function reduceChat(state: ChatState, event: ChatEvent): ChatState {
   switch (event.t) {
     case 'sdk': {
       if (obj(event.m)?.type === 'conversation_reset') {
-        return { ...emptyChatState(), process: state.process, info: state.info, models: state.models, commands: state.commands, usage: state.usage }
+        // /clear starts a new conversation in the same process; its tasks run on.
+        return { ...emptyChatState(), process: state.process, info: state.info, models: state.models, commands: state.commands, usage: state.usage, tasks: state.tasks }
       }
       const draft = new Draft(state, `i${state.items.length}-`)
       return draft.result(applySdkMessage(state, event.m, event.at, false, draft))
@@ -682,7 +923,13 @@ export function reduceChat(state: ChatState, event: ChatEvent): ChatState {
     }
     case 'process': {
       if (event.state !== 'exited') {
-        return { ...state, process: event.state, processError: event.state === 'starting' ? undefined : state.processError }
+        // A (re)started CLI has none of the old process's tasks, and reports new ones itself.
+        return {
+          ...state,
+          process: event.state,
+          processError: event.state === 'starting' ? undefined : state.processError,
+          ...(event.state === 'starting' ? { tasks: {} } : {})
+        }
       }
       // The process took its open prompts and unconsumed messages with it.
       const draft = new Draft(state, 'x')
@@ -699,13 +946,19 @@ export function reduceChat(state: ChatState, event: ChatEvent): ChatState {
       })
       if (event.error) draft.push({ kind: 'notice', id: draft.nextId(), text: event.error, tone: 'error' })
       draft.openBlocks = {}
+      // Its tasks died with it.
+      const tasks: Record<string, ChatTask> = {}
+      for (const [id, task] of Object.entries(state.tasks)) {
+        tasks[id] = task.status === 'running' ? finishTask(task, 'stopped', event.at) : task
+      }
       return draft.result({
         process: 'exited',
         processError: event.error,
         busy: false,
         turnStartedAt: undefined,
         compacting: false,
-        pending: []
+        pending: [],
+        tasks
       })
     }
     case 'notice': {
@@ -751,6 +1004,30 @@ export const CHAT_PERMISSION_MODES = [
   { value: 'auto', label: 'Auto' },
   { value: 'bypassPermissions', label: 'Bypass' }
 ] as const
+
+/**
+ * `/btw`: a quick question answered from the conversation so far, without joining
+ * it. The CLI doesn't list it (it's a terminal-UI command); the chat tab runs it
+ * through the SDK's side-question request instead.
+ */
+export const SIDE_QUESTION_COMMAND: ChatCommand = {
+  name: 'btw',
+  description: 'Ask a quick side question — the answer stays out of the conversation',
+  argumentHint: '<question>'
+}
+
+/** The question in `/btw <question>`; '' for a bare `/btw`, null for anything else. */
+export function parseSideQuestion(text: string): string | null {
+  const match = /^\/btw(?:\s+([\s\S]*))?$/.exec(text.trim())
+  return match ? (match[1] ?? '').trim() : null
+}
+
+export interface ChatSideAnswer {
+  /** Null when the CLI had nothing to say (e.g. the question was cancelled). */
+  response: string | null
+  /** The CLI made up the answer itself (an error or refusal), not the model. */
+  synthetic?: boolean
+}
 
 /** Built-in commands that only make sense in the terminal UI. */
 export const TERMINAL_ONLY_COMMANDS = new Set([

@@ -7,7 +7,8 @@ describe('copyOnSelect', () => {
   })
 
   it('copies non-empty selections when the terminal selection changes', async () => {
-    let listener: (() => void) | null = null
+    // Widened via `as`: TS doesn't track the closure assignment and would narrow to `null`.
+    let listener = null as (() => void) | null
     const writeText = vi.fn<(_: string) => Promise<void>>().mockResolvedValue(undefined)
     const term = {
       onSelectionChange: (nextListener: () => void) => {
@@ -28,7 +29,8 @@ describe('copyOnSelect', () => {
   })
 
   it('ignores empty selections', async () => {
-    let listener: (() => void) | null = null
+    // Widened via `as`: TS doesn't track the closure assignment and would narrow to `null`.
+    let listener = null as (() => void) | null
     const writeText = vi.fn<(_: string) => Promise<void>>().mockResolvedValue(undefined)
     const term = {
       onSelectionChange: (nextListener: () => void) => {

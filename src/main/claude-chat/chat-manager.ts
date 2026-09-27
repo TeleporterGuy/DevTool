@@ -6,6 +6,7 @@ import {
   type ChatImage,
   type ChatPrompt,
   type ChatPromptResponse,
+  type ChatSideAnswer,
   type ChatSnapshot,
   type ChatState
 } from '../../shared/claude-chat'
@@ -125,6 +126,38 @@ export class ClaudeChatManager {
 
   async interrupt(tabId: string): Promise<void> {
     await this.runtimes.get(tabId)?.session?.interrupt()
+  }
+
+  /** `/btw`. Starts (resuming) the process when it isn't running, like a send does. */
+  async askSideQuestion(tabId: string, question: string): Promise<ChatSideAnswer> {
+    const runtime = this.runtimes.get(tabId)
+    if (!runtime) throw new Error('chat tab not attached')
+    await runtime.ready
+    if (!runtime.session || runtime.session.isEnded()) await this.startSession(runtime)
+    if (!runtime.session) throw new Error('Claude is not running.')
+    return runtime.session.askSideQuestion(question)
+  }
+
+  /** Stop one of the tab's tasks. False (with a notice in the timeline) when it couldn't. */
+  async stopTask(tabId: string, taskId: string): Promise<boolean> {
+    const runtime = this.runtimes.get(tabId)
+    if (!runtime) return false
+    if (!runtime.session || runtime.session.isEnded()) {
+      this.emit(runtime, { t: 'notice', text: "Couldn't stop the task: Claude is not running.", tone: 'warning' })
+      return false
+    }
+    return runtime.session.stopTask(taskId)
+  }
+
+  /** Send the foreground task a tool call started to the background. */
+  async backgroundTask(tabId: string, toolUseId: string): Promise<boolean> {
+    const runtime = this.runtimes.get(tabId)
+    if (!runtime) return false
+    if (!runtime.session || runtime.session.isEnded()) {
+      this.emit(runtime, { t: 'notice', text: "Couldn't send the task to the background: Claude is not running.", tone: 'warning' })
+      return false
+    }
+    return runtime.session.backgroundTask(toolUseId)
   }
 
   respond(tabId: string, promptId: string, response: ChatPromptResponse): boolean {
@@ -272,7 +305,7 @@ export class ClaudeChatManager {
       await session.start()
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
-      this.emit(runtime, { t: 'process', state: 'exited', error: `Couldn't start Claude: ${message}` })
+      this.emit(runtime, { t: 'process', state: 'exited', at: Date.now(), error: `Couldn't start Claude: ${message}` })
       runtime.session = null
       this.deps.onProcessChange(tabId, false, message)
     }

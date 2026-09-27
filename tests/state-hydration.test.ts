@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { DEFAULT_CONFIG, type Project, type ProjectsData } from '../src/shared/types'
+import { DEFAULT_CONFIG, type AppConfig, type Project, type ProjectsData } from '../src/shared/types'
 import {
   applyQueuedStateUpdates,
   persistSelectionState,
@@ -42,7 +42,7 @@ describe('state hydration', () => {
   })
 
   it('rebases queued config updates onto loaded config', () => {
-    const loadedConfig = {
+    const loadedConfig: AppConfig = {
       ...DEFAULT_CONFIG,
       lastProjectId: 'old-project',
       lastTaskId: 'old-task'

@@ -4,9 +4,6 @@ type EventMap = {
   'open-project-settings': void
   'toggle-sidebar': void
   'toggle-file-browser': void
-  'toggle-watch-strip': void
-  'pin-active-tab': void
-  'unpin-active-tab': void
   'reload-window': void
   'open-devtools': void
   'quit-app': void

@@ -121,7 +121,7 @@ Starts the app in development mode with hot reload. On Windows this still needs 
 ### Build
 
 ```bash
-npm run build          # Production JS/CSS bundle only
+npm run build          # Typecheck, then production JS/CSS bundle
 npm run build:win      # Portable Windows folder (dist/win-unpacked)
 npm run build:mac      # Package macOS app
 npm run build:linux    # Package Linux app
@@ -140,8 +140,11 @@ Builds and installs the app system-wide. Supports macOS (arm64) and Linux (x86_6
 ```bash
 npm test               # Run tests
 npm run test:watch     # Run tests in watch mode
-npm run typecheck      # TypeScript (`tsc --noEmit`)
+npm run typecheck      # tsc over src/ and tests/ (tsconfig.typecheck.json)
+npm run lint           # ESLint (eslint.config.mjs); warnings are allowed, errors fail
 ```
+
+`npm install` sets `git config core.hooksPath .githooks`, so commits run `.githooks/pre-commit`: ESLint on the staged JS/TS files plus a full typecheck. Skip it once with `git commit --no-verify`.
 
 Live notebook kernel smoke (real `jupyter_client` / ipykernel, no Electron window). Needs a conda env with those packages. Git Bash:
 
@@ -149,10 +152,10 @@ Live notebook kernel smoke (real `jupyter_client` / ipykernel, no Electron windo
 NOTEBOOK_LIVE=1 npm test -- tests/notebook-kernel.live.test.ts
 ```
 
-Pull requests and pushes to `master` run typecheck + Vitest on GitHub Actions:
+CI (`.github/workflows/ci.yml`):
 
-- **ubuntu-latest** — unit/component coverage. Live kernel and live SSH (`DEMO_SSH=1`) stay skipped. Does not launch Electron or ConPTY.
-- **windows-latest** — same unit suite, plus live kernel smoke (`NOTEBOOK_LIVE_REQUIRED=1`) after Miniconda + `ipykernel` / `jupyter_client`. Skips Electron/`node-pty` native rebuild (`npm ci --ignore-scripts`). Toolbar clicks and Monaco stay a human check on a Windows box.
+- **test (macOS / Linux / Windows)** — typecheck and tests with Node 24, plus lint and `npm run build` on Linux. The Windows job adds the MSVC Spectre-mitigated libs to the runner's Visual Studio if they are missing, since `postinstall` compiles `node-pty`. Live kernel and live SSH (`DEMO_SSH=1`) stay skipped.
+- **notebook-live-windows** — the unit suite plus the live kernel smoke (`NOTEBOOK_LIVE_REQUIRED=1`) after Miniforge + `ipykernel` / `jupyter_client`. Skips the native rebuild (`npm ci --ignore-scripts`). Toolbar clicks and Monaco stay a human check on a Windows box.
 
 ## License
 

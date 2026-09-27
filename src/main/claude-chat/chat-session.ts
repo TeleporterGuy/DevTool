@@ -19,6 +19,7 @@ import {
   type ChatImage,
   type ChatPrompt,
   type ChatPromptResponse,
+  type ChatSideAnswer,
   type ChatUsage
 } from '../../shared/claude-chat'
 
@@ -33,6 +34,24 @@ export const FORWARDED_HOOK_EVENTS: HookEvent[] = [
   'PreToolUse', 'PostToolUse', 'PostToolUseFailure',
   'SubagentStart', 'SubagentStop', 'PreCompact', 'PostCompact', 'SessionEnd'
 ]
+
+/**
+ * The CLI leaves the Artifact tool off in SDK sessions ("sdk_default_off") unless
+ * CLAUDE_CODE_ARTIFACT is set. A chat tab is someone at a keyboard, like a
+ * terminal session, so turn it on. CLAUDE_CODE_ARTIFACT=0 in the env, or
+ * `enableArtifact: false` in settings, still turns it off.
+ */
+export function chatEnv(env: Record<string, string | undefined>): Record<string, string | undefined> {
+  return env.CLAUDE_CODE_ARTIFACT === undefined ? { ...env, CLAUDE_CODE_ARTIFACT: '1' } : env
+}
+
+/**
+ * `/btw` in the SDK: shipped in the SDK's code, not yet in its types. Checked at
+ * runtime so an SDK without it fails the question, not the session.
+ */
+interface SideQuestionQuery {
+  askSideQuestion?: (question: string) => Promise<{ response: string; synthetic: boolean } | null>
+}
 
 /** Mid-turn context refreshes are at most this often; a turn's end always refreshes. */
 const CONTEXT_REFRESH_MS = 20_000
@@ -209,7 +228,7 @@ export class ChatSession {
     const queryOptions: Options = {
       cwd: o.cwd,
       pathToClaudeCodeExecutable: o.executable,
-      env: o.env,
+      env: chatEnv(o.env),
       settingSources: ['user', 'project', 'local'],
       systemPrompt: { type: 'preset', preset: 'claude_code' },
       includePartialMessages: true,
@@ -217,6 +236,10 @@ export class ChatSession {
       hooks,
       extraArgs: extra,
       allowDangerouslySkipPermissions: true,
+      // The tab has a per-task Stop, so Stop/Esc only aborts the turn and spares
+      // background agents and shells. Subagents also report a one-line summary.
+      perTaskStopAffordance: true,
+      agentProgressSummaries: true,
       ...(o.resume ? { resume: o.sessionId } : { sessionId: o.sessionId }),
       ...(o.model ? { model: o.model } : {}),
       ...(o.permissionMode ? { permissionMode: o.permissionMode as PermissionMode } : {}),
@@ -286,7 +309,7 @@ export class ChatSession {
     }
     this.held.clear()
     this.input.end()
-    this.options.onEvent({ t: 'process', state: 'exited', ...(error ? { error } : {}) })
+    this.options.onEvent({ t: 'process', state: 'exited', at: Date.now(), ...(error ? { error } : {}) })
     this.options.onExit(error)
   }
 
@@ -454,6 +477,47 @@ export class ChatSession {
   async interrupt(): Promise<void> {
     this.options.onEvent({ t: 'interrupting' })
     await this.query?.interrupt().catch((err) => this.options.log(`chatInterrupt error=${String(err)}`))
+  }
+
+  /** `/btw`: answered from the conversation so far; nothing joins the transcript. */
+  async askSideQuestion(question: string): Promise<ChatSideAnswer> {
+    const query = this.query as (Query & SideQuestionQuery) | null
+    if (!query || this.ended) throw new Error('Claude is not running.')
+    if (typeof query.askSideQuestion !== 'function') throw new Error('This Agent SDK has no side questions.')
+    const answer = await query.askSideQuestion(question)
+    return answer ? { response: answer.response, synthetic: answer.synthetic } : { response: null }
+  }
+
+  /** Stop one running task (a subagent, a shell). Failures show in the timeline. */
+  async stopTask(taskId: string): Promise<boolean> {
+    const query = this.query
+    if (!query || this.ended) return this.taskFailed('stop', 'Claude is not running.')
+    try {
+      await query.stopTask(taskId)
+      return true
+    } catch (err) {
+      this.options.log(`chatStopTask task=${taskId} error=${String(err)}`)
+      return this.taskFailed('stop', err instanceof Error ? err.message : String(err))
+    }
+  }
+
+  /** Move the foreground task started by one tool call to the background. */
+  async backgroundTask(toolUseId: string): Promise<boolean> {
+    const query = this.query
+    if (!query || this.ended) return this.taskFailed('background', 'Claude is not running.')
+    try {
+      if (await query.backgroundTasks(toolUseId)) return true
+      return this.taskFailed('background', 'It is no longer running in the foreground.')
+    } catch (err) {
+      this.options.log(`chatBackgroundTask toolUse=${toolUseId} error=${String(err)}`)
+      return this.taskFailed('background', err instanceof Error ? err.message : String(err))
+    }
+  }
+
+  private taskFailed(action: 'stop' | 'background', reason: string): false {
+    const what = action === 'stop' ? "Couldn't stop the task" : "Couldn't send the task to the background"
+    this.options.onEvent({ t: 'notice', text: `${what}: ${reason}`, tone: 'warning' })
+    return false
   }
 
   async setModel(model: string | undefined): Promise<void> {

@@ -167,7 +167,6 @@ describe('openFolderInEditor', () => {
     const exe = editor().command
     openFolderInEditor(editor(), folder, {
       platform: 'win32',
-      path: path.win32,
       env: { USERPROFILE: 'C:\\Users\\me' },
       existsSync: (filePath) => filePath === folder || filePath.toLowerCase() === exe.toLowerCase(),
       statSync: (filePath) => ({ isDirectory: () => filePath === folder }),

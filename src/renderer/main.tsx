@@ -119,7 +119,9 @@ window.addEventListener('unhandledrejection', (event) => {
 
 async function bootstrap(): Promise<void> {
   try {
-    const { default: App } = await import('./App')
+    // Monaco is configured before anything can mount an editor, so the loader
+    // never falls back to fetching it from the CDN. Both chunks load in parallel.
+    const [{ default: App }] = await Promise.all([import('./App'), import('./monacoSetup')])
     root.render(
       <React.StrictMode>
         <RendererErrorBoundary>
