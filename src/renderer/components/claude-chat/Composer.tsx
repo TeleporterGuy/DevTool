@@ -13,6 +13,7 @@ import {
 import ChipMenu from './ChipMenu'
 import UsageMeter from './UsageMeter'
 import { menuCls } from '../ui'
+import { onAgentInsert } from '../../agentLink/linkToAgent'
 
 interface Attachment extends ChatImage {
   id: string
@@ -36,6 +37,8 @@ interface Props {
   onOpenInTerminal: () => void
   /** Focus the textarea when this flips true (tab shown). */
   focusSignal: boolean
+  /** Receive agent links (Ctrl+L from an editor/notebook) addressed to this tab. */
+  tabId?: string
 }
 
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024
@@ -87,8 +90,10 @@ function readImage(file: File): Promise<Attachment | null> {
 }
 
 export default function Composer(props: Props): React.ReactElement {
-  const { busy, disabled, info, usage, models, commands, loadFiles, onSend, onStop, onSetModel, onSetMode, onSetEffort, onOpenInTerminal, focusSignal } = props
+  const { busy, disabled, info, usage, models, commands, loadFiles, onSend, onStop, onSetModel, onSetMode, onSetEffort, onOpenInTerminal, focusSignal, tabId } = props
   const [text, setText] = useState('')
+  const textRef = useRef(text)
+  textRef.current = text
   const [images, setImages] = useState<Attachment[]>([])
   const [suggest, setSuggest] = useState<Suggest | null>(null)
   const [highlight, setHighlight] = useState(0)
@@ -99,6 +104,27 @@ export default function Composer(props: Props): React.ReactElement {
   useEffect(() => {
     if (focusSignal) textareaRef.current?.focus()
   }, [focusSignal])
+
+  // An agent link lands at the caret (a space before it if it would touch a word),
+  // and the caret ends up after it, ready for the question.
+  useEffect(() => {
+    if (!tabId) return
+    return onAgentInsert(tabId, (insert) => {
+      const el = textareaRef.current
+      const prev = textRef.current
+      const caret = Math.min(el?.selectionStart ?? prev.length, prev.length)
+      const lead = caret > 0 && !/\s/.test(prev[caret - 1]) ? ' ' : ''
+      const next = prev.slice(0, caret) + lead + insert + prev.slice(caret)
+      const position = caret + lead.length + insert.length
+      textRef.current = next
+      setText(next)
+      setSuggest(null)
+      requestAnimationFrame(() => {
+        el?.focus()
+        el?.setSelectionRange(position, position)
+      })
+    })
+  }, [tabId])
 
   // Autosize up to a cap; the timeline keeps the rest of the pane.
   useLayoutEffect(() => {

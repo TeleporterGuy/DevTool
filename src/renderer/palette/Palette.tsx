@@ -6,7 +6,7 @@ import { commandRegistry } from './CommandRegistry'
 import { fuzzyMatch, FUZZY_SCORE_FLOOR } from './fuzzy'
 import { computeFrecencyMultiplier, recordUse, recentIds, type FrecencyState } from './frecency'
 import { parsePrefix } from './parsePrefix'
-import { paletteEvents } from './paletteEvents'
+import { paletteEvents, setPaletteReturnFocus } from './paletteEvents'
 import { projectsToEntities } from './sources/projects'
 import { tasksToEntities } from './sources/tasks'
 import { openTabsToEntities } from './sources/openTabs'
@@ -69,6 +69,7 @@ export function Palette(): React.ReactElement | null {
     if (open) {
       const prev = document.activeElement
       lastFocusedRef.current = prev instanceof HTMLElement ? prev : null
+      setPaletteReturnFocus(lastFocusedRef.current)
       setInput('')
       setSelectedIndex(0)
       const t = window.setTimeout(() => inputRef.current?.focus(), 0)

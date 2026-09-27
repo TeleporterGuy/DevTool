@@ -34,6 +34,14 @@ vi.mock('@monaco-editor/react', async () => {
           forceRender(n => n + 1)
         },
         addCommand: () => {},
+        addAction: () => ({ dispose: () => {} }),
+        onDidDispose: () => ({ dispose: () => {} }),
+        onDidChangeCursorSelection: () => ({ dispose: () => {} }),
+        onDidBlurEditorWidget: () => ({ dispose: () => {} }),
+        hasTextFocus: () => false,
+        addContentWidget: () => {},
+        removeContentWidget: () => {},
+        layoutContentWidget: () => {},
         updateOptions: () => {},
         layout: () => {}
       }

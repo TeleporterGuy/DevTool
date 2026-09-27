@@ -19,6 +19,7 @@ import {
   parseKernelEventLine,
   parseNotebook,
   serializeNotebook,
+  storedCellIds,
   setNotebookCellCollapsed,
   setNotebookCondaEnvMetadata,
   notebookCondaEnvFromMetadata,
@@ -528,5 +529,63 @@ describe('kernel message handling', () => {
   it('does not change outputs for status or reply events', () => {
     expect(applyKernelEventToOutputs([], { event: 'status', execution_state: 'idle' })).toBeNull()
     expect(applyKernelEventToOutputs([], { event: 'execute_reply', id: 'c1', status: 'ok', execution_count: 2 })).toBeNull()
+  })
+})
+
+describe('cell ids for notebooks that store none (nbformat < 4.5)', () => {
+  const legacy = JSON.stringify({
+    nbformat: 4,
+    nbformat_minor: 2,
+    metadata: {},
+    cells: [
+      { cell_type: 'markdown', metadata: {}, source: ['# Title'] },
+      { cell_type: 'code', metadata: {}, source: ['x = 1'], outputs: [], execution_count: null }
+    ]
+  })
+
+  it('gives the same stand-in ids on every parse, so re-reads do not churn them', () => {
+    const first = parseNotebook(legacy).cells.map(c => c.id)
+    const second = parseNotebook(legacy).cells.map(c => c.id)
+    expect(first).toEqual(['cell-0', 'cell-1'])
+    expect(second).toEqual(first)
+    expect(serializeNotebook(parseNotebook(legacy))).toBe(serializeNotebook(parseNotebook(legacy)))
+  })
+
+  it('keeps stored ids and makes repeated ones unique', () => {
+    const doc = parseNotebook(JSON.stringify({
+      nbformat: 4,
+      nbformat_minor: 5,
+      metadata: {},
+      cells: [
+        { id: 'a', cell_type: 'code', metadata: {}, source: [], outputs: [], execution_count: null },
+        { id: 'a', cell_type: 'code', metadata: {}, source: [], outputs: [], execution_count: null },
+        { cell_type: 'code', metadata: {}, source: [], outputs: [], execution_count: null }
+      ]
+    }))
+    const ids = doc.cells.map(c => c.id)
+    expect(ids[0]).toBe('a')
+    expect(ids[2]).toBe('cell-2')
+    expect(new Set(ids).size).toBe(3)
+  })
+})
+
+describe('storedCellIds', () => {
+  it('lists only ids the file itself stores', () => {
+    const text = JSON.stringify({
+      nbformat: 4,
+      nbformat_minor: 5,
+      metadata: {},
+      cells: [
+        { id: 'abc', cell_type: 'code', metadata: {}, source: ['print("cell-1")'], outputs: [], execution_count: null },
+        { cell_type: 'markdown', metadata: {}, source: [] }
+      ]
+    })
+    expect([...storedCellIds(text)]).toEqual(['abc'])
+    // A stand-in id mentioned in cell text is not a stored id.
+    expect(storedCellIds(text).has('cell-1')).toBe(false)
+  })
+
+  it('is empty for invalid text', () => {
+    expect(storedCellIds('not json').size).toBe(0)
   })
 })

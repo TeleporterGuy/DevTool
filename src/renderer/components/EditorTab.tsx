@@ -9,6 +9,15 @@ import { buildMonacoEditorOptions, getLanguageFromPath } from './monacoOptions'
 import { defineMonacoThemes, monacoThemeFor } from './monacoTheme'
 import MarkdownPreview from './MarkdownPreview'
 import { formatShortcutForApp } from '../../shared/shortcut-label'
+import { agentLinkPath, formatAgentLink, selectionLines } from '../../shared/agent-link'
+import { showAgentLinkNotice, useLinkToAgent } from '../agentLink/linkToAgent'
+import { attachAgentLinkHint } from '../agentLink/selectionHint'
+import { isAgentTabType } from '../../shared/types'
+import { paletteEvents } from '../palette/paletteEvents'
+
+// Monaco KeyMod.CtrlCmd | KeyMod.Shift | KeyCode.KeyL
+export const LINK_SELECTION_KEYBINDING = 2048 | 42
+export const LINK_FILE_KEYBINDING = 2048 | 1024 | 42
 
 interface Props {
   tabId: string
@@ -22,7 +31,7 @@ interface Props {
 }
 
 export default function EditorTab({ tabId, visible, filePath, projectDir, projectId, taskId, pane, effectiveTheme }: Props): React.ReactElement {
-  const { config } = useApp()
+  const { config, projects } = useApp()
   const dirtyBuffers = useDirtyBufferStore()
   const [content, setContent] = useState<string | null>(null)
   const [dirty, setDirty] = useState(false)
@@ -208,6 +217,44 @@ export default function EditorTab({ tabId, visible, filePath, projectDir, projec
     return () => dirtyBuffers.unregisterBuffer(tabId, token)
   }, [dirtyBuffers, tabId, filePath, dirty])
 
+  // Ctrl+L / Ctrl+Shift+L: save if needed (the agent reads disk), then send a
+  // compact link to the selection / file to the task's agent tab.
+  const linkToAgent = useLinkToAgent(projectId, taskId)
+  // Whether the "Add to agent" chip may show on a selection: only when the task
+  // has an agent tab to take the link.
+  const task = projects?.find(p => p.id === projectId)?.tasks.find(t => t.id === taskId)
+  const hasAgentTab = !!task && [...task.tabs.left, ...task.tabs.right].some(t => isAgentTabType(t.type))
+  const hasAgentTabRef = useRef(hasAgentTab)
+  hasAgentTabRef.current = hasAgentTab
+  const linkRef = useRef<(kind: 'selection' | 'file') => void>(() => {})
+  linkRef.current = (kind) => {
+    void (async () => {
+      const ed = editorRef.current
+      if (dirtyRef.current) {
+        try {
+          await writeBuffer()
+        } catch {
+          showAgentLinkNotice('Save failed, so no link was sent.')
+          return
+        }
+      }
+      const path = agentLinkPath(projectDir, filePath)
+      const sel = kind === 'selection' ? ed?.getSelection() : null
+      linkToAgent(formatAgentLink(sel ? { path, ...selectionLines(sel) } : { path }))
+    })()
+  }
+
+  // From the palette: only the editor that had focus when the palette opened.
+  const rootRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!visible) return
+    return paletteEvents.on('link-to-agent', (request) => {
+      if (request.handled || !request.target || !rootRef.current?.contains(request.target)) return
+      request.handled = true
+      linkRef.current(request.kind)
+    })
+  }, [visible])
+
   const handleEditorDidMount = (ed: editor.IStandaloneCodeEditor) => {
     editorRef.current = ed
     // Bind Cmd+S / Ctrl+S to save
@@ -223,6 +270,34 @@ export default function EditorTab({ tabId, visible, filePath, projectDir, projec
         () => handleToggleView()
       )
     }
+    // Actions rather than commands so they also show in the editor's context menu.
+    // They replace Monaco's own Ctrl+L (expand line selection) and Ctrl+Shift+L
+    // (select all occurrences) inside DevTool.
+    const linkSelectionAction = ed.addAction({
+      id: 'devtool.linkSelectionToAgent',
+      label: 'Link Selection to Agent',
+      keybindings: [LINK_SELECTION_KEYBINDING],
+      contextMenuGroupId: 'navigation',
+      contextMenuOrder: 0,
+      run: () => linkRef.current('selection')
+    })
+    const linkFileAction = ed.addAction({
+      id: 'devtool.linkFileToAgent',
+      label: 'Link File to Agent',
+      keybindings: [LINK_FILE_KEYBINDING],
+      contextMenuGroupId: 'navigation',
+      contextMenuOrder: 0.1,
+      run: () => linkRef.current('file')
+    })
+    attachAgentLinkHint(ed, {
+      enabled: () => hasAgentTabRef.current,
+      onLink: () => linkRef.current('selection')
+    })
+    // addAction's keybindings and menu items outlive the editor unless released.
+    ed.onDidDispose(() => {
+      linkSelectionAction.dispose()
+      linkFileAction.dispose()
+    })
   }
 
   const handleChange = (value: string | undefined) => {
@@ -236,7 +311,7 @@ export default function EditorTab({ tabId, visible, filePath, projectDir, projec
   if (!visible && !everVisible) return <div style={{ display: 'none' }} />
 
   return (
-    <div style={{ position: 'absolute', inset: 0, display: visible ? 'block' : 'none' }}>
+    <div ref={rootRef} style={{ position: 'absolute', inset: 0, display: visible ? 'block' : 'none' }}>
       {content === null ? (
         <div className="tab-content-placeholder">{error ?? 'Loading...'}</div>
       ) : (

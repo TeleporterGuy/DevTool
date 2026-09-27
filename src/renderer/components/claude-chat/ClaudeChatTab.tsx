@@ -12,6 +12,7 @@ import { attachChat, forgetChat, getChatState, setChatEventHandler, useChatState
 import Timeline from './Timeline'
 import PromptCard from './PromptCards'
 import Composer from './Composer'
+import { noteAgentTabTyped } from '../../agentLink/agentTabRecency'
 
 interface Props {
   tabId: string
@@ -186,7 +187,7 @@ export default function ClaudeChatTab({ tabId, visible, sessionId, pane, project
   const starting = state.process === 'starting' && state.items.length === 0
 
   return (
-    <div className="absolute inset-0 flex-col bg-bg" style={{ display: visible ? 'flex' : 'none' }}>
+    <div className="absolute inset-0 flex-col bg-bg" style={{ display: visible ? 'flex' : 'none' }} onKeyDownCapture={() => noteAgentTabTyped(taskId, tabId)}>
       <div ref={scrollRef} onScroll={onScroll} className="flex-1 overflow-y-auto relative">
         <div className="max-w-[860px] mx-auto px-5 pt-4 pb-3">
           {empty ? (
@@ -237,6 +238,7 @@ export default function ClaudeChatTab({ tabId, visible, sessionId, pane, project
           onSetEffort={(effort) => { void window.api.chatSetEffort(tabId, effort) }}
           onOpenInTerminal={openInTerminal}
           focusSignal={visible}
+          tabId={tabId}
         />
       </div>
     </div>

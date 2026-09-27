@@ -12,6 +12,20 @@ type EventMap = {
   'quit-app': void
   'switch-theme': 'dark' | 'light' | 'toggle'
   'palette-prefix-set': string
+  /**
+   * Palette-run Ctrl+L / Ctrl+Shift+L. The editor or notebook containing `target`
+   * (what had focus when the palette opened) links to its task's agent and sets
+   * `handled`.
+   */
+  'link-to-agent': LinkToAgentRequest
+  /** Short message for the agent-link banner (no agent tab, save failed). */
+  'agent-link-notice': string
+}
+
+export interface LinkToAgentRequest {
+  kind: 'selection' | 'file'
+  target: Element | null
+  handled: boolean
 }
 
 type Listener<K extends keyof EventMap> = EventMap[K] extends void
@@ -34,3 +48,13 @@ class PaletteEvents {
 }
 
 export const paletteEvents = new PaletteEvents()
+
+// What had focus when the palette opened, for commands that act on "where the
+// user was" (Link Selection to Agent). One palette per window.
+let paletteReturnFocus: Element | null = null
+export function setPaletteReturnFocus(el: Element | null): void {
+  paletteReturnFocus = el
+}
+export function getPaletteReturnFocus(): Element | null {
+  return paletteReturnFocus
+}

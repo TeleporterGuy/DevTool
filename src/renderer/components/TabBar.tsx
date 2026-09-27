@@ -329,14 +329,15 @@ export default function TabBar({
           &#9673;
         </button>
         {config?.enableClaude && selectedProject && !isShellCommandProject(selectedProject) && (
-          <>
-            <button className="bg-transparent border-0 text-text-muted cursor-pointer px-1.5 py-1 rounded-md text-xs font-mono hover:bg-surface-3 hover:text-text transition-colors duration-(--motion-fast)" onClick={() => handleAdd(claudeChatDefault ? 'claude-chat' : 'claude')} title={claudeChatDefault ? 'New Claude chat' : 'New Claude Code'}>
-              &#10022;
-            </button>
-            <button className="bg-transparent border-0 text-text-muted cursor-pointer px-1.5 py-1 rounded-md text-xs font-mono hover:bg-surface-3 hover:text-text transition-colors duration-(--motion-fast) inline-flex items-center" onClick={() => handleAdd(claudeChatDefault ? 'claude' : 'claude-chat')} title={claudeChatDefault ? 'New Claude Code (terminal)' : 'New Claude chat'}>
-              {claudeChatDefault ? <span>&gt;&#10022;</span> : <MessageSquare size={12} strokeWidth={2} />}
-            </button>
-          </>
+          // One Claude button, in the mode Settings picks (terminal or chat). An open
+          // tab can still be switched between the two from its own tab.
+          <button
+            className="bg-transparent border-0 text-text-muted cursor-pointer px-1.5 py-1 rounded-md text-xs font-mono hover:bg-surface-3 hover:text-text transition-colors duration-(--motion-fast) inline-flex items-center"
+            onClick={() => handleAdd(claudeChatDefault ? 'claude-chat' : 'claude')}
+            title={claudeChatDefault ? 'New Claude chat' : 'New Claude Code'}
+          >
+            {claudeChatDefault ? <MessageSquare size={12} strokeWidth={2} /> : <span>&#10022;</span>}
+          </button>
         )}
         {config?.enableCodex && selectedProject && !isShellCommandProject(selectedProject) && (
           <button className="bg-transparent border-0 text-text-muted cursor-pointer px-1.5 py-1 rounded-md text-xs font-mono hover:bg-surface-3 hover:text-text transition-colors duration-(--motion-fast)" onClick={() => handleAdd('codex')} title="New Codex">
