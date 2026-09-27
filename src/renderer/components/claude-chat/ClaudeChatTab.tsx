@@ -4,7 +4,7 @@ import { useApp } from '../../context/AppContext'
 import { useTabStatusStore } from '../../context/TabStatusContext'
 import type { SshConfig } from '../../../shared/types'
 import { classifyNotification, nextAiStatus, type AiNotificationKind, type AiStatusDecision, type AiStatusEvent } from '../../../shared/ai-status'
-import type { ChatImage, ChatPromptResponse } from '../../../shared/claude-chat'
+import { SIDE_QUESTION_COMMAND, type ChatImage, type ChatPromptResponse } from '../../../shared/claude-chat'
 import { parseExtraArgs } from '../aiToolTabUtils'
 import { ensureHookListeners, hookStatusCallbacks } from '../hookStatusListeners'
 import { normalizeBrowserUrl } from '../../browserUrl'
@@ -12,6 +12,7 @@ import { attachChat, forgetChat, getChatState, setChatEventHandler, useChatState
 import Timeline, { type TimelineFocus } from './Timeline'
 import TaskIndicator from './TaskIndicator'
 import PromptCard from './PromptCards'
+import SideQuestion, { type SideQuestionState } from './SideQuestion'
 import Composer from './Composer'
 
 interface Props {
@@ -50,6 +51,8 @@ export default function ClaudeChatTab({ tabId, visible, sessionId, pane, project
   const [attachError, setAttachError] = useState<string | null>(null)
   const [focus, setFocus] = useState<TimelineFocus | null>(null)
   const focusSeq = useRef(0)
+  const [side, setSide] = useState<SideQuestionState | null>(null)
+  const sideSeq = useRef(0)
 
   const applyStatus = useCallback((event: AiStatusEvent, notificationKind?: AiNotificationKind): AiStatusDecision => {
     const current = statusStore.getStatus(tabId)
@@ -171,10 +174,38 @@ export default function ClaudeChatTab({ tabId, visible, sessionId, pane, project
     })
   }, [tabId, projectId, taskId, markTaskInteracted])
 
+  // One side question at a time, like the CLI: a new one replaces the last, and a
+  // dismissed one's late answer is dropped.
+  const askSideQuestion = useCallback((question: string) => {
+    sideSeq.current += 1
+    const id = sideSeq.current
+    setSide({ id, question, status: 'asking' })
+    const settle = (next: Partial<SideQuestionState>): void => {
+      setSide((current) => (current?.id === id ? { ...current, ...next } : current))
+    }
+    window.api.chatSideQuestion(tabId, question).then((answer) => {
+      if (answer.response === null) settle({ status: 'error', error: 'No answer came back.' })
+      else settle({ status: 'done', answer: answer.response })
+    }).catch((err: unknown) => {
+      const raw = err instanceof Error ? err.message : String(err)
+      settle({ status: 'error', error: raw.replace(/^Error invoking remote method '[^']+': (?:Error: )?/u, '') })
+    })
+  }, [tabId])
+
+  // The CLI doesn't list /btw to SDK clients; the chat tab runs it itself.
+  const commands = useMemo(
+    () => (state.commands.some((c) => c.name === SIDE_QUESTION_COMMAND.name) ? state.commands : [SIDE_QUESTION_COMMAND, ...state.commands]),
+    [state.commands]
+  )
+
   const respond = useCallback((promptId: string, response: ChatPromptResponse) => {
     markTaskInteracted(projectId, taskId)
     void window.api.chatRespond(tabId, promptId, response)
   }, [tabId, projectId, taskId, markTaskInteracted])
+
+  const openLink = useCallback((url: string) => {
+    addTab(projectId, taskId, pane, 'browser', { url: normalizeBrowserUrl(url) })
+  }, [addTab, projectId, taskId, pane])
 
   const openInTerminal = useCallback(() => {
     convertClaudeTab(projectId, taskId, pane, tabId, 'claude')
@@ -238,7 +269,7 @@ export default function ClaudeChatTab({ tabId, visible, sessionId, pane, project
                 compacting={state.compacting}
                 waiting={state.pending.length > 0}
                 turnStartedAt={state.turnStartedAt}
-                onOpenLink={(url) => addTab(projectId, taskId, pane, 'browser', { url: normalizeBrowserUrl(url) })}
+                onOpenLink={openLink}
                 taskTools={taskTools}
                 focus={focus}
               />
@@ -262,14 +293,16 @@ export default function ClaudeChatTab({ tabId, visible, sessionId, pane, project
         {state.pending.map((prompt) => (
           <PromptCard key={prompt.id} prompt={prompt} onRespond={(response) => respond(prompt.id, response)} />
         ))}
+        {side && <SideQuestion side={side} onDismiss={() => setSide(null)} onOpenLink={openLink} />}
         <Composer
           busy={state.busy}
           info={state.info}
           usage={state.usage}
           models={state.models}
-          commands={state.commands}
+          commands={commands}
           loadFiles={loadFiles}
           onSend={send}
+          onSideQuestion={askSideQuestion}
           onStop={() => { void window.api.chatInterrupt(tabId) }}
           onSetModel={(model) => { void window.api.chatSetModel(tabId, model) }}
           onSetMode={(mode) => { void window.api.chatSetMode(tabId, mode) }}

@@ -4,6 +4,7 @@ import {
   CHAT_PERMISSION_MODES,
   TERMINAL_ONLY_COMMANDS,
   findModelOption,
+  parseSideQuestion,
   type ChatCommand,
   type ChatImage,
   type ChatModelOption,
@@ -29,6 +30,8 @@ interface Props {
   /** Loaded on the first `@`; the project's files as git lists them. */
   loadFiles: () => Promise<string[]>
   onSend: (text: string, images: ChatImage[]) => void
+  /** `/btw <question>`: answered beside the conversation, not sent into it. */
+  onSideQuestion: (question: string) => void
   onStop: () => void
   onSetModel: (model: string | undefined) => void
   onSetMode: (mode: string) => void
@@ -87,7 +90,7 @@ function readImage(file: File): Promise<Attachment | null> {
 }
 
 export default function Composer(props: Props): React.ReactElement {
-  const { busy, disabled, info, usage, models, commands, loadFiles, onSend, onStop, onSetModel, onSetMode, onSetEffort, onOpenInTerminal, focusSignal } = props
+  const { busy, disabled, info, usage, models, commands, loadFiles, onSend, onSideQuestion, onStop, onSetModel, onSetMode, onSetEffort, onOpenInTerminal, focusSignal } = props
   const [text, setText] = useState('')
   const [images, setImages] = useState<Attachment[]>([])
   const [suggest, setSuggest] = useState<Suggest | null>(null)
@@ -164,6 +167,15 @@ export default function Composer(props: Props): React.ReactElement {
     const command = /^\/(\S+)/.exec(trimmed)?.[1]
     if (command && TERMINAL_ONLY_COMMANDS.has(command)) {
       onOpenInTerminal()
+      return
+    }
+    const side = parseSideQuestion(trimmed)
+    if (side !== null) {
+      // Text only: attached images stay for the next real message.
+      if (!side) return
+      onSideQuestion(side)
+      setText('')
+      setSuggest(null)
       return
     }
     onSend(trimmed, images.map(({ mediaType, data }) => ({ mediaType, data })))

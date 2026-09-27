@@ -19,6 +19,7 @@ import {
   type ChatImage,
   type ChatPrompt,
   type ChatPromptResponse,
+  type ChatSideAnswer,
   type ChatUsage
 } from '../../shared/claude-chat'
 
@@ -33,6 +34,24 @@ export const FORWARDED_HOOK_EVENTS: HookEvent[] = [
   'PreToolUse', 'PostToolUse', 'PostToolUseFailure',
   'SubagentStart', 'SubagentStop', 'PreCompact', 'PostCompact', 'SessionEnd'
 ]
+
+/**
+ * The CLI leaves the Artifact tool off in SDK sessions ("sdk_default_off") unless
+ * CLAUDE_CODE_ARTIFACT is set. A chat tab is someone at a keyboard, like a
+ * terminal session, so turn it on. CLAUDE_CODE_ARTIFACT=0 in the env, or
+ * `enableArtifact: false` in settings, still turns it off.
+ */
+export function chatEnv(env: Record<string, string | undefined>): Record<string, string | undefined> {
+  return env.CLAUDE_CODE_ARTIFACT === undefined ? { ...env, CLAUDE_CODE_ARTIFACT: '1' } : env
+}
+
+/**
+ * `/btw` in the SDK: shipped in the SDK's code, not yet in its types. Checked at
+ * runtime so an SDK without it fails the question, not the session.
+ */
+interface SideQuestionQuery {
+  askSideQuestion?: (question: string) => Promise<{ response: string; synthetic: boolean } | null>
+}
 
 /** Mid-turn context refreshes are at most this often; a turn's end always refreshes. */
 const CONTEXT_REFRESH_MS = 20_000
@@ -209,7 +228,7 @@ export class ChatSession {
     const queryOptions: Options = {
       cwd: o.cwd,
       pathToClaudeCodeExecutable: o.executable,
-      env: o.env,
+      env: chatEnv(o.env),
       settingSources: ['user', 'project', 'local'],
       systemPrompt: { type: 'preset', preset: 'claude_code' },
       includePartialMessages: true,
@@ -458,6 +477,15 @@ export class ChatSession {
   async interrupt(): Promise<void> {
     this.options.onEvent({ t: 'interrupting' })
     await this.query?.interrupt().catch((err) => this.options.log(`chatInterrupt error=${String(err)}`))
+  }
+
+  /** `/btw`: answered from the conversation so far; nothing joins the transcript. */
+  async askSideQuestion(question: string): Promise<ChatSideAnswer> {
+    const query = this.query as (Query & SideQuestionQuery) | null
+    if (!query || this.ended) throw new Error('Claude is not running.')
+    if (typeof query.askSideQuestion !== 'function') throw new Error('This Agent SDK has no side questions.')
+    const answer = await query.askSideQuestion(question)
+    return answer ? { response: answer.response, synthetic: answer.synthetic } : { response: null }
   }
 
   /** Stop one running task (a subagent, a shell). Failures show in the timeline. */

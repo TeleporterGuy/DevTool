@@ -162,6 +162,8 @@ export function registerAgentHandlers(ipc: IpcRegistrar, deps: AgentDeps): void 
   })
   ipc.handle('chat-send', [safeId, str, chatImages], (_event, tabId, text, images) =>
     deps.chatManager().send(tabId, text, images ?? []))
+  ipc.handle('chat-side-question', [safeId, v.string({ nonEmpty: true, max: 20_000 })], (_event, tabId, question) =>
+    deps.chatManager().askSideQuestion(tabId, question))
   ipc.handle('chat-interrupt', [safeId], (_event, tabId) => deps.chatManager().interrupt(tabId))
   ipc.handle('chat-stop-task', chatTaskArgs, (_event, tabId, taskId) => deps.chatManager().stopTask(tabId, taskId))
   ipc.handle('chat-background-task', chatTaskArgs, (_event, tabId, toolUseId) =>

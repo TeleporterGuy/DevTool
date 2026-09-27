@@ -1005,6 +1005,30 @@ export const CHAT_PERMISSION_MODES = [
   { value: 'bypassPermissions', label: 'Bypass' }
 ] as const
 
+/**
+ * `/btw`: a quick question answered from the conversation so far, without joining
+ * it. The CLI doesn't list it (it's a terminal-UI command); the chat tab runs it
+ * through the SDK's side-question request instead.
+ */
+export const SIDE_QUESTION_COMMAND: ChatCommand = {
+  name: 'btw',
+  description: 'Ask a quick side question — the answer stays out of the conversation',
+  argumentHint: '<question>'
+}
+
+/** The question in `/btw <question>`; '' for a bare `/btw`, null for anything else. */
+export function parseSideQuestion(text: string): string | null {
+  const match = /^\/btw(?:\s+([\s\S]*))?$/.exec(text.trim())
+  return match ? (match[1] ?? '').trim() : null
+}
+
+export interface ChatSideAnswer {
+  /** Null when the CLI had nothing to say (e.g. the question was cancelled). */
+  response: string | null
+  /** The CLI made up the answer itself (an error or refusal), not the model. */
+  synthetic?: boolean
+}
+
 /** Built-in commands that only make sense in the terminal UI. */
 export const TERMINAL_ONLY_COMMANDS = new Set([
   'login', 'logout', 'config', 'settings', 'theme', 'terminal-setup', 'vim', 'doctor', 'ide',
