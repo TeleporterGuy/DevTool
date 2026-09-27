@@ -15,6 +15,8 @@ import PromptCard from './PromptCards'
 import SideQuestion, { type SideQuestionState } from './SideQuestion'
 import Composer from './Composer'
 import { noteAgentTabTyped } from '../../agentLink/agentTabRecency'
+import LinkContextMenu, { type LinkMenuState } from '../LinkContextMenu'
+import { chatContextMenuAt } from './chatContextMenu'
 
 interface Props {
   tabId: string
@@ -54,6 +56,7 @@ export default function ClaudeChatTab({ tabId, visible, sessionId, pane, project
   const focusSeq = useRef(0)
   const [side, setSide] = useState<SideQuestionState | null>(null)
   const sideSeq = useRef(0)
+  const [linkMenu, setLinkMenu] = useState<LinkMenuState | null>(null)
 
   const applyStatus = useCallback((event: AiStatusEvent, notificationKind?: AiNotificationKind): AiStatusDecision => {
     const current = statusStore.getStatus(tabId)
@@ -208,6 +211,13 @@ export default function ClaudeChatTab({ tabId, visible, sessionId, pane, project
     addTab(projectId, taskId, pane, 'browser', { url: normalizeBrowserUrl(url) })
   }, [addTab, projectId, taskId, pane])
 
+  const openContextMenu = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+    const menu = chatContextMenuAt(e.target as Element, e.currentTarget, window.getSelection(), e.clientX, e.clientY)
+    if (!menu) return
+    e.preventDefault()
+    setLinkMenu(menu)
+  }, [])
+
   const openInTerminal = useCallback(() => {
     convertClaudeTab(projectId, taskId, pane, tabId, 'claude')
   }, [convertClaudeTab, projectId, taskId, pane, tabId])
@@ -249,7 +259,12 @@ export default function ClaudeChatTab({ tabId, visible, sessionId, pane, project
   const starting = state.process === 'starting' && state.items.length === 0
 
   return (
-    <div className="absolute inset-0 flex-col bg-bg" style={{ display: visible ? 'flex' : 'none' }} onKeyDownCapture={() => noteAgentTabTyped(taskId, tabId)}>
+    <div
+      className="absolute inset-0 flex-col bg-bg"
+      style={{ display: visible ? 'flex' : 'none' }}
+      onKeyDownCapture={() => noteAgentTabTyped(taskId, tabId)}
+      onContextMenu={openContextMenu}
+    >
       <div className="flex-1 min-h-0 relative">
         <div className="absolute top-2 right-3 z-(--z-sticky)">
           <TaskIndicator tasks={tasks} onStop={stopTask} onBackground={backgroundTask} onJump={jumpToTool} canJump={canJump} />
@@ -313,6 +328,7 @@ export default function ClaudeChatTab({ tabId, visible, sessionId, pane, project
           tabId={tabId}
         />
       </div>
+      <LinkContextMenu menu={linkMenu} onClose={() => setLinkMenu(null)} onOpenInApp={openLink} />
     </div>
   )
 }

@@ -1,9 +1,13 @@
 import React from 'react'
 import { normalizeBrowserUrl } from '../browserUrl'
 import { useMenuPosition } from '../hooks/useMenuPosition'
+import { menuCls, menuItemCls } from './ui/menu'
 
 export interface LinkMenuState {
-  url: string
+  /** The link under the pointer; the link rows appear only when set. */
+  url?: string
+  /** Selected text to offer a Copy row for. */
+  selection?: string
   x: number
   y: number
 }
@@ -19,20 +23,9 @@ export default function LinkContextMenu({ menu, onClose, onOpenInApp }: Props): 
 
   if (!menu) return null
 
-  const normalized = normalizeBrowserUrl(menu.url)
-
-  const handleOpenInApp = () => {
-    onOpenInApp(normalized)
-    onClose()
-  }
-
-  const handleCopyLink = () => {
-    void window.api.clipboardWriteText(normalized)
-    onClose()
-  }
-
-  const handleOpenExternal = () => {
-    void window.api.openExternal(normalized)
+  const normalized = menu.url ? normalizeBrowserUrl(menu.url) : null
+  const run = (action: () => void) => () => {
+    action()
     onClose()
   }
 
@@ -43,36 +36,47 @@ export default function LinkContextMenu({ menu, onClose, onOpenInApp }: Props): 
         onClick={onClose}
         onContextMenu={(e) => {
           e.preventDefault()
+          // Keep a parent's own context-menu handler from reopening the menu.
+          e.stopPropagation()
           onClose()
         }}
       />
       <div
         ref={menuPos.ref}
         style={menuPos.style}
-        className="fixed z-(--z-menu) min-w-[180px] bg-surface border-[0.5px] border-border rounded-lg p-1 shadow-pop"
+        role="menu"
+        className={`fixed z-(--z-menu) min-w-[180px] ${menuCls}`}
         onMouseDown={(e) => e.stopPropagation()}
+        onContextMenu={(e) => {
+          e.preventDefault()
+          e.stopPropagation()
+        }}
       >
-        <button
-          type="button"
-          className="block w-full rounded-md px-2.5 py-1 bg-transparent border-0 text-text text-sm text-left cursor-pointer hover:bg-sel"
-          onClick={handleOpenInApp}
-        >
-          Open in Browser Tab
-        </button>
-        <button
-          type="button"
-          className="block w-full rounded-md px-2.5 py-1 bg-transparent border-0 text-text text-sm text-left cursor-pointer hover:bg-sel"
-          onClick={handleCopyLink}
-        >
-          Copy Link
-        </button>
-        <button
-          type="button"
-          className="block w-full rounded-md px-2.5 py-1 bg-transparent border-0 text-text text-sm text-left cursor-pointer hover:bg-sel"
-          onClick={handleOpenExternal}
-        >
-          Open in System Browser
-        </button>
+        {menu.selection && (
+          <button type="button" role="menuitem" className={menuItemCls}
+            onClick={run(() => void window.api.clipboardWriteText(menu.selection!))}
+          >
+            Copy
+          </button>
+        )}
+        {menu.selection && normalized && <div className="my-1 border-t border-hair" />}
+        {normalized && (
+          <>
+            <button type="button" role="menuitem" className={menuItemCls} onClick={run(() => onOpenInApp(normalized))}>
+              Open in Browser Tab
+            </button>
+            <button type="button" role="menuitem" className={menuItemCls}
+              onClick={run(() => void window.api.clipboardWriteText(normalized))}
+            >
+              Copy Link
+            </button>
+            <button type="button" role="menuitem" className={menuItemCls}
+              onClick={run(() => void window.api.openExternal(normalized))}
+            >
+              Open in System Browser
+            </button>
+          </>
+        )}
       </div>
     </>
   )
