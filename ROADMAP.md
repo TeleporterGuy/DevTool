@@ -328,6 +328,7 @@ Work items:
    - **Not Ctrl+Alt+…:** on Windows Ctrl+Alt is AltGr, which layouts like Slovak need for `@`, `{`, `[`.
    - These override two Monaco defaults inside DevTool: Ctrl+L (expand line selection) and Ctrl+Shift+L (select all occurrences; Ctrl+F2 still covers most of that). Same trade Cursor makes.
    - Also a context-menu entry in the editor and on the notebook cell header, and file-tree right-click → link the whole file. List both shortcuts in the Phase 1.4 shortcut map with Windows labels.
+   - **Discoverability:** a small "Add to agent Ctrl+L" (⌘L) chip at the end of a non-empty selection in editors and notebook cells, shown only when the task has an agent tab; clicking it links like the shortcut.
 
 Stay out of: pasting full selection text into the PTY, a DevTool-side resolver/index for links, remote SSH notebooks (still local-only), inline edit (Cursor's Ctrl+K edit-in-place is not this — Ctrl+K stays the palette), LSP.
 

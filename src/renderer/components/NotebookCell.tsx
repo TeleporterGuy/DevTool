@@ -20,6 +20,7 @@ import {
   NOTEBOOK_CODE_PREVIEW_CODE_CLASS
 } from './notebookCodePreview'
 import { selectionLines } from '../../shared/agent-link'
+import { attachAgentLinkHint } from '../agentLink/selectionHint'
 import { formatShortcutForApp } from '../../shared/shortcut-label'
 
 interface Props {
@@ -55,6 +56,8 @@ interface Props {
   onLinkToAgent?: (kind: 'selection' | 'file', lines: { startLine: number; endLine: number } | null) => void
   /** This cell's Monaco editor when it mounts, null when it goes away. */
   onEditorChange?: (ed: editor.IStandaloneCodeEditor | null) => void
+  /** The task has an agent tab, so the "Add to agent" chip may show on a selection. */
+  agentAvailable?: boolean
 }
 
 const RUN_KEY = 2048 | 3
@@ -180,7 +183,8 @@ export default function NotebookCellView({
   resetKey,
   suspendEditors = false,
   onLinkToAgent,
-  onEditorChange
+  onEditorChange,
+  agentAvailable = false
 }: Props): React.ReactElement {
   const [height, setHeight] = useState(64)
   const editorRef = useRef<editor.IStandaloneCodeEditor | null>(null)
@@ -193,6 +197,8 @@ export default function NotebookCellView({
   onLinkToAgentRef.current = onLinkToAgent
   const onEditorChangeRef = useRef(onEditorChange)
   onEditorChangeRef.current = onEditorChange
+  const agentAvailableRef = useRef(agentAvailable)
+  agentAvailableRef.current = agentAvailable
   const cellTypeRef = useRef(cell.cellType)
   const collapsed = isNotebookCellCollapsed(cell)
   const sourcePreview = notebookCellSourcePreview(cell.source)
@@ -276,6 +282,14 @@ export default function NotebookCellView({
     ed.onDidDispose(() => {
       linkSelectionAction.dispose()
       linkFileAction.dispose()
+    })
+    attachAgentLinkHint(ed, {
+      enabled: () => agentAvailableRef.current && !!onLinkToAgentRef.current,
+      onLink: () => {
+        const sel = ed.getSelection()
+        const empty = !sel || (sel.startLineNumber === sel.endLineNumber && sel.startColumn === sel.endColumn)
+        onLinkToAgentRef.current?.('selection', empty ? null : selectionLines(sel))
+      }
     })
     onEditorChangeRef.current?.(ed)
     const applyHeight = () => {

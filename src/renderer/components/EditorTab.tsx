@@ -11,6 +11,8 @@ import MarkdownPreview from './MarkdownPreview'
 import { formatShortcutForApp } from '../../shared/shortcut-label'
 import { agentLinkPath, formatAgentLink, selectionLines } from '../../shared/agent-link'
 import { showAgentLinkNotice, useLinkToAgent } from '../agentLink/linkToAgent'
+import { attachAgentLinkHint } from '../agentLink/selectionHint'
+import { isAgentTabType } from '../../shared/types'
 import { paletteEvents } from '../palette/paletteEvents'
 
 // Monaco KeyMod.CtrlCmd | KeyMod.Shift | KeyCode.KeyL
@@ -29,7 +31,7 @@ interface Props {
 }
 
 export default function EditorTab({ tabId, visible, filePath, projectDir, projectId, taskId, pane, effectiveTheme }: Props): React.ReactElement {
-  const { config } = useApp()
+  const { config, projects } = useApp()
   const dirtyBuffers = useDirtyBufferStore()
   const [content, setContent] = useState<string | null>(null)
   const [dirty, setDirty] = useState(false)
@@ -218,6 +220,12 @@ export default function EditorTab({ tabId, visible, filePath, projectDir, projec
   // Ctrl+L / Ctrl+Shift+L: save if needed (the agent reads disk), then send a
   // compact link to the selection / file to the task's agent tab.
   const linkToAgent = useLinkToAgent(projectId, taskId)
+  // Whether the "Add to agent" chip may show on a selection: only when the task
+  // has an agent tab to take the link.
+  const task = projects?.find(p => p.id === projectId)?.tasks.find(t => t.id === taskId)
+  const hasAgentTab = !!task && [...task.tabs.left, ...task.tabs.right].some(t => isAgentTabType(t.type))
+  const hasAgentTabRef = useRef(hasAgentTab)
+  hasAgentTabRef.current = hasAgentTab
   const linkRef = useRef<(kind: 'selection' | 'file') => void>(() => {})
   linkRef.current = (kind) => {
     void (async () => {
@@ -280,6 +288,10 @@ export default function EditorTab({ tabId, visible, filePath, projectDir, projec
       contextMenuGroupId: 'navigation',
       contextMenuOrder: 0.1,
       run: () => linkRef.current('file')
+    })
+    attachAgentLinkHint(ed, {
+      enabled: () => hasAgentTabRef.current,
+      onLink: () => linkRef.current('selection')
     })
     // addAction's keybindings and menu items outlive the editor unless released.
     ed.onDidDispose(() => {

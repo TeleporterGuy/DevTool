@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { flushSync } from 'react-dom'
 import { AtSign, Eraser, Play, RotateCw, Square } from 'lucide-react'
-import { DEFAULT_CONFIG } from '../../shared/types'
+import { DEFAULT_CONFIG, isAgentTabType } from '../../shared/types'
 import {
   addCellAt,
   applyKernelEventToOutputs,
@@ -94,6 +94,7 @@ export default function NotebookTab({
   const dirtyBuffers = useDirtyBufferStore()
   const monacoConfig = config ?? DEFAULT_CONFIG
   const projectRecord = projects.find((item) => item.id === projectId)
+  const taskRecord = projectRecord?.tasks.find((t) => t.id === taskId)
   const projectConda: ProjectCondaSelection = {
     condaEnvName: projectRecord?.condaEnvName,
     condaEnvPrefix: projectRecord?.condaEnvPrefix
@@ -774,6 +775,7 @@ export default function NotebookTab({
               suspendEditors={suspendEditors}
               onFocus={() => setActiveCellId(cell.id)}
               onLinkToAgent={(kind, lines) => linkNotebook(kind, cell.id, lines)}
+              agentAvailable={!!taskRecord && [...taskRecord.tabs.left, ...taskRecord.tabs.right].some((t) => isAgentTabType(t.type))}
               onEditorChange={(ed) => {
                 if (ed) cellEditorRef.current = { cellId: cell.id, editor: ed }
                 else if (cellEditorRef.current?.cellId === cell.id) cellEditorRef.current = null

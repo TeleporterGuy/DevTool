@@ -59,6 +59,12 @@ vi.mock('@monaco-editor/react', async () => {
         },
         getSelection: () => mocks.selection,
         onDidDispose: () => ({ dispose: () => {} }),
+        onDidChangeCursorSelection: () => ({ dispose: () => {} }),
+        onDidBlurEditorWidget: () => ({ dispose: () => {} }),
+        hasTextFocus: () => false,
+        addContentWidget: () => {},
+        removeContentWidget: () => {},
+        layoutContentWidget: () => {},
         updateOptions: () => {},
         layout: () => {
           mocks.layoutCalls.count += 1
