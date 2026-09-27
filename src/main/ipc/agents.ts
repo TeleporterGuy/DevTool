@@ -124,7 +124,7 @@ export function registerAgentHandlers(ipc: IpcRegistrar, deps: AgentDeps): void 
         const { stdout } = await execFileAsync(manager.getSshCommand(), sshArgs, { timeout: 5000 })
         return JSON.parse(stdout.trim()) as { sessionId: string | null }
       } catch (error) {
-        throw new Error(`Failed to read Codex session: ${error instanceof Error ? error.message : String(error)}`)
+        throw new Error(`Failed to read Codex session: ${error instanceof Error ? error.message : String(error)}`, { cause: error })
       }
     }
   )
