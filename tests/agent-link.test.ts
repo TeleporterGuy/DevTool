@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { agentLinkPath, formatAgentLink, pickAgentTarget, selectionLines } from '../src/shared/agent-link'
+import { agentLinkPath, agentLinkShortcut, formatAgentLink, pickAgentTarget, selectionLines } from '../src/shared/agent-link'
 import type { Tab } from '../src/shared/types'
 
 describe('formatAgentLink', () => {
@@ -113,5 +113,27 @@ describe('pickAgentTarget', () => {
 
   it('returns null when the task has no agent tab', () => {
     expect(pickAgentTarget({ tabs: { left: [tab('ed', 'editor')], right: [tab('t', 'terminal')] } })).toBeNull()
+  })
+})
+
+describe('agentLinkShortcut', () => {
+  const key = (over: Partial<{ key: string; ctrlKey: boolean; metaKey: boolean; altKey: boolean; shiftKey: boolean }>) =>
+    ({ key: 'l', ctrlKey: false, metaKey: false, altKey: false, shiftKey: false, ...over })
+
+  it('is Ctrl+L / Ctrl+Shift+L on Windows and Linux', () => {
+    expect(agentLinkShortcut(key({ ctrlKey: true }), 'win32')).toBe('selection')
+    expect(agentLinkShortcut(key({ ctrlKey: true, shiftKey: true, key: 'L' }), 'win32')).toBe('file')
+    expect(agentLinkShortcut(key({ ctrlKey: true }), 'linux')).toBe('selection')
+  })
+
+  it('is Cmd+L on macOS, and Control+L there does nothing (as in Monaco)', () => {
+    expect(agentLinkShortcut(key({ metaKey: true }), 'darwin')).toBe('selection')
+    expect(agentLinkShortcut(key({ ctrlKey: true }), 'darwin')).toBeNull()
+  })
+
+  it('ignores AltGr (Ctrl+Alt on Windows) and other keys', () => {
+    expect(agentLinkShortcut(key({ ctrlKey: true, altKey: true }), 'win32')).toBeNull()
+    expect(agentLinkShortcut(key({ ctrlKey: true, key: 'k' }), 'win32')).toBeNull()
+    expect(agentLinkShortcut(key({}), 'win32')).toBeNull()
   })
 })

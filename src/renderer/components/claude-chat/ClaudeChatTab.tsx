@@ -12,7 +12,7 @@ import { attachChat, forgetChat, getChatState, setChatEventHandler, useChatState
 import Timeline from './Timeline'
 import PromptCard from './PromptCards'
 import Composer from './Composer'
-import { noteAgentTabFocused } from '../../agentLink/agentTabRecency'
+import { noteAgentTabTyped } from '../../agentLink/agentTabRecency'
 
 interface Props {
   tabId: string
@@ -121,10 +121,8 @@ export default function ClaudeChatTab({ tabId, visible, sessionId, pane, project
   }, [visible, tabId, sessionId, projectDir, projectId, sshConfig, extraArgs, applyStatus])
 
   useEffect(() => {
-    if (!visible) return
-    applyStatus('visit')
-    noteAgentTabFocused(taskId, tabId)
-  }, [visible, applyStatus, taskId, tabId])
+    if (visible) applyStatus('visit')
+  }, [visible, applyStatus])
 
   // Closing (or converting) the tab ends its process and forgets this window's copy.
   useEffect(() => {
@@ -189,7 +187,7 @@ export default function ClaudeChatTab({ tabId, visible, sessionId, pane, project
   const starting = state.process === 'starting' && state.items.length === 0
 
   return (
-    <div className="absolute inset-0 flex-col bg-bg" style={{ display: visible ? 'flex' : 'none' }} onFocusCapture={() => noteAgentTabFocused(taskId, tabId)}>
+    <div className="absolute inset-0 flex-col bg-bg" style={{ display: visible ? 'flex' : 'none' }} onKeyDownCapture={() => noteAgentTabTyped(taskId, tabId)}>
       <div ref={scrollRef} onScroll={onScroll} className="flex-1 overflow-y-auto relative">
         <div className="max-w-[860px] mx-auto px-5 pt-4 pb-3">
           {empty ? (

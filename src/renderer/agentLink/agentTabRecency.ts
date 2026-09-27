@@ -5,7 +5,7 @@
  */
 const recencyByTask = new Map<string, string[]>()
 
-export function noteAgentTabFocused(taskId: string, tabId: string): void {
+export function noteAgentTabTyped(taskId: string, tabId: string): void {
   const list = recencyByTask.get(taskId) ?? []
   recencyByTask.set(taskId, [tabId, ...list.filter(id => id !== tabId)])
 }

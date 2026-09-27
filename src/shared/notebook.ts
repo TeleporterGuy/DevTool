@@ -880,3 +880,21 @@ export function parseKernelEventLine(line: string): NotebookKernelEvent | null {
       return null
   }
 }
+
+/**
+ * The cell ids a notebook file actually stores (nbformat 4.5+). Stand-in ids that
+ * `parseNotebook` makes up for older files are not in it, so an agent reading the
+ * file would not find them.
+ */
+export function storedCellIds(text: string): Set<string> {
+  try {
+    const cells = (JSON.parse(text) as { cells?: unknown }).cells
+    if (!Array.isArray(cells)) return new Set()
+    return new Set(cells.flatMap((cell) => {
+      const id = (cell as { id?: unknown } | null)?.id
+      return typeof id === 'string' && id.trim() ? [id] : []
+    }))
+  } catch {
+    return new Set()
+  }
+}

@@ -29,8 +29,8 @@ import { sanitizeRestoredScrollback } from './scrollbackReplay'
 import { disarmXtermDocMouseListeners } from './xtermDisposal'
 import '@xterm/xterm/css/xterm.css'
 import { buildXtermTheme } from './terminalThemes'
-import { noteAgentTabFocused } from '../agentLink/agentTabRecency'
-import { onAgentInsert } from '../agentLink/linkToAgent'
+import { noteAgentTabTyped } from '../agentLink/agentTabRecency'
+import { agentTerminalReady, onAgentInsert, showAgentLinkNotice } from '../agentLink/linkToAgent'
 
 const ENABLE_XTERM_WEBGL = false
 
@@ -152,6 +152,11 @@ export default function AiToolTab({ tabId, toolType, visible, sessionId, pane, p
   // Agent links (Ctrl+L) that arrived before the PTY was spawned or while its
   // scrollback was replaying; pasted once input would reach the process.
   const pendingInsertsRef = useRef<string[]>([])
+  // When this xterm got attached to its running PTY (spawn resolved and scrollback
+  // replayed); null while detached. `spawnedRef` flips earlier, before the async
+  // spawn, so it cannot tell whether a write would reach the process yet.
+  const attachedAtRef = useRef<number | null>(null)
+  const insertRetryRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const focusClaimRef = useRef(false)
   const activityTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const staleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -241,6 +246,7 @@ export default function AiToolTab({ tabId, toolType, visible, sessionId, pane, p
     disposeAiToolTerminal(tabId, { killRuntime: false, persistScrollback: false })
     initializedRef.current = false
     spawnedRef.current = false
+    attachedAtRef.current = null
     scrollbackPreloadedRef.current = false
   }, [visible, tabId])
 
@@ -319,6 +325,7 @@ export default function AiToolTab({ tabId, toolType, visible, sessionId, pane, p
     window.api.ptyKill(tabId)
     statusStore.setStatus(tabId, null, 'ssh-respawn') // Clear exited status
     spawnedRef.current = false
+    attachedAtRef.current = null
     if (isCodexTab) {
       stopCodexSessionPolling()
     }
@@ -425,6 +432,9 @@ export default function AiToolTab({ tabId, toolType, visible, sessionId, pane, p
       window.api.ptyWrite(tabId, data)
     })
 
+    // Typing here makes this the agent Ctrl+L links go to.
+    term.onKey(() => noteAgentTabTyped(taskId, tabId))
+
     term.onResize(({ cols, rows }) => {
       const currentEntry = terminals.get(tabId)
       if (!currentEntry || currentEntry.suppressResizeEvents > 0) return
@@ -433,7 +443,6 @@ export default function AiToolTab({ tabId, toolType, visible, sessionId, pane, p
 
     term.element?.addEventListener('focusin', () => {
       focusClaimRef.current = true
-      noteAgentTabFocused(taskId, tabId)
       const currentEntry = terminals.get(tabId)
       if (!currentEntry) return
       currentEntry.fitAddon.fit()
@@ -673,6 +682,7 @@ export default function AiToolTab({ tabId, toolType, visible, sessionId, pane, p
                 entry.pendingData = []
               }
               entry.term.scrollToBottom()
+              attachedAtRef.current = Date.now()
               flushAgentInserts()
             }
 
@@ -703,6 +713,7 @@ export default function AiToolTab({ tabId, toolType, visible, sessionId, pane, p
             entry.restoring = false
             entry.pendingData = []
             spawnedRef.current = false
+            attachedAtRef.current = null
           })
         }
       }
@@ -711,25 +722,50 @@ export default function AiToolTab({ tabId, toolType, visible, sessionId, pane, p
     return () => ro.disconnect()
   }, [tabId, toolType, config, sessionId, projectDir, sshReady, userActivated, activationDecisionPending, visible])
 
-  // Agent links (Ctrl+L from an editor/notebook): paste into the TUI's input — as
-  // a bracketed paste when the TUI enabled it, never with a newline — and focus.
+  // Agent links (Ctrl+L from an editor/notebook): paste into the TUI's input as a
+  // bracketed paste, never with a newline, and focus. Held until the PTY is
+  // attached and the agent's TUI is up (see agentTerminalReady), so a link sent to
+  // a tab that is still starting is neither dropped nor typed into its startup.
   const flushAgentInserts = useCallback((): void => {
+    if (insertRetryRef.current) {
+      clearTimeout(insertRetryRef.current)
+      insertRetryRef.current = null
+    }
     const entry = terminals.get(tabId)
-    if (!entry || !spawnedRef.current || entry.restoring) return
-    const texts = pendingInsertsRef.current.splice(0)
-    for (const text of texts) pasteIntoTerminal(entry.term, text)
-    if (texts.length > 0) entry.term.focus()
+    if (!entry || pendingInsertsRef.current.length === 0) return
+    const ready = agentTerminalReady({
+      attachedAt: attachedAtRef.current,
+      restoring: entry.restoring,
+      bracketedPaste: entry.term.modes.bracketedPasteMode,
+      now: Date.now()
+    })
+    if (!ready) {
+      // Not attached yet: the spawn path flushes once it is. Attached but the TUI
+      // is not up yet: look again shortly.
+      if (attachedAtRef.current !== null) insertRetryRef.current = setTimeout(flushAgentInserts, 200)
+      return
+    }
+    for (const text of pendingInsertsRef.current.splice(0)) pasteIntoTerminal(entry.term, text)
+    entry.term.focus()
   }, [tabId])
 
-  useEffect(() => onAgentInsert(tabId, (text) => {
-    pendingInsertsRef.current.push(text)
-    flushAgentInserts()
-  }), [tabId, flushAgentInserts])
+  useEffect(() => {
+    const off = onAgentInsert(tabId, (text) => {
+      pendingInsertsRef.current.push(text)
+      if (requiresActivation && !userActivatedRef.current) {
+        showAgentLinkNotice('Link queued. Resume the agent tab to send it.')
+      }
+      flushAgentInserts()
+    })
+    return () => {
+      off()
+      if (insertRetryRef.current) clearTimeout(insertRetryRef.current)
+    }
+  }, [tabId, flushAgentInserts, requiresActivation])
 
   // Focus + re-fit on visibility change, clear attention
   useEffect(() => {
     if (visible) {
-      noteAgentTabFocused(taskId, tabId)
       if (!isClaudeTab) {
         suppressUntilRef.current = Date.now() + 500
       }
@@ -749,7 +785,7 @@ export default function AiToolTab({ tabId, toolType, visible, sessionId, pane, p
     } else {
       focusClaimRef.current = false
     }
-  }, [visible, tabId, taskId, isClaudeTab, applyStatus])
+  }, [visible, tabId, isClaudeTab, applyStatus])
 
   // Update font when config or zoom changes
   useEffect(() => {

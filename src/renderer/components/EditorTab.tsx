@@ -236,13 +236,14 @@ export default function EditorTab({ tabId, visible, filePath, projectDir, projec
     })()
   }
 
-  // From the palette: only the editor that had focus before the palette opened
-  // (the palette hands focus back before the command's event arrives).
+  // From the palette: only the editor that had focus when the palette opened.
   const rootRef = useRef<HTMLDivElement>(null)
   useEffect(() => {
     if (!visible) return
-    return paletteEvents.on('link-to-agent', (kind) => {
-      if (rootRef.current?.contains(document.activeElement)) linkRef.current(kind)
+    return paletteEvents.on('link-to-agent', (request) => {
+      if (request.handled || !request.target || !rootRef.current?.contains(request.target)) return
+      request.handled = true
+      linkRef.current(request.kind)
     })
   }, [visible])
 
@@ -264,7 +265,7 @@ export default function EditorTab({ tabId, visible, filePath, projectDir, projec
     // Actions rather than commands so they also show in the editor's context menu.
     // They replace Monaco's own Ctrl+L (expand line selection) and Ctrl+Shift+L
     // (select all occurrences) inside DevTool.
-    ed.addAction({
+    const linkSelectionAction = ed.addAction({
       id: 'devtool.linkSelectionToAgent',
       label: 'Link Selection to Agent',
       keybindings: [LINK_SELECTION_KEYBINDING],
@@ -272,13 +273,18 @@ export default function EditorTab({ tabId, visible, filePath, projectDir, projec
       contextMenuOrder: 0,
       run: () => linkRef.current('selection')
     })
-    ed.addAction({
+    const linkFileAction = ed.addAction({
       id: 'devtool.linkFileToAgent',
       label: 'Link File to Agent',
       keybindings: [LINK_FILE_KEYBINDING],
       contextMenuGroupId: 'navigation',
       contextMenuOrder: 0.1,
       run: () => linkRef.current('file')
+    })
+    // addAction's keybindings and menu items outlive the editor unless released.
+    ed.onDidDispose(() => {
+      linkSelectionAction.dispose()
+      linkFileAction.dispose()
     })
   }
 

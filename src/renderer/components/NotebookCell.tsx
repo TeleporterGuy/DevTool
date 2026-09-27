@@ -53,6 +53,8 @@ interface Props {
    * selection inside it, null for the whole cell — or the whole notebook to the agent.
    */
   onLinkToAgent?: (kind: 'selection' | 'file', lines: { startLine: number; endLine: number } | null) => void
+  /** This cell's Monaco editor when it mounts, null when it goes away. */
+  onEditorChange?: (ed: editor.IStandaloneCodeEditor | null) => void
 }
 
 const RUN_KEY = 2048 | 3
@@ -177,7 +179,8 @@ export default function NotebookCellView({
   onToggleCollapsed,
   resetKey,
   suspendEditors = false,
-  onLinkToAgent
+  onLinkToAgent,
+  onEditorChange
 }: Props): React.ReactElement {
   const [height, setHeight] = useState(64)
   const editorRef = useRef<editor.IStandaloneCodeEditor | null>(null)
@@ -188,6 +191,8 @@ export default function NotebookCellView({
   const onFinishMarkdownEditRef = useRef(onFinishMarkdownEdit)
   const onLinkToAgentRef = useRef(onLinkToAgent)
   onLinkToAgentRef.current = onLinkToAgent
+  const onEditorChangeRef = useRef(onEditorChange)
+  onEditorChangeRef.current = onEditorChange
   const cellTypeRef = useRef(cell.cellType)
   const collapsed = isNotebookCellCollapsed(cell)
   const sourcePreview = notebookCellSourcePreview(cell.source)
@@ -228,12 +233,14 @@ export default function NotebookCellView({
     if (mountMonaco) return
     safeMonacoCall(() => sizeSubRef.current?.dispose())
     sizeSubRef.current = null
+    if (editorRef.current) onEditorChangeRef.current?.(null)
     editorRef.current = null
   }, [mountMonaco])
 
   useEffect(() => () => {
     safeMonacoCall(() => sizeSubRef.current?.dispose())
     sizeSubRef.current = null
+    if (editorRef.current) onEditorChangeRef.current?.(null)
     editorRef.current = null
   }, [])
 
@@ -244,7 +251,9 @@ export default function NotebookCellView({
     ed.addCommand(ESCAPE_KEY, () => {
       if (cellTypeRef.current === 'markdown') onFinishMarkdownEditRef.current()
     })
-    ed.addAction({
+    // addAction registers keybindings and menu items beyond the editor's own
+    // lifetime; release them with it (cell editors remount often).
+    const linkSelectionAction = ed.addAction({
       id: 'devtool.linkSelectionToAgent',
       label: 'Link Selection to Agent',
       keybindings: [LINK_SELECTION_KEY],
@@ -256,7 +265,7 @@ export default function NotebookCellView({
         onLinkToAgentRef.current?.('selection', empty ? null : selectionLines(sel))
       }
     })
-    ed.addAction({
+    const linkFileAction = ed.addAction({
       id: 'devtool.linkFileToAgent',
       label: 'Link Notebook to Agent',
       keybindings: [LINK_FILE_KEY],
@@ -264,6 +273,11 @@ export default function NotebookCellView({
       contextMenuOrder: 0.1,
       run: () => onLinkToAgentRef.current?.('file', null)
     })
+    ed.onDidDispose(() => {
+      linkSelectionAction.dispose()
+      linkFileAction.dispose()
+    })
+    onEditorChangeRef.current?.(ed)
     const applyHeight = () => {
       // Content-size events can fire while Monaco is disposing during a cell reorder.
       try {

@@ -413,6 +413,7 @@ Parking lot. Do not start these instead of the numbered phases. Several items al
 | Open workspace in VS Code / Cursor | Phase 1.2 |
 | Spyder as an external IDE | after Phase 3 |
 | Config-dir `0700`, scrollback id, IPC cwd allow-list | Parking lot (deferred; not packaging) |
+| One agent per task (Settings option) | Parking lot. Phase 4.5 links go to the agent last typed in; a setting could instead limit a task to one agent tab. |
 | Machine-wide / Program Files install | Optional later; Phase 5 default is per-user NSIS |
 | Software Center / MSI | Separate IT artifact, not the Phase 5 default |
 

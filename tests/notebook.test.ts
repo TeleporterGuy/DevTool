@@ -19,6 +19,7 @@ import {
   parseKernelEventLine,
   parseNotebook,
   serializeNotebook,
+  storedCellIds,
   setNotebookCellCollapsed,
   setNotebookCondaEnvMetadata,
   notebookCondaEnvFromMetadata,
@@ -565,5 +566,26 @@ describe('cell ids for notebooks that store none (nbformat < 4.5)', () => {
     expect(ids[0]).toBe('a')
     expect(ids[2]).toBe('cell-2')
     expect(new Set(ids).size).toBe(3)
+  })
+})
+
+describe('storedCellIds', () => {
+  it('lists only ids the file itself stores', () => {
+    const text = JSON.stringify({
+      nbformat: 4,
+      nbformat_minor: 5,
+      metadata: {},
+      cells: [
+        { id: 'abc', cell_type: 'code', metadata: {}, source: ['print("cell-1")'], outputs: [], execution_count: null },
+        { cell_type: 'markdown', metadata: {}, source: [] }
+      ]
+    })
+    expect([...storedCellIds(text)]).toEqual(['abc'])
+    // A stand-in id mentioned in cell text is not a stored id.
+    expect(storedCellIds(text).has('cell-1')).toBe(false)
+  })
+
+  it('is empty for invalid text', () => {
+    expect(storedCellIds('not json').size).toBe(0)
   })
 })

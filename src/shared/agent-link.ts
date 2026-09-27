@@ -115,3 +115,21 @@ export function pickAgentTarget(task: AgentTargetTask, recency: readonly string[
   }
   return agentTabs[0]
 }
+
+/**
+ * Which link a key event asks for: Ctrl+L / Ctrl+Shift+L, or ⌘L / ⌘⇧L on macOS —
+ * the same keys Monaco's CtrlCmd binds, so the notebook's own handler and the
+ * cell editors agree (Control+L on a Mac does nothing in either). AltGr (Ctrl+Alt
+ * on Windows) never matches.
+ */
+export function agentLinkShortcut(
+  event: { key: string; ctrlKey: boolean; metaKey: boolean; altKey: boolean; shiftKey: boolean },
+  platform: string
+): 'selection' | 'file' | null {
+  if (event.altKey || event.key.toLowerCase() !== 'l') return null
+  const primary = platform === 'darwin'
+    ? event.metaKey && !event.ctrlKey
+    : event.ctrlKey && !event.metaKey
+  if (!primary) return null
+  return event.shiftKey ? 'file' : 'selection'
+}

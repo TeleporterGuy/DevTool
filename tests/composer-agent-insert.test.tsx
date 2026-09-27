@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import React from 'react'
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import Composer from '../src/renderer/components/claude-chat/Composer'
-import { dispatchAgentInsert } from '../src/renderer/agentLink/linkToAgent'
+import { queueAgentInsert } from '../src/renderer/agentLink/linkToAgent'
 
 void React
 
@@ -35,7 +35,7 @@ function textarea(): HTMLTextAreaElement {
 
 async function insert(tabId: string, text: string): Promise<void> {
   await act(async () => {
-    dispatchAgentInsert({ tabId, text })
+    queueAgentInsert(tabId, text)
     await new Promise(resolve => requestAnimationFrame(() => resolve(undefined)))
   })
 }

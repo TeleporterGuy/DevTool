@@ -1,6 +1,6 @@
 // src/renderer/palette/sources/commands.ts
 import { commandRegistry } from '../CommandRegistry'
-import { paletteEvents } from '../paletteEvents'
+import { getPaletteReturnFocus, paletteEvents } from '../paletteEvents'
 import { AI_TAB_TYPES, AI_TAB_META, isHomeTask, isShellCommandProject, pinnedItemKey, type AiTabType, type PinnedItem } from '../../../shared/types'
 import { shortcutPlatform } from '../../../shared/shortcut-label'
 import { claudeTabType } from '../../components/newTaskTabs'
@@ -90,10 +90,13 @@ commandRegistry.register({
 
 for (const aiType of AI_TAB_TYPES) {
   const meta = AI_TAB_META[aiType as AiTabType]
+  // Claude opens in the mode Settings picks (terminal or chat), like the tab-bar
+  // button, so its entry is named for neither.
+  const isClaude = aiType === 'claude'
   commandRegistry.register({
     id: `cmd.new${aiType.charAt(0).toUpperCase()}${aiType.slice(1)}Tab`,
-    title: `New ${meta.label} Tab`,
-    aliases: [meta.label.toLowerCase(), aiType, meta.command],
+    title: isClaude ? 'New Claude Tab' : `New ${meta.label} Tab`,
+    aliases: [meta.label.toLowerCase(), aiType, meta.command, ...(isClaude ? ['claude chat', 'claude code'] : [])],
     when: ctx => {
       const { selectedProjectId, selectedTaskId, projects, config } = ctx.actions
       if (!selectedProjectId || !selectedTaskId) return false
@@ -122,8 +125,7 @@ commandRegistry.register({
 
 // Ctrl+L / Ctrl+Shift+L are bound inside editor and notebook tabs (Monaco actions
 // and the notebook's own key handler); these entries make them findable and list
-// the shortcut. The palette gives focus back to the tab it came from before the
-// event arrives, and only a tab holding focus answers it.
+// the shortcut. The tab that had focus when the palette opened answers.
 function selectedTaskHasFileTab(actions: any): boolean {
   const project = actions.projects?.find((p: any) => p.id === actions.selectedProjectId)
   const task = project?.tasks.find((t: any) => t.id === actions.selectedTaskId)
@@ -132,7 +134,11 @@ function selectedTaskHasFileTab(actions: any): boolean {
 }
 
 function emitLinkToAgent(kind: 'selection' | 'file'): void {
-  window.setTimeout(() => paletteEvents.emit('link-to-agent', kind), 50)
+  const request = { kind, target: getPaletteReturnFocus(), handled: false }
+  paletteEvents.emit('link-to-agent', request)
+  if (!request.handled) {
+    paletteEvents.emit('agent-link-notice', 'Put the cursor in an editor or notebook first, then link.')
+  }
 }
 
 commandRegistry.register({

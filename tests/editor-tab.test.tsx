@@ -58,6 +58,7 @@ vi.mock('@monaco-editor/react', async () => {
           return { dispose: () => {} }
         },
         getSelection: () => mocks.selection,
+        onDidDispose: () => ({ dispose: () => {} }),
         updateOptions: () => {},
         layout: () => {
           mocks.layoutCalls.count += 1
@@ -89,12 +90,15 @@ vi.mock('../src/renderer/context/AppContext', () => ({
   useApp: () => ({
     config: null,
     projects: [{ id: 'p1', tasks: [mocks.task] }],
-    getTaskViewState: (task: typeof mocks.task) => ({ activeTab: task.activeTab }),
-    setActiveTab: (...args: unknown[]) => mocks.setActiveTab(...args)
+    getTaskViewState: (task: typeof mocks.task) => ({ activeTab: task.activeTab, splitOpen: true }),
+    setActiveTab: (...args: unknown[]) => mocks.setActiveTab(...args),
+    toggleSplit: () => {}
   })
 }))
 
 import EditorTab from '../src/renderer/components/EditorTab'
+import { onAgentInsert } from '../src/renderer/agentLink/linkToAgent'
+import { paletteEvents } from '../src/renderer/palette/paletteEvents'
 
 const DISK_CONTENT = 'line one\nline two\n'
 
@@ -292,11 +296,11 @@ describe('EditorTab', () => {
 
   describe('agent links', () => {
     let inserts: Array<{ tabId: string; text: string }>
-    const onInsert = (e: Event) => inserts.push((e as CustomEvent).detail)
+    let off: () => void = () => {}
 
     beforeEach(() => {
       inserts = []
-      window.addEventListener('agent-insert', onInsert)
+      off = onAgentInsert('pi-1', text => inserts.push({ tabId: 'pi-1', text }))
       mocks.task.tabs = {
         left: [{ id: 'tab-1', type: 'editor', title: 'notes.txt' }],
         right: [{ id: 'pi-1', type: 'pi', title: 'Pi' }]
@@ -305,7 +309,7 @@ describe('EditorTab', () => {
     })
 
     afterEach(() => {
-      window.removeEventListener('agent-insert', onInsert)
+      off()
     })
 
     async function press(keybinding: number): Promise<void> {
@@ -378,6 +382,28 @@ describe('EditorTab', () => {
 
       expect(inserts).toEqual([])
       expect(unhandledRejections).toEqual([])
+    })
+
+    it('answers the palette only when it held focus when the palette opened', async () => {
+      renderTab(true)
+      await waitFor(() => expect(editor().value).toBe(DISK_CONTENT))
+      mocks.selection = { startLineNumber: 2, startColumn: 1, endLineNumber: 2, endColumn: 1 }
+
+      const elsewhere = { kind: 'selection' as const, target: document.body, handled: false }
+      await act(async () => {
+        paletteEvents.emit('link-to-agent', elsewhere)
+        await new Promise(resolve => setTimeout(resolve, 0))
+      })
+      expect(elsewhere.handled).toBe(false)
+      expect(inserts).toEqual([])
+
+      const here = { kind: 'selection' as const, target: editor(), handled: false }
+      await act(async () => {
+        paletteEvents.emit('link-to-agent', here)
+        await new Promise(resolve => setTimeout(resolve, 0))
+      })
+      expect(here.handled).toBe(true)
+      expect(inserts.map(i => i.text)).toEqual(['@src/notes.txt (line 2) '])
     })
 
     it('sends nothing when the task has no agent tab', async () => {

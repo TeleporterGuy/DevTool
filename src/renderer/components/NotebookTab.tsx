@@ -20,6 +20,7 @@ import {
   replaceCellOutputs,
   serializeNotebook,
   setNotebookCellCollapsed,
+  storedCellIds,
   setNotebookCondaEnvMetadata,
   updateCellSource,
   type NotebookCellType,
@@ -50,14 +51,15 @@ import {
   notebookRunQueueBusy,
   type NotebookRunQueueState
 } from '../../shared/notebook-execute'
+import type { editor } from 'monaco-editor'
 import { useApp } from '../context/AppContext'
 import { useDirtyBufferStore } from '../context/DirtyBufferContext'
 import { FILE_BROWSER_REFRESH_MS } from '../hooks/fileBrowserRefresh'
 import NotebookCellView from './NotebookCell'
 import { scheduleResumeAfterNotebookReorder } from './notebookCellEditor'
 import ThemedSelect from './ThemedSelect'
-import { formatShortcutForApp } from '../../shared/shortcut-label'
-import { agentLinkPath, formatAgentLink } from '../../shared/agent-link'
+import { formatShortcutForApp, shortcutPlatform } from '../../shared/shortcut-label'
+import { agentLinkPath, agentLinkShortcut, formatAgentLink, selectionLines } from '../../shared/agent-link'
 import { showAgentLinkNotice, useLinkToAgent } from '../agentLink/linkToAgent'
 import { paletteEvents } from '../palette/paletteEvents'
 
@@ -119,7 +121,10 @@ export default function NotebookTab({
   // The file as last read from or written to disk. Differs from `savedRef` (our
   // own serialization) for notebooks written without cell ids: those get stand-in
   // ids when parsed, which an agent reading the file will not find.
-  const diskTextRef = useRef<string | null>(null)
+  const diskIdsRef = useRef<Set<string>>(new Set())
+  // The cell editor that is mounted (only the active cell has one), for the
+  // palette's "Link Selection to Agent", which does not go through Monaco.
+  const cellEditorRef = useRef<{ cellId: string; editor: editor.IStandaloneCodeEditor } | null>(null)
   const rootRef = useRef<HTMLDivElement>(null)
   const dirtyRef = useRef(false)
   const requestIdRef = useRef(0)
@@ -176,7 +181,7 @@ export default function NotebookTab({
         const serialized = serializeNotebook(parsed)
         if (!force && savedRef.current !== null && serialized === savedRef.current) return
         savedRef.current = serialized
-        diskTextRef.current = text
+        diskIdsRef.current = storedCellIds(text)
         docRef.current = parsed
         dirtyRef.current = false
         setDirty(false)
@@ -249,7 +254,7 @@ export default function NotebookTab({
     setSaveError(null)
     return window.api.fbWriteFile(projectDir, filePath, value).then(() => {
       savedRef.current = value
-      diskTextRef.current = value
+      diskIdsRef.current = storedCellIds(value)
       dirtyRef.current = serializeNotebook(docRef.current ?? current) !== value
       setDirty(dirtyRef.current)
       setSaveError(null)
@@ -315,7 +320,7 @@ export default function NotebookTab({
         linkToAgent(formatAgentLink({ path }))
         return
       }
-      const idOnDisk = (diskTextRef.current ?? '').includes(`"${cellId}"`)
+      const idOnDisk = cellId !== null && diskIdsRef.current.has(cellId)
       linkToAgent(formatAgentLink({
         path,
         cellNumber: index + 1,
@@ -330,6 +335,16 @@ export default function NotebookTab({
   const linkNotebookRef = useRef(linkNotebook)
   linkNotebookRef.current = linkNotebook
 
+  // The active cell, with the lines selected in its editor when it has a selection.
+  const activeCellSelection = (): { cellId: string | null; lines: { startLine: number; endLine: number } | null } => {
+    const cellId = activeCellIdRef.current
+    const mounted = cellEditorRef.current
+    if (!cellId || mounted?.cellId !== cellId) return { cellId, lines: null }
+    const sel = mounted.editor.getSelection()
+    const empty = !sel || (sel.startLineNumber === sel.endLineNumber && sel.startColumn === sel.endColumn)
+    return { cellId, lines: empty ? null : selectionLines(sel) }
+  }
+
   // With a cell editor focused, its Monaco action handles the keys. Otherwise
   // (an idle cell was clicked, or the toolbar) link the active cell / notebook —
   // but only when focus is inside this notebook, so Ctrl+L still reaches a
@@ -337,23 +352,27 @@ export default function NotebookTab({
   useEffect(() => {
     if (!visible) return
     const onKey = (event: KeyboardEvent) => {
-      if (!(event.metaKey || event.ctrlKey) || event.altKey || event.key.toLowerCase() !== 'l') return
+      const kind = agentLinkShortcut(event, shortcutPlatform())
+      if (!kind) return
       const target = event.target instanceof Element ? event.target : null
       if (!target || !rootRef.current?.contains(target)) return
       if (target.closest('.monaco-editor') || target.closest('input, textarea, select')) return
       event.preventDefault()
       event.stopPropagation()
-      linkNotebookRef.current(event.shiftKey ? 'file' : 'selection', activeCellIdRef.current, null)
+      linkNotebookRef.current(kind, activeCellIdRef.current, null)
     }
     window.addEventListener('keydown', onKey, true)
     return () => window.removeEventListener('keydown', onKey, true)
   }, [visible])
 
+  // From the palette: only when this notebook had focus when the palette opened.
   useEffect(() => {
     if (!visible) return
-    return paletteEvents.on('link-to-agent', (kind) => {
-      if (!rootRef.current?.contains(document.activeElement)) return
-      linkNotebookRef.current(kind, activeCellIdRef.current, null)
+    return paletteEvents.on('link-to-agent', (request) => {
+      if (request.handled || !request.target || !rootRef.current?.contains(request.target)) return
+      request.handled = true
+      const { cellId, lines } = activeCellSelection()
+      linkNotebookRef.current(request.kind, cellId, lines)
     })
   }, [visible])
 
@@ -755,6 +774,10 @@ export default function NotebookTab({
               suspendEditors={suspendEditors}
               onFocus={() => setActiveCellId(cell.id)}
               onLinkToAgent={(kind, lines) => linkNotebook(kind, cell.id, lines)}
+              onEditorChange={(ed) => {
+                if (ed) cellEditorRef.current = { cellId: cell.id, editor: ed }
+                else if (cellEditorRef.current?.cellId === cell.id) cellEditorRef.current = null
+              }}
               onChangeSource={(source) => {
                 const current = docRef.current
                 if (!current) return

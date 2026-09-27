@@ -30,6 +30,7 @@ vi.mock('@monaco-editor/react', async () => {
           return { dispose: () => {} }
         },
         getSelection: () => mocks.selection,
+        onDidDispose: () => ({ dispose: () => {} }),
         updateOptions: () => {},
         layout: () => {},
         getContentHeight: () => 64,
