@@ -15,9 +15,13 @@ import type { Project } from '../src/shared/types'
 
 const tmpDirs: string[] = []
 
-/** A real temp dir (realpath'd: macOS's /var is a symlink to /private/var). */
+/**
+ * A real temp dir, realpath'd the way the code under test does it (native: macOS's
+ * /var is a symlink to /private/var, and on Windows the runner's temp dir is an 8.3
+ * short name like RUNNER~1 that only the native realpath expands).
+ */
 function tmp(prefix: string): string {
-  const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), prefix)))
+  const dir = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), prefix)))
   tmpDirs.push(dir)
   return dir
 }
