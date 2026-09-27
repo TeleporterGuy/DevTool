@@ -168,5 +168,8 @@ export const chatPromptResponse = v.union(
   })
 ) as Validator<ChatPromptResponse>
 
+/** `chat-stop-task` / `chat-background-task`: the tab, then a task id or tool_use id. */
+export const chatTaskArgs = [safeId, v.string({ nonEmpty: true, max: 256 })] as const
+
 export const envRecord = v.optional(v.record(v.string()))
 export const dimension = v.number({ int: true, min: 0, max: 10_000 })

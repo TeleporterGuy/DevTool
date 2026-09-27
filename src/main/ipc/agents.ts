@@ -13,6 +13,7 @@ import type { IpcRegistrar } from './registrar'
 import {
   chatImages,
   chatPromptResponse,
+  chatTaskArgs,
   chatTabConfig,
   optSafeId,
   optSshConfig,
@@ -162,6 +163,9 @@ export function registerAgentHandlers(ipc: IpcRegistrar, deps: AgentDeps): void 
   ipc.handle('chat-send', [safeId, str, chatImages], (_event, tabId, text, images) =>
     deps.chatManager().send(tabId, text, images ?? []))
   ipc.handle('chat-interrupt', [safeId], (_event, tabId) => deps.chatManager().interrupt(tabId))
+  ipc.handle('chat-stop-task', chatTaskArgs, (_event, tabId, taskId) => deps.chatManager().stopTask(tabId, taskId))
+  ipc.handle('chat-background-task', chatTaskArgs, (_event, tabId, toolUseId) =>
+    deps.chatManager().backgroundTask(tabId, toolUseId))
   ipc.handle('chat-respond', [safeId, v.string({ nonEmpty: true }), chatPromptResponse], (_event, tabId, promptId, response) =>
     deps.chatManager().respond(tabId, promptId, response))
   ipc.handle('chat-set-model', [safeId, optStr], (_event, tabId, model) => deps.chatManager().setModel(tabId, model))

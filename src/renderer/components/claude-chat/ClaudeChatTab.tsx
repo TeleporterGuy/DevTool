@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { ArrowDown } from 'lucide-react'
 import { useApp } from '../../context/AppContext'
 import { useTabStatusStore } from '../../context/TabStatusContext'
@@ -9,7 +9,8 @@ import { parseExtraArgs } from '../aiToolTabUtils'
 import { ensureHookListeners, hookStatusCallbacks } from '../hookStatusListeners'
 import { normalizeBrowserUrl } from '../../browserUrl'
 import { attachChat, forgetChat, getChatState, setChatEventHandler, useChatState } from './chatStore'
-import Timeline from './Timeline'
+import Timeline, { type TimelineFocus } from './Timeline'
+import TaskIndicator from './TaskIndicator'
 import PromptCard from './PromptCards'
 import Composer from './Composer'
 
@@ -47,6 +48,8 @@ export default function ClaudeChatTab({ tabId, visible, sessionId, pane, project
   const stickRef = useRef(true)
   const [atBottom, setAtBottom] = useState(true)
   const [attachError, setAttachError] = useState<string | null>(null)
+  const [focus, setFocus] = useState<TimelineFocus | null>(null)
+  const focusSeq = useRef(0)
 
   const applyStatus = useCallback((event: AiStatusEvent, notificationKind?: AiNotificationKind): AiStatusDecision => {
     const current = statusStore.getStatus(tabId)
@@ -182,29 +185,65 @@ export default function ClaudeChatTab({ tabId, visible, sessionId, pane, project
     [projectDir, projectId, sshConfig]
   )
 
+  const { tasks, toolIndex } = state
+  const taskTools = useMemo(() => {
+    const ids = new Set<string>()
+    for (const task of Object.values(tasks)) {
+      if (task.status === 'running' && task.toolUseId) ids.add(task.toolUseId)
+    }
+    return ids
+  }, [tasks])
+
+  const reportTaskError = useCallback((err: unknown) => {
+    setAttachError(err instanceof Error ? err.message : String(err))
+  }, [])
+  const stopTask = useCallback((taskId: string) => {
+    void window.api.chatStopTask(tabId, taskId).catch(reportTaskError)
+  }, [tabId, reportTaskError])
+  const backgroundTask = useCallback((toolUseId: string) => {
+    void window.api.chatBackgroundTask(tabId, toolUseId).catch(reportTaskError)
+  }, [tabId, reportTaskError])
+  const canJump = useCallback((toolUseId: string) => toolIndex[toolUseId] !== undefined, [toolIndex])
+  const jumpToTool = useCallback((toolUseId: string) => {
+    if (toolIndex[toolUseId] === undefined) return
+    // Looking back up the conversation: stop following the bottom.
+    stickRef.current = false
+    focusSeq.current += 1
+    setFocus({ toolId: toolUseId, seq: focusSeq.current })
+  }, [toolIndex])
+
+  const hasTasks = Object.keys(tasks).length > 0
   const empty = state.items.length === 0 && !state.busy
   const starting = state.process === 'starting' && state.items.length === 0
 
   return (
     <div className="absolute inset-0 flex-col bg-bg" style={{ display: visible ? 'flex' : 'none' }}>
-      <div ref={scrollRef} onScroll={onScroll} className="flex-1 overflow-y-auto relative">
-        <div className="max-w-[860px] mx-auto px-5 pt-4 pb-3">
-          {empty ? (
-            <div className="pt-[18vh] text-center select-none">
-              <div className="text-2xl text-accent mb-2">&#10022;</div>
-              <div className="text-md text-text">{starting ? 'Starting Claude…' : 'What should Claude work on?'}</div>
-              <div className="text-sm text-text-subtle mt-1 font-mono truncate">{projectDir || sshConfig?.remoteDir || '~'}</div>
-            </div>
-          ) : (
-            <Timeline
-              items={state.items}
-              busy={state.busy}
-              compacting={state.compacting}
-              waiting={state.pending.length > 0}
-              turnStartedAt={state.turnStartedAt}
-              onOpenLink={(url) => addTab(projectId, taskId, pane, 'browser', { url: normalizeBrowserUrl(url) })}
-            />
-          )}
+      <div className="flex-1 min-h-0 relative">
+        <div className="absolute top-2 right-3 z-(--z-sticky)">
+          <TaskIndicator tasks={tasks} onStop={stopTask} onBackground={backgroundTask} onJump={jumpToTool} canJump={canJump} />
+        </div>
+        <div ref={scrollRef} onScroll={onScroll} className="h-full overflow-y-auto relative">
+          {/* Room for the task pill so it never covers the first message. */}
+          <div className={`max-w-[860px] mx-auto px-5 pb-3 ${hasTasks ? 'pt-11' : 'pt-4'}`}>
+            {empty ? (
+              <div className="pt-[18vh] text-center select-none">
+                <div className="text-2xl text-accent mb-2">&#10022;</div>
+                <div className="text-md text-text">{starting ? 'Starting Claude…' : 'What should Claude work on?'}</div>
+                <div className="text-sm text-text-subtle mt-1 font-mono truncate">{projectDir || sshConfig?.remoteDir || '~'}</div>
+              </div>
+            ) : (
+              <Timeline
+                items={state.items}
+                busy={state.busy}
+                compacting={state.compacting}
+                waiting={state.pending.length > 0}
+                turnStartedAt={state.turnStartedAt}
+                onOpenLink={(url) => addTab(projectId, taskId, pane, 'browser', { url: normalizeBrowserUrl(url) })}
+                taskTools={taskTools}
+                focus={focus}
+              />
+            )}
+          </div>
         </div>
       </div>
       <div className="max-w-[860px] w-full mx-auto px-5 pb-3 flex flex-col gap-2 relative">

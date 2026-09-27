@@ -217,6 +217,10 @@ export class ChatSession {
       hooks,
       extraArgs: extra,
       allowDangerouslySkipPermissions: true,
+      // The tab has a per-task Stop, so Stop/Esc only aborts the turn and spares
+      // background agents and shells. Subagents also report a one-line summary.
+      perTaskStopAffordance: true,
+      agentProgressSummaries: true,
       ...(o.resume ? { resume: o.sessionId } : { sessionId: o.sessionId }),
       ...(o.model ? { model: o.model } : {}),
       ...(o.permissionMode ? { permissionMode: o.permissionMode as PermissionMode } : {}),
@@ -286,7 +290,7 @@ export class ChatSession {
     }
     this.held.clear()
     this.input.end()
-    this.options.onEvent({ t: 'process', state: 'exited', ...(error ? { error } : {}) })
+    this.options.onEvent({ t: 'process', state: 'exited', at: Date.now(), ...(error ? { error } : {}) })
     this.options.onExit(error)
   }
 
@@ -454,6 +458,38 @@ export class ChatSession {
   async interrupt(): Promise<void> {
     this.options.onEvent({ t: 'interrupting' })
     await this.query?.interrupt().catch((err) => this.options.log(`chatInterrupt error=${String(err)}`))
+  }
+
+  /** Stop one running task (a subagent, a shell). Failures show in the timeline. */
+  async stopTask(taskId: string): Promise<boolean> {
+    const query = this.query
+    if (!query || this.ended) return this.taskFailed('stop', 'Claude is not running.')
+    try {
+      await query.stopTask(taskId)
+      return true
+    } catch (err) {
+      this.options.log(`chatStopTask task=${taskId} error=${String(err)}`)
+      return this.taskFailed('stop', err instanceof Error ? err.message : String(err))
+    }
+  }
+
+  /** Move the foreground task started by one tool call to the background. */
+  async backgroundTask(toolUseId: string): Promise<boolean> {
+    const query = this.query
+    if (!query || this.ended) return this.taskFailed('background', 'Claude is not running.')
+    try {
+      if (await query.backgroundTasks(toolUseId)) return true
+      return this.taskFailed('background', 'It is no longer running in the foreground.')
+    } catch (err) {
+      this.options.log(`chatBackgroundTask toolUse=${toolUseId} error=${String(err)}`)
+      return this.taskFailed('background', err instanceof Error ? err.message : String(err))
+    }
+  }
+
+  private taskFailed(action: 'stop' | 'background', reason: string): false {
+    const what = action === 'stop' ? "Couldn't stop the task" : "Couldn't send the task to the background"
+    this.options.onEvent({ t: 'notice', text: `${what}: ${reason}`, tone: 'warning' })
+    return false
   }
 
   async setModel(model: string | undefined): Promise<void> {

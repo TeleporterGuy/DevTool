@@ -195,6 +195,9 @@ const api = {
   chatSend: (tabId: string, text: string, images?: ChatImage[]): Promise<void> =>
     ipcRenderer.invoke('chat-send', tabId, text, images),
   chatInterrupt: (tabId: string): Promise<void> => ipcRenderer.invoke('chat-interrupt', tabId),
+  chatStopTask: (tabId: string, taskId: string): Promise<boolean> => ipcRenderer.invoke('chat-stop-task', tabId, taskId),
+  chatBackgroundTask: (tabId: string, toolUseId: string): Promise<boolean> =>
+    ipcRenderer.invoke('chat-background-task', tabId, toolUseId),
   chatRespond: (tabId: string, promptId: string, response: ChatPromptResponse): Promise<boolean> =>
     ipcRenderer.invoke('chat-respond', tabId, promptId, response),
   chatSetModel: (tabId: string, model?: string): Promise<void> => ipcRenderer.invoke('chat-set-model', tabId, model),

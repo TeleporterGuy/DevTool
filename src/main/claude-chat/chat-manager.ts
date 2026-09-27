@@ -127,6 +127,28 @@ export class ClaudeChatManager {
     await this.runtimes.get(tabId)?.session?.interrupt()
   }
 
+  /** Stop one of the tab's tasks. False (with a notice in the timeline) when it couldn't. */
+  async stopTask(tabId: string, taskId: string): Promise<boolean> {
+    const runtime = this.runtimes.get(tabId)
+    if (!runtime) return false
+    if (!runtime.session || runtime.session.isEnded()) {
+      this.emit(runtime, { t: 'notice', text: "Couldn't stop the task: Claude is not running.", tone: 'warning' })
+      return false
+    }
+    return runtime.session.stopTask(taskId)
+  }
+
+  /** Send the foreground task a tool call started to the background. */
+  async backgroundTask(tabId: string, toolUseId: string): Promise<boolean> {
+    const runtime = this.runtimes.get(tabId)
+    if (!runtime) return false
+    if (!runtime.session || runtime.session.isEnded()) {
+      this.emit(runtime, { t: 'notice', text: "Couldn't send the task to the background: Claude is not running.", tone: 'warning' })
+      return false
+    }
+    return runtime.session.backgroundTask(toolUseId)
+  }
+
   respond(tabId: string, promptId: string, response: ChatPromptResponse): boolean {
     return this.runtimes.get(tabId)?.session?.respond(promptId, response) ?? false
   }
@@ -272,7 +294,7 @@ export class ClaudeChatManager {
       await session.start()
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
-      this.emit(runtime, { t: 'process', state: 'exited', error: `Couldn't start Claude: ${message}` })
+      this.emit(runtime, { t: 'process', state: 'exited', at: Date.now(), error: `Couldn't start Claude: ${message}` })
       runtime.session = null
       this.deps.onProcessChange(tabId, false, message)
     }
