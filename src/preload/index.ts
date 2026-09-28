@@ -14,6 +14,7 @@ import type {
   ProjectsEnvelope,
   ProjectsSaveResult,
   SshConfig,
+  TabStatusValue,
   TaskRemoval,
   TunnelConfig,
   TunnelState,
@@ -46,6 +47,8 @@ const api = {
   // Idle task cleanup runs entirely in main — a window only reports what main
   // cannot see (its unsaved buffers) and reacts to what main removed.
   reportDirtyTabs: (tabIds: string[]): Promise<void> => ipcRenderer.invoke('report-dirty-tabs', tabIds),
+  /** Status of a tab main has no hooks for (Codex, shells), for the phone's inbox. */
+  reportTabStatus: (tabId: string, status: TabStatusValue): Promise<void> => ipcRenderer.invoke('report-tab-status', tabId, status),
   getCleanupActivity: (): Promise<CleanupActivity> => ipcRenderer.invoke('get-cleanup-activity'),
   onTasksRemoved: (callback: (removal: TaskRemoval) => void): (() => void) => {
     const handler = (_event: Electron.IpcRendererEvent, removal: TaskRemoval) => callback(removal)

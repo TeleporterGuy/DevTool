@@ -12,9 +12,11 @@ import type { TabStatusValue } from '../shared/types'
  *
  * The transitions come from `shared/ai-status.ts`, the same state machine
  * `AiToolTab` drives, so the two cannot disagree about what "working" means.
- * Only hook and process events feed it: the renderer-only heuristics (terminal
- * bell, PTY-quiet) have no equivalent here, which is why the sweep also treats a
- * live PTY as protection rather than trusting statuses alone.
+ * Hook and process events feed it directly. The renderer-only heuristics (terminal
+ * bell, PTY-quiet) have no equivalent here, so for tabs without hooks the window
+ * that mounts them reports its verdict (`reported`) — and a window may not be
+ * open, which is why the sweep also treats a live PTY as protection rather than
+ * trusting statuses alone.
  */
 export class TabActivityRegistry {
   private readonly statuses = new Map<string, TabStatusValue>()
@@ -93,6 +95,25 @@ export class TabActivityRegistry {
 
   getActivitySnapshot(): Record<string, AgentActivity> {
     return Object.fromEntries(this.activities)
+  }
+
+  /**
+   * A status a window derived for a tab no hook reports on (Codex, shells: PTY
+   * output, the terminal bell, going quiet). The window is the only one that can
+   * see those signals, so its verdict is taken as is — except over 'exited', which
+   * only a respawn (`reset`) or another exit may rewrite.
+   */
+  reported(tabId: string, status: TabStatusValue): void {
+    this.apply(tabId, (current) => (current === 'exited' && status !== 'exited' ? 'keep' : status))
+  }
+
+  /**
+   * The window that reported for this tab is gone, and with it the only source of
+   * its heuristics: keep 'exited', forget a 'working' or 'attention' nobody will
+   * ever clear.
+   */
+  unreported(tabId: string): void {
+    this.apply(tabId, (current) => (current === 'exited' ? 'keep' : null))
   }
 
   /** A session started in this tab: it exists, but nothing is claimed about its status. */

@@ -45,6 +45,37 @@ describe('TabActivityRegistry change listener', () => {
     expect(registry.getSince('a')).toBe(9)
   })
 
+  it('takes a window-reported status for tabs without hooks, but not over exited', () => {
+    const registry = new TabActivityRegistry(() => 1)
+    const seen: string[] = []
+    registry.subscribe((tabId) => seen.push(tabId))
+
+    registry.reported('codex', 'working')
+    expect(registry.getStatus('codex')).toBe('working')
+    registry.reported('codex', 'attention')
+    expect(registry.getStatus('codex')).toBe('attention')
+    registry.reported('codex', null)
+    expect(registry.getStatus('codex')).toBeNull()
+    expect(seen).toEqual(['codex', 'codex', 'codex'])
+
+    registry.exited('shell')
+    registry.reported('shell', 'working') // late output from the dead PTY
+    expect(registry.getStatus('shell')).toBe('exited')
+    registry.reset('shell')
+    registry.reported('shell', 'working')
+    expect(registry.getStatus('shell')).toBe('working')
+  })
+
+  it('forgets a reported status when its window goes away, keeping exited', () => {
+    const registry = new TabActivityRegistry(() => 1)
+    registry.reported('a', 'working')
+    registry.reported('b', 'exited')
+    registry.unreported('a')
+    registry.unreported('b')
+    expect(registry.getStatus('a')).toBeNull()
+    expect(registry.getStatus('b')).toBe('exited')
+  })
+
   it('a throwing listener does not break the registry', () => {
     const registry = new TabActivityRegistry()
     registry.subscribe(() => { throw new Error('boom') })

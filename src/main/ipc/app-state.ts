@@ -1,5 +1,5 @@
 import { BrowserWindow } from 'electron'
-import type { AppConfig, CleanupActivity, NotesRecord, ProjectsData } from '../../shared/types'
+import type { AppConfig, CleanupActivity, NotesRecord, ProjectsData, TabStatusValue } from '../../shared/types'
 import type { AgentActivity } from '../../shared/agent-activity'
 import type { RevisionStore } from '../revision-store'
 import type { PaletteFrecencyStorage } from '../palette-frecency-storage'
@@ -15,6 +15,8 @@ export interface AppStateDeps {
   getAgentActivity: () => Record<string, AgentActivity>
   getCleanupActivity: () => CleanupActivity
   setDirtyTabs: (windowId: number, tabIds: string[]) => void
+  /** A window's status for a tab without hooks (see `TabActivityRegistry.reported`). */
+  reportTabStatus: (windowId: number, tabId: string, status: TabStatusValue) => void
   backupProjects: () => boolean
   getConfig: () => AppConfig
   /** Merge a validated partial config, persist it and tell every window. */
@@ -44,6 +46,15 @@ export function registerAppStateHandlers(ipc: IpcRegistrar, deps: AppStateDeps):
     const window = BrowserWindow.fromWebContents(event.sender)
     if (!window) return undefined
     deps.setDirtyTabs(window.id, tabIds)
+    return undefined
+  })
+
+  // Codex and shell tabs have no hooks: their status is the window's PTY heuristics,
+  // which main (and through it the phone) would otherwise never see.
+  ipc.handle('report-tab-status', [v.string({ max: 200 }), v.nullable(v.literal('working', 'attention', 'exited'))], (event, tabId, status) => {
+    const window = BrowserWindow.fromWebContents(event.sender)
+    if (!window) return undefined
+    deps.reportTabStatus(window.id, tabId, status)
     return undefined
   })
 

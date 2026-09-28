@@ -128,6 +128,8 @@ export class AppRuntime {
   private readonly activityRegistry = new TabActivityRegistry()
   /** Tabs with an unsaved editor buffer, per window — a task holding one is not swept. */
   private readonly dirtyTabsByWindow = new Map<number, Set<string>>()
+  /** Which window last reported each hook-less tab's status (`report-tab-status`). */
+  private readonly statusReporters = new Map<string, number>()
   private hookInjector!: HookInjector
   private sshManager!: SshConnectionManager
   /** Claude chat tabs' processes — the Agent SDK counterpart of `ptySessions`. */
@@ -288,6 +290,11 @@ export class AppRuntime {
       // A closed window's unsaved buffers went with it; leaving them behind would
       // protect their tasks from cleanup forever.
       this.dirtyTabsByWindow.delete(window.id)
+      for (const [tabId, windowId] of this.statusReporters) {
+        if (windowId !== window.id) continue
+        this.statusReporters.delete(tabId)
+        this.activityRegistry.unreported(tabId)
+      }
       if (!this.quitting) {
         this.windowStates.delete(window.id)
         this.persistWindowSession()
@@ -418,6 +425,7 @@ export class AppRuntime {
       },
       deleteScrollback: (tabId) => this.scrollbackStorage.delete(tabId),
       forgetActivity: (tabId) => {
+        this.statusReporters.delete(tabId)
         this.activityRegistry.remove(tabId)
         this.broadcastAgentActivity(tabId)
       },
@@ -647,6 +655,10 @@ export class AppRuntime {
       paletteFrecency: this.paletteFrecencyStorage,
       getAgentActivity: () => this.activityRegistry.getActivitySnapshot(),
       getCleanupActivity: () => this.getCleanupActivity(),
+      reportTabStatus: (windowId, tabId, status) => {
+        this.statusReporters.set(tabId, windowId)
+        this.activityRegistry.reported(tabId, status)
+      },
       setDirtyTabs: (windowId, tabIds) => {
         if (tabIds.length === 0) this.dirtyTabsByWindow.delete(windowId)
         else this.dirtyTabsByWindow.set(windowId, new Set(tabIds))
@@ -698,6 +710,7 @@ export class AppRuntime {
       cleanupRemoteHooks: (projectId, sshConfig, remoteDir, tabId) =>
         this.cleanupRemoteHooks(projectId, sshConfig, remoteDir, tabId),
       forgetActivity: (tabId) => {
+        this.statusReporters.delete(tabId)
         this.activityRegistry.remove(tabId)
         this.broadcastAgentActivity(tabId)
       },
