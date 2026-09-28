@@ -708,6 +708,12 @@ export function truncateMimeBundle(data: Record<string, unknown>): Record<string
   const out: Record<string, unknown> = {}
   let omittedPng = false
   for (const [key, value] of Object.entries(data)) {
+    // JSON mime values are objects, not text: keep them (the kernel helper already
+    // drops oversized ones). Turning them into text here made them "".
+    if (isJsonMimeType(key)) {
+      out[key] = value
+      continue
+    }
     const text = typeof value === 'string' ? value : joinNotebookText(value)
     if (key === 'image/png' && text.length > NOTEBOOK_MIME_CHAR_LIMIT) {
       omittedPng = true
