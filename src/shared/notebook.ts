@@ -708,6 +708,12 @@ export function truncateMimeBundle(data: Record<string, unknown>): Record<string
   const out: Record<string, unknown> = {}
   let omittedPng = false
   for (const [key, value] of Object.entries(data)) {
+    // JSON mime values are objects, not text: keep them (the kernel helper already
+    // drops oversized ones). Turning them into text here made them "".
+    if (isJsonMimeType(key)) {
+      out[key] = value
+      continue
+    }
     const text = typeof value === 'string' ? value : joinNotebookText(value)
     if (key === 'image/png' && text.length > NOTEBOOK_MIME_CHAR_LIMIT) {
       omittedPng = true
@@ -935,4 +941,61 @@ export function storedCellIds(text: string): Set<string> {
   } catch {
     return new Set()
   }
+}
+
+/**
+ * What an `execute_result` / `display_data` output shows. Earlier entries win,
+ * keeping the long-standing PNG-then-plain-text order for the common outputs
+ * (a pandas frame keeps its text form); richer forms are used when nothing
+ * simpler is there, and anything left is named so a cell never looks empty.
+ */
+export type NotebookDisplay =
+  | { kind: 'image'; src: string }
+  | { kind: 'text'; text: string }
+  | { kind: 'html'; html: string }
+  | { kind: 'markdown'; markdown: string }
+  | { kind: 'json'; text: string }
+  | { kind: 'unsupported'; mimeTypes: string[] }
+
+export function notebookOutputDisplay(
+  data: Record<string, string>,
+  jsonData?: Record<string, unknown>
+): NotebookDisplay | null {
+  const png = mimePng(data)
+  if (png) return { kind: 'image', src: `data:image/png;base64,${png.replace(/\s/g, '')}` }
+  const jpeg = data['image/jpeg']
+  if (jpeg) return { kind: 'image', src: `data:image/jpeg;base64,${jpeg.replace(/\s/g, '')}` }
+  const svg = data['image/svg+xml']
+  if (svg) return { kind: 'image', src: `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}` }
+  const plain = mimePlainText(data)
+  if (plain) return { kind: 'text', text: plain }
+  if (data['text/html']) return { kind: 'html', html: data['text/html'] }
+  if (data['text/markdown']) return { kind: 'markdown', markdown: data['text/markdown'] }
+  const jsonKey = Object.keys(jsonData ?? {}).find(isJsonMimeType)
+  if (jsonKey) return { kind: 'json', text: JSON.stringify(jsonData![jsonKey], null, 2) }
+  const mimeTypes = [...Object.keys(data), ...Object.keys(jsonData ?? {})].filter((m) => m !== 'text/plain')
+  return mimeTypes.length > 0 ? { kind: 'unsupported', mimeTypes } : null
+}
+
+/**
+ * Markdown cells reference pasted images as `attachment:<name>`; the bytes live
+ * in the cell's `attachments` (`{ name: { "image/png": base64 } }`). Rewrite
+ * those references to data URLs so the preview can show them. Unknown names
+ * are left alone.
+ */
+export function resolveMarkdownAttachments(source: string, attachments: unknown): string {
+  const record = asRecord(attachments)
+  if (!record) return source
+  return source.replace(/attachment:([^\s)"'<>]+)/g, (match, rawName: string) => {
+    let name = rawName
+    try { name = decodeURIComponent(rawName) } catch { /* keep raw */ }
+    const bundle = asRecord(record[name] ?? record[rawName])
+    if (!bundle) return match
+    const mime = Object.keys(bundle).find((key) => key.startsWith('image/'))
+    const value = mime ? bundle[mime] : undefined
+    const base64 = typeof value === 'string' ? value : Array.isArray(value) ? value.join('') : null
+    if (!mime || !base64) return match
+    if (mime === 'image/svg+xml') return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(base64)}`
+    return `data:${mime};base64,${base64.replace(/\s/g, '')}`
+  })
 }
