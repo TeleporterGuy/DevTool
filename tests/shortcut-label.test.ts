@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { formatShortcut } from '../src/shared/shortcut-label'
+import { formatShortcut, isMenuZoomInKey } from '../src/shared/shortcut-label'
 
 describe('formatShortcut', () => {
   it('maps CmdOrCtrl to ⌘ on macOS and Ctrl on Windows', () => {
@@ -32,9 +32,23 @@ describe('formatShortcut', () => {
     expect(formatShortcut('CmdOrCtrl+Shift+1', 'win32')).toBe('Ctrl+Shift+1')
   })
 
-  it('leaves zoom keys readable', () => {
+  it('leaves zoom keys readable for both = and Plus', () => {
     expect(formatShortcut('CmdOrCtrl+=', 'win32')).toBe('Ctrl+=')
+    expect(formatShortcut('CmdOrCtrl+=', 'darwin')).toBe('⌘=')
+    expect(formatShortcut('CmdOrCtrl+Plus', 'darwin')).toBe('⌘+')
+    expect(formatShortcut('CmdOrCtrl+Plus', 'win32')).toBe('Ctrl++')
     expect(formatShortcut('CmdOrCtrl+-', 'win32')).toBe('Ctrl+-')
     expect(formatShortcut('CmdOrCtrl+0', 'darwin')).toBe('⌘0')
+  })
+})
+
+describe('isMenuZoomInKey', () => {
+  it('accepts =, +, and Electron Plus (Shift+= on Mac)', () => {
+    expect(isMenuZoomInKey('=')).toBe(true)
+    expect(isMenuZoomInKey('+')).toBe(true)
+    expect(isMenuZoomInKey('Plus')).toBe(true)
+    expect(isMenuZoomInKey('plus')).toBe(true)
+    expect(isMenuZoomInKey('-')).toBe(false)
+    expect(isMenuZoomInKey('0')).toBe(false)
   })
 })

@@ -1,4 +1,5 @@
 import { useCallback, useRef } from 'react'
+import { isNotebookFile } from '../../../shared/notebook'
 import { v4 as uuid } from 'uuid'
 import {
   AI_TAB_META,
@@ -312,15 +313,16 @@ export function useTabs(
     const task = findTask(projectsRef.current, projectId, taskId)
     if (!task) return
 
+    // An .ipynb opens as (and matches) a native notebook tab, not a text editor.
     const existingTab = [...task.tabs.left, ...task.tabs.right].find(
-      t => t.type === type && t.filePath === filePath
+      t => t.filePath === filePath && (t.type === type || (type === 'editor' && t.type === 'notebook'))
     )
     if (existingTab) {
       setActiveTab(projectId, taskId, paneOfTab(task, existingTab), existingTab.id)
       return
     }
 
-    addTab(projectId, taskId, pane, type, filePath)
+    addTab(projectId, taskId, pane, type === 'editor' && isNotebookFile(filePath) ? 'notebook' : type, filePath)
   }, [addTab, setActiveTab])
 
   const openOrFocusDiffTab = useCallback((projectId: string, taskId: string, pane: Pane, filePath: string) => {

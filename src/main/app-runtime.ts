@@ -35,6 +35,19 @@ import { registerTerminalHandlers } from './ipc/terminals'
 import { registerWorkspaceHandlers } from './ipc/workspaces'
 import { registerFileBrowserHandlers } from './ipc/file-browser'
 import { registerGitHandlers } from './ipc/git'
+import { registerNotebookHandlers } from './ipc/notebooks'
+import { isRemoteProject, isShellCommandProject } from '../shared/types'
+import {
+  NOTEBOOK_ERROR_REMOTE,
+  NOTEBOOK_ERROR_SHELL_PROJECT,
+  resolveNotebookKernelCondaEnv,
+  type NotebookKernelCondaOverride
+} from '../shared/notebook'
+import { notebookAllowedCwdRoots, resolveNotebookKernelCwd } from './notebook-cwd'
+import { listCondaEnvs, listCondaEnvsForNotebookKernel, resolveProjectCondaEnv } from './conda-env'
+import { NotebookKernelManager } from './notebook-kernel'
+import { safeWebContentsSend } from './safe-ipc-send'
+import type { CondaEnvInfo } from '../shared/conda'
 import type {
   AppConfig,
   CleanupActivity,
@@ -89,6 +102,11 @@ export class AppRuntime {
   private readonly notesStorage = new NotesStorage(CONFIG_DIR)
   private readonly paletteFrecencyStorage = new PaletteFrecencyStorage(CONFIG_DIR)
   private readonly ptyManager = new PtyManager()
+  /** Native notebook tabs' Jupyter kernels, one per tab. */
+  private readonly notebookKernels = new NotebookKernelManager()
+  /** tabId -> token of a kernel start still awaiting its conda lookup. */
+  private readonly pendingNotebookStarts = new Map<string, number>()
+  private notebookStartCounter = 0
   private readonly hookServer = new HookServer((message) => this.logDebug(message))
   private readonly codexSessionManager = new CodexSessionManager()
   private readonly workspaceManager = new WorkspaceManager()
@@ -145,7 +163,9 @@ export class AppRuntime {
       getConfig: () => this.config,
       broadcastAgentActivity: (tabId) => this.broadcastAgentActivity(tabId),
       sendToWindow: (windowId, channel, ...args) => this.sendToWindow(windowId, channel, ...args),
-      log: (message) => this.logDebug(message)
+      log: (message) => this.logDebug(message),
+      condaEnvForProject: (projectId) => this.condaEnvForLocalProject(projectId),
+      onKill: (tabId) => this.shutdownNotebookKernel(tabId)
     })
     this.startupWindowStates = this.storage.loadWindowSession(
       this.projectsStore.peek(),
@@ -174,6 +194,9 @@ export class AppRuntime {
     this.logDebug(`start hookPort=${this.hookServer.getPort()}`)
     this.hookInjector = new HookInjector(this.hookServer.getPort(), this.hookServer.getToken())
     this.sshManager = new SshConnectionManager(path.join(CONFIG_DIR, 'ssh'), this.hookServer.getPort())
+    this.notebookKernels.onEvent((tabId, event) => {
+      this.broadcastToAllWindows('notebook-kernel-event', tabId, event)
+    })
     this.chatManager = this.createChatManager()
     this.registerEventForwarders()
     this.registerIpcHandlers()
@@ -383,6 +406,7 @@ export class AppRuntime {
     this.persistWindowSession()
     this.ptySessions.saveAllScrollback()
     this.ptySessions.killAll()
+    this.notebookKernels.shutdownAll()
     this.chatManager.closeAll()
     this.hookInjector.cleanupAll()
     await this.hookServer.stop()
@@ -628,6 +652,13 @@ export class AppRuntime {
 
     registerFileBrowserHandlers(ipc, { resolveRoot })
     registerGitHandlers(ipc, { resolveRoot })
+    registerNotebookHandlers(ipc, {
+      startKernel: (tabId, projectId, cwd, override) => this.startNotebookKernel(tabId, projectId, cwd, override),
+      execute: (tabId, requestId, code, cellId) => this.notebookKernels.execute(tabId, requestId, code, cellId),
+      interrupt: (tabId) => this.notebookKernels.interrupt(tabId),
+      shutdown: (tabId) => this.shutdownNotebookKernel(tabId),
+      listCondaEnvs: () => listCondaEnvs({}, { force: true })
+    })
   }
 
   /**
@@ -736,10 +767,69 @@ export class AppRuntime {
 
   private broadcastToAllWindows(channel: string, ...args: unknown[]): void {
     for (const window of this.windows.values()) {
-      if (!window.isDestroyed()) {
-        window.webContents.send(channel, ...args)
-      }
+      safeWebContentsSend(window, channel, ...args)
     }
+  }
+
+  /** Local PTYs only. Remote tabs run on the SSH host, which has its own python. */
+  private condaEnvForLocalProject(projectId?: string): CondaEnvInfo | undefined {
+    if (!projectId) return undefined
+    const project = this.projectsStore.peek().projects.find((item) => item.id === projectId)
+    if (!project) return undefined
+    const resolved = resolveProjectCondaEnv(project)
+    if (!resolved) {
+      if (project.condaEnvName?.trim() || project.condaEnvPrefix?.trim()) {
+        this.logDebug(
+          `condaEnv missing name=${project.condaEnvName ?? ''} prefix=${project.condaEnvPrefix ?? ''} projectId=${projectId}`
+        )
+      }
+      return undefined
+    }
+    this.logDebug(`condaEnv name=${resolved.name} prefix=${resolved.prefix} projectId=${projectId}`)
+    return resolved
+  }
+
+  /** Cancels a start still waiting on the conda lookup, then stops a running kernel. */
+  private shutdownNotebookKernel(tabId: string): void {
+    this.pendingNotebookStarts.delete(tabId)
+    this.notebookKernels.shutdown(tabId)
+  }
+
+  private async startNotebookKernel(
+    tabId: string,
+    projectId: string,
+    cwd: string,
+    condaOverride?: NotebookKernelCondaOverride | null
+  ): Promise<{ error?: string; code?: string }> {
+    const fail = (code: string, message: string): { error: string; code: string } => {
+      this.broadcastToAllWindows('notebook-kernel-event', tabId, { event: 'fail', code, message })
+      return { error: message, code }
+    }
+    const project = this.projectsStore.peek().projects.find((item) => item.id === projectId)
+    if (!project) return { error: 'Project not found.', code: 'no-project' }
+    if (isRemoteProject(project)) return fail('remote', NOTEBOOK_ERROR_REMOTE)
+    if (isShellCommandProject(project)) return fail('shell-project', NOTEBOOK_ERROR_SHELL_PROJECT)
+    const cwdResult = resolveNotebookKernelCwd(cwd, notebookAllowedCwdRoots(project))
+    if (!cwdResult.ok) return fail('cwd', cwdResult.error)
+    const override = condaOverride
+      ? { condaEnvName: condaOverride.name, condaEnvPrefix: condaOverride.prefix }
+      : null
+    const hasOverride = !!(override?.condaEnvName?.trim() || override?.condaEnvPrefix?.trim())
+    const token = ++this.notebookStartCounter
+    this.pendingNotebookStarts.set(tabId, token)
+    // Override: live conda list only. No override: existing project-default resolve.
+    const listedEnvs = hasOverride ? await listCondaEnvsForNotebookKernel() : []
+    // The tab was closed (or a newer start began) while conda was listing envs.
+    if (this.pendingNotebookStarts.get(tabId) !== token) return {}
+    this.pendingNotebookStarts.delete(tabId)
+    const projectResolved = hasOverride ? null : resolveProjectCondaEnv(project)
+    const resolved = resolveNotebookKernelCondaEnv(override, project, listedEnvs, projectResolved, process.platform)
+    if (!resolved.ok) return fail(resolved.code, resolved.error)
+    const condaEnv = resolved.env ?? undefined
+    this.logDebug(
+      `notebookKernelStart tabId=${tabId} projectId=${projectId} cwd=${cwdResult.cwd} conda=${condaEnv?.name ?? ''} prefix=${condaEnv?.prefix ?? ''}`
+    )
+    return this.notebookKernels.start(tabId, condaEnv, cwdResult.cwd)
   }
 
   private getProjectTunnel(projectId: string): TunnelConfig | undefined {
@@ -754,6 +844,6 @@ export class AppRuntime {
 
   private sendToWindow(windowId: number, channel: string, ...args: unknown[]): void {
     const window = this.windows.get(windowId)
-    if (window && !window.isDestroyed()) window.webContents.send(channel, ...args)
+    if (window) safeWebContentsSend(window, channel, ...args)
   }
 }

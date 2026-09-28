@@ -23,6 +23,8 @@ import type {
   WorkspaceListBranchesRequest,
   WindowViewState
 } from '../shared/types'
+import type { CondaListResult } from '../shared/conda'
+import type { NotebookKernelCondaOverride, NotebookKernelEvent } from '../shared/notebook'
 import type { AgentActivity } from '../shared/agent-activity'
 import type { AiStatusEvent } from '../shared/ai-status'
 import type { ChatEvent, ChatImage, ChatPromptResponse, ChatSideAnswer, ChatSnapshot } from '../shared/claude-chat'
@@ -90,6 +92,9 @@ const api = {
   // File picker
   pickFile: (title?: string): Promise<string | null> =>
     ipcRenderer.invoke('pick-file', title),
+
+  condaListEnvs: (): Promise<CondaListResult> =>
+    ipcRenderer.invoke('conda-list-envs'),
 
   externalIdeDetect: (): Promise<Array<{ name: string; command: string }>> =>
     ipcRenderer.invoke('external-ide-detect'),
@@ -356,7 +361,39 @@ const api = {
     relativeProjectPath: string
   }> => ipcRenderer.invoke('workspace-create', request),
   workspaceDelete: (request: WorkspaceDeleteRequest): Promise<WorkspaceDeleteResult> =>
-    ipcRenderer.invoke('workspace-delete', request)
+    ipcRenderer.invoke('workspace-delete', request),
+
+  // Native notebooks. One jupyter_client helper per tab, local conda env only.
+  notebookKernelStart: (
+    tabId: string,
+    projectId: string,
+    cwd: string,
+    condaOverride?: NotebookKernelCondaOverride | null
+  ): Promise<{ error?: string; code?: string }> =>
+    ipcRenderer.invoke('notebook-kernel-start', tabId, projectId, cwd, condaOverride),
+  notebookKernelExecute: (
+    tabId: string,
+    requestId: string,
+    code: string,
+    cellId?: string
+  ): Promise<{ error?: string }> =>
+    ipcRenderer.invoke('notebook-kernel-execute', tabId, requestId, code, cellId),
+  notebookKernelInterrupt: (tabId: string): Promise<void> =>
+    ipcRenderer.invoke('notebook-kernel-interrupt', tabId),
+  notebookKernelRestart: (
+    tabId: string,
+    projectId: string,
+    cwd: string,
+    condaOverride?: NotebookKernelCondaOverride | null
+  ): Promise<{ error?: string; code?: string }> =>
+    ipcRenderer.invoke('notebook-kernel-restart', tabId, projectId, cwd, condaOverride),
+  notebookKernelShutdown: (tabId: string): Promise<void> =>
+    ipcRenderer.invoke('notebook-kernel-shutdown', tabId),
+  onNotebookKernelEvent: (callback: (tabId: string, event: NotebookKernelEvent) => void): (() => void) => {
+    const handler = (_e: Electron.IpcRendererEvent, tabId: string, event: NotebookKernelEvent) => callback(tabId, event)
+    ipcRenderer.on('notebook-kernel-event', handler)
+    return () => ipcRenderer.removeListener('notebook-kernel-event', handler)
+  }
 }
 
 contextBridge.exposeInMainWorld('api', api)

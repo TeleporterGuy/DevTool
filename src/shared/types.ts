@@ -1,4 +1,4 @@
-export type TabType = 'terminal' | 'browser' | 'claude' | 'claude-chat' | 'codex' | 'pi' | 'diff' | 'editor' | 'note' | 'home'
+export type TabType = 'terminal' | 'browser' | 'claude' | 'claude-chat' | 'codex' | 'pi' | 'diff' | 'editor' | 'notebook' | 'note' | 'home'
 
 export const AI_TAB_TYPES = ['claude', 'codex', 'pi'] as const
 export type AiTabType = typeof AI_TAB_TYPES[number]
@@ -217,6 +217,13 @@ export interface Project {
   tunnel?: TunnelConfig
   shellCommand?: ShellCommandConfig
   aiToolArgs?: Partial<Record<AiTabType, string>>
+  /**
+   * Conda / micromamba env name (display + fallback lookup).
+   * Spawn prefers `condaEnvPrefix` when that folder is still a real env.
+   */
+  condaEnvName?: string
+  /** Absolute conda env prefix. Unique when two installs share a name. */
+  condaEnvPrefix?: string
   lifetimeStats?: { tasksCreated: number; notesCreated: number }
   tagIds?: string[]
   /**

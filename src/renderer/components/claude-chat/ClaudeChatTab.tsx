@@ -14,6 +14,7 @@ import TaskIndicator from './TaskIndicator'
 import PromptCard from './PromptCards'
 import SideQuestion, { type SideQuestionState } from './SideQuestion'
 import Composer from './Composer'
+import { noteAgentTabTyped } from '../../agentLink/agentTabRecency'
 
 interface Props {
   tabId: string
@@ -248,7 +249,7 @@ export default function ClaudeChatTab({ tabId, visible, sessionId, pane, project
   const starting = state.process === 'starting' && state.items.length === 0
 
   return (
-    <div className="absolute inset-0 flex-col bg-bg" style={{ display: visible ? 'flex' : 'none' }}>
+    <div className="absolute inset-0 flex-col bg-bg" style={{ display: visible ? 'flex' : 'none' }} onKeyDownCapture={() => noteAgentTabTyped(taskId, tabId)}>
       <div className="flex-1 min-h-0 relative">
         <div className="absolute top-2 right-3 z-(--z-sticky)">
           <TaskIndicator tasks={tasks} onStop={stopTask} onBackground={backgroundTask} onJump={jumpToTool} canJump={canJump} />
@@ -309,6 +310,7 @@ export default function ClaudeChatTab({ tabId, visible, sessionId, pane, project
           onSetEffort={(effort) => { void window.api.chatSetEffort(tabId, effort) }}
           onOpenInTerminal={openInTerminal}
           focusSignal={visible}
+          tabId={tabId}
         />
       </div>
     </div>

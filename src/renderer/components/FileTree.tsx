@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react'
 import type { DirectoryEntry, GitStatusResult, GitFileStatus } from '../../shared/types'
-import { ChevronRight, Folder, FileText } from 'lucide-react'
+import { ChevronRight, Folder, FileText, BookText } from 'lucide-react'
 import { FILE_BROWSER_REFRESH_MS } from '../hooks/fileBrowserRefresh'
 import { posixRelativeJoin } from '../../shared/workspace-path'
+import { isNotebookFile } from '../../shared/notebook'
 
 interface Props {
   projectDir: string
@@ -12,6 +13,8 @@ interface Props {
   onRevealInTerminal?: (relativeDir: string) => void
   ideEditors?: Array<{ id: string; name: string }>
   onOpenInIde?: (editorId: string) => Promise<string | null>
+  /** "Link to agent": insert an `@path` link into the task's agent tab. */
+  onLinkToAgent?: (relativePath: string, isDirectory: boolean) => void
 }
 
 type StatusColor = 'var(--color-danger)' | 'var(--color-warn)' | 'var(--color-success)' | undefined
@@ -205,7 +208,9 @@ function TreeNode({
         </span>
         {isDirectory
           ? <Folder size={12} className="mr-1.5 text-text-muted shrink-0" />
-          : <FileText size={12} className="mr-1.5 text-text-muted shrink-0" />
+          : isNotebookFile(entry.name)
+            ? <BookText size={12} className="mr-1.5 text-text-muted shrink-0" />
+            : <FileText size={12} className="mr-1.5 text-text-muted shrink-0" />
         }
         {renaming ? (
           <DraftInput
@@ -367,7 +372,8 @@ const FileTree = React.forwardRef<FileTreeHandle, Props>(function FileTree({
   filterQuery = '',
   onRevealInTerminal,
   ideEditors = [],
-  onOpenInIde
+  onOpenInIde,
+  onLinkToAgent
 }, ref) {
   const [expandedDirs, setExpandedDirs] = useState<Set<string>>(new Set())
   const [childrenCache, setChildrenCache] = useState<Record<string, DirectoryEntry[]>>({})
@@ -801,6 +807,17 @@ const FileTree = React.forwardRef<FileTreeHandle, Props>(function FileTree({
           >
             <button className={menuItemCls} onClick={() => startCreate(createParent, 'file')}>New file</button>
             <button className={menuItemCls} onClick={() => startCreate(createParent, 'directory')}>New folder</button>
+            {!menuTargetIsRoot && onLinkToAgent && (
+              <button
+                className={menuItemCls}
+                onClick={() => {
+                  setMenu(null)
+                  onLinkToAgent(menu.relativePath, menu.isDirectory)
+                }}
+              >
+                Link to agent
+              </button>
+            )}
             {!menuTargetIsRoot && (
               <>
                 <button

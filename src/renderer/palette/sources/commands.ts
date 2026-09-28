@@ -1,8 +1,10 @@
 // src/renderer/palette/sources/commands.ts
 import { commandRegistry } from '../CommandRegistry'
-import { paletteEvents } from '../paletteEvents'
+import type { AppCtx } from '../types'
+import { getPaletteReturnFocus, paletteEvents } from '../paletteEvents'
 import { AI_TAB_TYPES, AI_TAB_META, isHomeTask, isShellCommandProject, pinnedItemKey, type AiTabType, type PinnedItem } from '../../../shared/types'
 import { shortcutPlatform } from '../../../shared/shortcut-label'
+import { claudeTabType } from '../../components/newTaskTabs'
 
 function currentPinTargets(actions: any): { project: PinnedItem | null; task: PinnedItem | null; isPinned: (item: PinnedItem) => boolean } {
   const { selectedProjectId, selectedTaskId, projects, pinnedItems } = actions
@@ -89,10 +91,13 @@ commandRegistry.register({
 
 for (const aiType of AI_TAB_TYPES) {
   const meta = AI_TAB_META[aiType as AiTabType]
+  // Claude opens in the mode Settings picks (terminal or chat), like the tab-bar
+  // button, so its entry is named for neither.
+  const isClaude = aiType === 'claude'
   commandRegistry.register({
     id: `cmd.new${aiType.charAt(0).toUpperCase()}${aiType.slice(1)}Tab`,
-    title: `New ${meta.label} Tab`,
-    aliases: [meta.label.toLowerCase(), aiType, meta.command],
+    title: isClaude ? 'New Claude Tab' : `New ${meta.label} Tab`,
+    aliases: [meta.label.toLowerCase(), aiType, meta.command, ...(isClaude ? ['claude chat', 'claude code'] : [])],
     when: ctx => {
       const { selectedProjectId, selectedTaskId, projects, config } = ctx.actions
       if (!selectedProjectId || !selectedTaskId) return false
@@ -102,9 +107,9 @@ for (const aiType of AI_TAB_TYPES) {
       return true
     },
     run: ctx => {
-      const { selectedProjectId, selectedTaskId } = ctx.actions
+      const { selectedProjectId, selectedTaskId, config } = ctx.actions
       if (!selectedProjectId || !selectedTaskId) return
-      ctx.actions.addTab(selectedProjectId, selectedTaskId, 'left', aiType)
+      ctx.actions.addTab(selectedProjectId, selectedTaskId, 'left', claudeTabType(aiType, config?.claudeDefaultView ?? 'terminal'))
     }
   })
 }
@@ -117,6 +122,42 @@ commandRegistry.register({
   run: ctx => {
     if (ctx.actions.selectedProjectId) ctx.actions.createNote(ctx.actions.selectedProjectId, 'Untitled')
   }
+})
+
+// Ctrl+L / Ctrl+Shift+L are bound inside editor and notebook tabs (Monaco actions
+// and the notebook's own key handler); these entries make them findable and list
+// the shortcut. The tab that had focus when the palette opened answers.
+function selectedTaskHasFileTab(actions: Pick<AppCtx['actions'], 'projects' | 'selectedProjectId' | 'selectedTaskId'>): boolean {
+  const project = actions.projects?.find(p => p.id === actions.selectedProjectId)
+  const task = project?.tasks.find(t => t.id === actions.selectedTaskId)
+  if (!task) return false
+  return [...task.tabs.left, ...task.tabs.right].some(t => t.type === 'editor' || t.type === 'notebook')
+}
+
+function emitLinkToAgent(kind: 'selection' | 'file'): void {
+  const request = { kind, target: getPaletteReturnFocus(), handled: false }
+  paletteEvents.emit('link-to-agent', request)
+  if (!request.handled) {
+    paletteEvents.emit('agent-link-notice', 'Put the cursor in an editor or notebook first, then link.')
+  }
+}
+
+commandRegistry.register({
+  id: 'cmd.linkSelectionToAgent',
+  title: 'Link Selection to Agent',
+  aliases: ['add to chat', 'link line', 'link cell', 'mention'],
+  shortcut: 'CmdOrCtrl+L',
+  when: ctx => selectedTaskHasFileTab(ctx.actions),
+  run: () => emitLinkToAgent('selection')
+})
+
+commandRegistry.register({
+  id: 'cmd.linkFileToAgent',
+  title: 'Link File to Agent',
+  aliases: ['add file to chat', 'link notebook', 'mention file'],
+  shortcut: 'CmdOrCtrl+Shift+L',
+  when: ctx => selectedTaskHasFileTab(ctx.actions),
+  run: () => emitLinkToAgent('file')
 })
 
 commandRegistry.register({
