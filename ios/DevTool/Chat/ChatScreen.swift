@@ -9,6 +9,8 @@ struct ChatScreen: View {
     @State private var atBottom = true
     @State private var detailItem: ChatItem?
     @FocusState private var composerFocused: Bool
+    /// The chat's height above the keyboard, bottom bar included; caps the prompt card.
+    @State private var viewportHeight: CGFloat = 0
 
     private static let bottomID = "chat-bottom"
 
@@ -125,29 +127,18 @@ struct ChatScreen: View {
             .onChange(of: model.view?.items.last) { _, _ in follow(proxy) }
             .onChange(of: model.view?.items.count) { _, _ in follow(proxy) }
             .onChange(of: model.view?.busy) { _, _ in follow(proxy) }
-            .onChange(of: model.view?.prompts.first?.id) { _, _ in follow(proxy) }
+            .onChange(of: model.view?.prompts.first?.id) { _, id in
+                // A card needs the room the keyboard takes, and its buttons, not the composer.
+                if id != nil { composerFocused = false }
+                follow(proxy)
+            }
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 bottomBar(proxy)
             }
-            .overlay(alignment: .bottomTrailing) {
-                if !atBottom {
-                    Button {
-                        withAnimation { proxy.scrollTo(Self.bottomID, anchor: .bottom) }
-                    } label: {
-                        Image(systemName: "arrow.down")
-                            .font(.footnote.weight(.bold))
-                            .frame(width: 34, height: 34)
-                            .background(.regularMaterial, in: Circle())
-                            .shadow(color: .black.opacity(0.12), radius: 4, y: 1)
-                    }
-                    .buttonStyle(.plain)
-                    .padding(.trailing, 16)
-                    .padding(.bottom, 8)
-                    .accessibilityLabel("Scroll to latest")
-                    .transition(.opacity)
-                }
-            }
         }
+        // Measured outside the bottom bar's inset: the card's height feeds the bar, so
+        // measuring inside it would loop (card grows → viewport shrinks → cap shrinks → …).
+        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { if abs(viewportHeight - $0) > 1 { viewportHeight = $0 } }
     }
 
     /// Keeps the newest content in view while the user is at the bottom.
@@ -212,7 +203,8 @@ struct ChatScreen: View {
                     moreCount: prompts.count - 1,
                     answering: model.answering.contains(prompt.id),
                     error: model.answerErrors[prompt.id],
-                    enabled: !offline
+                    enabled: !offline,
+                    maxHeight: viewportHeight > 0 ? max(200, viewportHeight * 0.55) : .infinity
                 ) { answer in
                     Task { await model.answer(prompt, answer) }
                 }
@@ -232,6 +224,25 @@ struct ChatScreen: View {
         .background(.bar)
         .animation(.snappy, value: model.view?.prompts.first?.id)
         .animation(.snappy, value: model.toast)
+        // Above the bar, not over it: over the composer it would cover Stop and Send.
+        .overlay(alignment: .topTrailing) {
+            if !atBottom {
+                Button {
+                    withAnimation { proxy.scrollTo(Self.bottomID, anchor: .bottom) }
+                } label: {
+                    Image(systemName: "arrow.down")
+                        .font(.footnote.weight(.bold))
+                        .frame(width: 34, height: 34)
+                        .background(.regularMaterial, in: Circle())
+                        .shadow(color: .black.opacity(0.12), radius: 4, y: 1)
+                }
+                .buttonStyle(.plain)
+                .padding(.trailing, 16)
+                .offset(y: -42)
+                .accessibilityLabel("Scroll to latest")
+                .transition(.opacity)
+            }
+        }
     }
 
     private var lastSeen: Date? {
@@ -288,6 +299,8 @@ struct ChatScreen: View {
         let text = draft
         draft = ""
         atBottom = true
+        // Hand the screen back to the transcript: the reply and any card land there.
+        composerFocused = false
         Task {
             if await !model.send(text), draft.isEmpty {
                 draft = text // Give the text back so it isn't lost.

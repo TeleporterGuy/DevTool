@@ -56,6 +56,7 @@ import { IdentityStore } from './mobile/identity'
 import { createInvite } from './mobile/invite'
 import { RelayClient } from './mobile/relay-client'
 import { createNoiseChannelFactory } from './mobile/channel'
+import { ChatBridge } from './mobile/chat-bridge'
 import { normalizeMobileConfig } from '../shared/mobile'
 import type {
   AppConfig,
@@ -250,7 +251,17 @@ export class AppRuntime {
       }),
       createInvite: (options) => createInvite(identity.get(), options),
       broadcastState: (state) => this.broadcastToAllWindows('mobile-state-changed', state),
-      log
+      log,
+      chat: new ChatBridge({
+        chats: this.chatManager,
+        projects: { peek: () => this.projectsStore.peek() },
+        timers: {
+          now: () => Date.now(),
+          setTimeout: (fn, ms) => setTimeout(fn, ms),
+          clearTimeout: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>)
+        },
+        log
+      })
     })
   }
 

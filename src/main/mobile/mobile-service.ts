@@ -10,6 +10,7 @@ import {
 } from '../../shared/mobile'
 import type { ProjectsData, TabStatusValue } from '../../shared/types'
 import { buildInbox, inboxContentKey } from './inbox'
+import type { ChatBridge, ChatPhone } from './chat-bridge'
 import type { MobilePairing } from './pairings-store'
 import {
   AppErrorCode,
@@ -17,7 +18,9 @@ import {
   b64uDecode,
   b64uEncode,
   constantTimeEqual,
-  deviceId
+  deviceId,
+  parseChatParams,
+  ProtocolError
 } from '../../../protocol/ts/index.ts'
 import type {
   AppMessage,
@@ -164,6 +167,8 @@ export interface MobileServiceDeps {
   broadcastState(state: MobileState): void
   log(message: string): void
   timers?: MobileTimers
+  /** Claude chat tabs (`chat.*`, SPEC.md §6). Without it those ops answer `unsupported`. */
+  chat?: Pick<ChatBridge, 'request' | 'dropPhone' | 'dropAll' | 'projectsChanged'>
 }
 
 // ---- The service -----------------------------------------------------------------
@@ -186,6 +191,8 @@ interface Session {
   /** Inbox event counter; restarts with every handshake (SPEC.md §4.4). */
   seq: number
   lastInboxKey: string | null
+  /** This session's handle in the chat bridge; replaced by every handshake. */
+  chatPhone: ChatPhone
 }
 
 interface PendingRequest extends Omit<MobilePendingRequest, 'online'> {
@@ -248,7 +255,10 @@ export class MobileService {
     if (this.started) return
     this.started = true
     this.storeUnsubs = [
-      this.deps.projects.subscribe(() => this.scheduleInbox()),
+      this.deps.projects.subscribe(() => {
+        this.deps.chat?.projectsChanged()
+        this.scheduleInbox()
+      }),
       this.deps.activity.subscribe(() => this.scheduleInbox())
     ]
     if (this.deps.getConfig().enabled) this.connect()
@@ -522,8 +532,10 @@ export class MobileService {
       channel: undefined as unknown as PhoneChannel,
       role: 'handshaking',
       seq: 0,
-      lastInboxKey: null
+      lastInboxKey: null,
+      chatPhone: undefined as unknown as ChatPhone
     }
+    session.chatPhone = this.chatPhoneFor(session)
     session.channel = this.deps.channels.create(phoneId, {
       sendFrame: (data) => {
         this.transport?.send({ t: 'frame', to: phoneId, data: b64uEncode(data) })
@@ -532,6 +544,7 @@ export class MobileService {
         // A new handshake on an existing channel starts a new session.
         session.seq = 0
         session.lastInboxKey = null
+        this.resetChat(session)
         const result = this.decideHandshake(phoneId, hello)
         session.role = result === 'ok' ? 'paired' : result === 'pending' ? 'pending' : 'refused'
         this.log(`handshake phone=${phoneId} kind=${hello.hello.kind} result=${result}`)
@@ -550,6 +563,7 @@ export class MobileService {
           session.role = 'handshaking'
           session.seq = 0
           session.lastInboxKey = null
+          this.resetChat(session)
         }
       }
     })
@@ -646,13 +660,47 @@ export class MobileService {
       }
       return
     }
+    if (this.deps.chat) {
+      let chatParams: ReturnType<typeof parseChatParams>
+      try {
+        chatParams = parseChatParams(message.op, message.params)
+      } catch (err) {
+        if (!(err instanceof ProtocolError)) throw err
+        session.channel.send({ t: 'res', id, ok: false, error: { code: AppErrorCode.BadRequest, message: err.message } })
+        return
+      }
+      if (chatParams) {
+        this.deps.chat.request(session.chatPhone, id, message.op, chatParams)
+        return
+      }
+    }
     session.channel.send({ t: 'res', id, ok: false, error: { code: AppErrorCode.Unsupported, message: `Unknown op ${message.op}` } })
+  }
+
+  /** The bridge's handle for this session: sends only while it is this session and paired. */
+  private chatPhoneFor(session: Session): ChatPhone {
+    const phone: ChatPhone = {
+      id: session.phoneId,
+      send: (message) =>
+        session.chatPhone === phone &&
+        this.sessions.get(session.phoneId) === session &&
+        session.role === 'paired' &&
+        session.channel.send(message)
+    }
+    return phone
+  }
+
+  /** A new or lost session: the phone's chat subscription and counters go with the old one. */
+  private resetChat(session: Session): void {
+    this.deps.chat?.dropPhone(session.phoneId)
+    session.chatPhone = this.chatPhoneFor(session)
   }
 
   private dropSession(phoneId: string): void {
     const session = this.sessions.get(phoneId)
     if (!session) return
     this.sessions.delete(phoneId)
+    this.deps.chat?.dropPhone(phoneId)
     session.channel.close()
   }
 

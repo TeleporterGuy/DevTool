@@ -9,9 +9,29 @@ struct PromptCard: View {
     let answering: Bool
     let error: String?
     let enabled: Bool
+    /// Taller cards scroll inside this height, so the transcript stays in view.
+    var maxHeight: CGFloat = .infinity
     let onAnswer: (ChatAnswer) -> Void
+    @State private var contentHeight: CGFloat = 0
 
     var body: some View {
+        ScrollView {
+            card
+                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { if abs(contentHeight - $0) > 1 { contentHeight = $0 } }
+        }
+        .scrollBounceBehavior(.basedOnSize)
+        .frame(height: min(contentHeight, maxHeight))
+        .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .strokeBorder(Color.orange.opacity(0.45), lineWidth: 1)
+        }
+        .shadow(color: .black.opacity(0.08), radius: 8, y: 2)
+        .accessibilityElement(children: .contain)
+    }
+
+    private var card: some View {
         VStack(alignment: .leading, spacing: 10) {
             switch prompt.content {
             case .permission(let permission):
@@ -39,13 +59,6 @@ struct PromptCard: View {
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .strokeBorder(Color.orange.opacity(0.45), lineWidth: 1)
-        }
-        .shadow(color: .black.opacity(0.08), radius: 8, y: 2)
-        .accessibilityElement(children: .contain)
     }
 }
 
@@ -147,21 +160,27 @@ struct PermissionPromptView: View {
                     .background(Color(.tertiarySystemFill), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
                 }
             }
+            // Deny and Allow share a row; "Always allow" gets its own, since three equal
+            // buttons on a phone cut it to "Always…".
             AnswerButtons(busy: busy) {
-                Button(role: .destructive) { onAnswer(.deny(message: nil)) } label: {
-                    Text("Deny").frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.bordered)
-                if permission.canAlwaysAllow {
-                    Button { onAnswer(.allow(always: true)) } label: {
-                        Text("Always allow").lineLimit(1).frame(maxWidth: .infinity)
+                VStack(spacing: 8) {
+                    HStack(spacing: 8) {
+                        Button(role: .destructive) { onAnswer(.deny(message: nil)) } label: {
+                            Text("Deny").frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.bordered)
+                        Button { onAnswer(.allow(always: false)) } label: {
+                            Text("Allow").bold().frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.borderedProminent)
                     }
-                    .buttonStyle(.bordered)
+                    if permission.canAlwaysAllow {
+                        Button { onAnswer(.allow(always: true)) } label: {
+                            Text("Always allow").frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.bordered)
+                    }
                 }
-                Button { onAnswer(.allow(always: false)) } label: {
-                    Text("Allow").bold().frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.borderedProminent)
             }
             .controlSize(.large)
             .disabled(!enabled || busy)

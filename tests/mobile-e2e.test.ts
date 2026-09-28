@@ -15,6 +15,9 @@ import type { AppMessage, InboxEvent } from '../protocol/ts/index.ts'
 import { startRelayServer, type RelayServer } from '../relay/src/server.ts'
 import { MemoryStore } from '../relay/src/store.ts'
 import { RelayPhone, waitFor } from './helpers/relay-phone'
+import { ChatBridge } from '../src/main/mobile/chat-bridge'
+import { FakeChats } from './helpers/fake-chats'
+import type { ChatViewEvent } from '../protocol/ts/index.ts'
 
 /**
  * The desktop's real mobile stack — MobileService, identity, pairings, RelayClient
@@ -37,7 +40,7 @@ const PROJECTS: ProjectsData = {
       id: 'p1', name: 'api-server', emoji: '🚀', directory: '/src/api',
       tasks: [createHomeTask('p1').task, {
         id: 't1', name: 'fix-auth',
-        tabs: { left: [{ id: 'tab-chat', type: 'claude-chat', title: 'Claude' }, { id: 'tab-web', type: 'browser', title: 'Docs' }], right: [] },
+        tabs: { left: [{ id: 'tab-chat', type: 'claude-chat', title: 'Claude', sessionId: 'sess-e2e' }, { id: 'tab-web', type: 'browser', title: 'Docs' }], right: [] },
         activeTab: { left: 'tab-chat', right: null }, splitOpen: false, splitRatio: 0.5
       }]
     },
@@ -60,6 +63,7 @@ describe('mobile end to end (real relay)', () => {
   let registry: TabActivityRegistry
   let states: MobileState[]
   let config: MobileConfig
+  let chats: FakeChats
   const phones: RelayPhone[] = []
 
   beforeEach(async () => {
@@ -71,6 +75,7 @@ describe('mobile end to end (real relay)', () => {
     config = { ...DEFAULT_MOBILE_CONFIG, relayUrl: relay.url }
     const identity = new IdentityStore(dir, encryptor)
     const listeners = new Set<() => void>()
+    chats = new FakeChats()
     service = new MobileService({
       getConfig: () => config,
       saveConfig: (next) => { config = next },
@@ -88,7 +93,13 @@ describe('mobile end to end (real relay)', () => {
       }),
       createInvite: (options) => createInvite(identity.get(), options),
       broadcastState: (state) => states.push(state),
-      log: () => {}
+      log: () => {},
+      chat: new ChatBridge({
+        chats,
+        projects: { peek: () => PROJECTS },
+        timers: { now: () => Date.now(), setTimeout: (fn, ms) => setTimeout(fn, ms), clearTimeout: (h) => clearTimeout(h as ReturnType<typeof setTimeout>) },
+        log: () => {}
+      })
     })
     service.start()
   })
@@ -154,7 +165,7 @@ describe('mobile end to end (real relay)', () => {
 
     // inbox.get answers with the same picture.
     phone.phone.request(2, 'inbox.get')
-    phone.phone.request(3, 'chat.send')
+    phone.phone.request(3, 'tasks.create')
     phone.flush()
     await waitFor(() => phone.phone.messages.some(m => m.t === 'res' && m.id === 3), 'responses')
     const res = phone.phone.messages.find(m => m.t === 'res' && m.id === 2)
@@ -189,6 +200,75 @@ describe('mobile end to end (real relay)', () => {
     expect(phone.phone.messages.at(-1)).toEqual({ t: 'evt', e: 'pairing', status: 'revoked' })
     expect(store.phonesForDesktop(phone.desktopId)).toEqual([])
     expect(service.getState().devices).toEqual([])
+  })
+
+  it('drives a chat: open, stream, send, answer, gone, interrupt, and a transcript over 60 KB', { timeout: 20_000 }, async () => {
+    const invite = await service.startPairing()
+    await waitFor(() => service.getState().connection.kind === 'online', 'desktop online')
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    const phone = new RelayPhone(invite.uri)
+    phones.push(phone)
+    await phone.connect('pair')
+    phone.phone.startHandshake(phone.phone.hello('pair', phone.secret))
+    phone.flush()
+    await waitFor(() => service.getState().pending !== null, 'pending request')
+    service.accept(phone.phone.id)
+    await waitFor(() => inboxEvents(phone.phone.messages).length === 1, 'inbox')
+
+    const res = (id: number) => phone.phone.messages.find(m => m.t === 'res' && m.id === id)
+    const chatEvents = () => phone.phone.messages.filter((m): m is ChatViewEvent => m.t === 'evt' && m.e === 'chat')
+    const call = async (id: number, op: string, params: unknown) => {
+      phone.phone.request(id, op, params)
+      phone.flush()
+      await waitFor(() => res(id) !== undefined, `${op} result`)
+      return res(id)
+    }
+
+    // 70 items of ~1 KB each: the open's 60-item window is ~60 KB+, so it arrives in fragments.
+    const filler = 'lorem ipsum '.repeat(90)
+    chats.update('tab-chat', (s) => ({ ...s, items: Array.from({ length: 70 }, (_, i) => ({ kind: 'text' as const, id: `h${i}`, text: `${i} ${filler}` })) }))
+    const framesBefore = phone.phone.transportFrames
+    const open = await call(10, 'chat.open', { tabId: 'tab-chat' })
+    expect(open).toMatchObject({ ok: true, result: { seq: 0, view: { tabId: 'tab-chat', title: 'Claude', hasEarlier: true } } })
+    const view = (open as { result: { view: { items: { id: string }[] } } }).result.view
+    expect(view.items).toHaveLength(60)
+    expect(view.items[0].id).toBe('h10')
+    expect(phone.phone.transportFrames - framesBefore).toBeGreaterThan(1)
+
+    // Unknown tabs answer not-found.
+    expect(await call(11, 'chat.open', { tabId: 'nope' })).toMatchObject({ ok: false, error: { code: 'not-found' } })
+    await call(12, 'chat.open', { tabId: 'tab-chat' })
+
+    // Send from the phone: the user item and busy come back as an event.
+    expect(await call(13, 'chat.send', { tabId: 'tab-chat', text: 'say hi' })).toMatchObject({ ok: true, result: {} })
+    expect(chats.sent).toEqual([{ tabId: 'tab-chat', text: 'say hi' }])
+    await waitFor(() => chatEvents().some(e => e.busy && e.upserts.some(i => i.kind === 'user' && i.text === 'say hi')), 'user item event')
+
+    // A streaming reply, then a permission prompt.
+    for (const partial of ['Hi', 'Hi the', 'Hi there']) {
+      chats.update('tab-chat', (s) => ({ ...s, items: [...s.items.filter(i => i.id !== 'r1'), { kind: 'text', id: 'r1', text: partial, streaming: true }] }))
+    }
+    chats.update('tab-chat', (s) => ({ ...s, pending: [{ id: 'perm-1', kind: 'permission', toolName: 'Bash', input: { command: 'ls' } }] }))
+    await waitFor(() => chatEvents().some(e => e.prompts.some(p => p.id === 'perm-1')), 'prompt event')
+    const withPrompt = chatEvents().find(e => e.prompts.some(p => p.id === 'perm-1'))
+    expect(withPrompt?.upserts).toContainEqual({ kind: 'text', id: 'r1', markdown: 'Hi there', streaming: true })
+
+    expect(await call(14, 'chat.answer', { tabId: 'tab-chat', promptId: 'perm-1', answer: { behavior: 'allow' } })).toMatchObject({ ok: true })
+    expect(chats.responses).toEqual([{ tabId: 'tab-chat', promptId: 'perm-1', response: { behavior: 'allow' } }])
+    await waitFor(() => chatEvents().at(-1)?.prompts.length === 0, 'prompt cleared')
+    expect(await call(15, 'chat.answer', { tabId: 'tab-chat', promptId: 'perm-1', answer: { behavior: 'allow' } })).toMatchObject({ ok: false, error: { code: 'gone' } })
+    expect(await call(16, 'chat.answer', { tabId: 'tab-chat', promptId: 'perm-1', answer: { behavior: 'nope' } })).toMatchObject({ ok: false, error: { code: 'bad-request' } })
+
+    expect(await call(17, 'chat.interrupt', { tabId: 'tab-chat' })).toMatchObject({ ok: true })
+    expect(chats.interrupts).toEqual(['tab-chat'])
+
+    // Event seqs run 1, 2, 3… after the second open's seq.
+    const seqs = chatEvents().map(e => e.seq)
+    expect(seqs).toEqual(seqs.map((_, i) => i + 1))
+
+    // A reconnect drops the subscription.
+    phone.close()
+    await waitFor(() => chats.listenerCount('tab-chat') === 0, 'subscription dropped')
   })
 
   it('a phone with the wrong proof is refused and the code stays usable', { timeout: 10_000 }, async () => {
