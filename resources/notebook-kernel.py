@@ -20,9 +20,15 @@ TRUNCATED_MARKER = "\n[truncated]\n"
 PNG_OMITTED = "[truncated: image/png omitted (too large)]"
 
 
+# The iopub and shell threads both emit; one line must never interleave with another.
+emit_lock = threading.Lock()
+
+
 def emit(payload):
-    sys.stdout.write(json.dumps(payload, ensure_ascii=False) + "\n")
-    sys.stdout.flush()
+    line = json.dumps(payload, ensure_ascii=False) + "\n"
+    with emit_lock:
+        sys.stdout.write(line)
+        sys.stdout.flush()
 
 
 def fail(code, message):
@@ -61,7 +67,10 @@ except ImportError:
 km = KernelManager()
 kc = None
 lock = threading.Lock()
-# jupyter msg_id -> {"id": request id, "cellId": cell id}
+# jupyter msg_id -> {"id": request id, "cellId": cell id, "reply": payload or None,
+# "idle": bool}. A request stays pending until both its execute_reply (shell) and its
+# idle status (iopub) have arrived: the reply can overtake outputs still queued on
+# iopub, and those outputs are matched to the cell through this map.
 pending = {}
 alive = True
 _shutting_down = False
@@ -130,11 +139,24 @@ except Exception as exc:
     fail("kernel-start", "Could not start an ipykernel: %s" % exc)
 
 
+def is_json_mime(key):
+    return key == "application/json" or key.endswith("+json")
+
+
 def mime_data(content):
     data = content.get("data") or {}
     out = {}
     omitted_png = False
     for key, value in data.items():
+        if is_json_mime(key):
+            # JSON mime values are JSON, not text: pass them through (unless huge).
+            try:
+                size = len(json.dumps(value, ensure_ascii=False))
+            except Exception:
+                continue
+            if size <= MIME_CHAR_LIMIT:
+                out[key] = value
+            continue
         if isinstance(value, list):
             text = "".join(str(part) for part in value)
         elif isinstance(value, str):
@@ -177,6 +199,8 @@ def iopub_loop():
             state = content.get("execution_state")
             if state in ("starting", "idle", "busy"):
                 emit({"event": "status", "execution_state": state})
+            if state == "idle":
+                mark_done(parent.get("msg_id"), idle=True)
             continue
 
         if not req:
@@ -236,6 +260,25 @@ def iopub_loop():
             emit(payload)
 
 
+def mark_done(jupyter_id, idle=False, reply=None):
+    """Record the idle status or the execute_reply; emit the reply once both are in."""
+    if not jupyter_id:
+        return
+    with lock:
+        req = pending.get(jupyter_id)
+        if not req:
+            return
+        if idle:
+            req["idle"] = True
+        if reply is not None:
+            req["reply"] = reply
+        if not (req.get("idle") and req.get("reply") is not None):
+            return
+        pending.pop(jupyter_id, None)
+        payload = req["reply"]
+    emit(payload)
+
+
 def shell_loop():
     global alive
     while alive:
@@ -249,8 +292,7 @@ def shell_loop():
         parent = msg.get("parent_header") or {}
         jupyter_id = parent.get("msg_id")
         content = msg.get("content") or {}
-        with lock:
-            req = pending.pop(jupyter_id, None)
+        req = lookup_request(parent)
         if not req:
             continue
         status = content.get("status") or "ok"
@@ -264,7 +306,7 @@ def shell_loop():
         }
         if req.get("cellId"):
             payload["cellId"] = req.get("cellId")
-        emit(payload)
+        mark_done(jupyter_id, reply=payload)
 
 
 def handle_command(cmd):
@@ -296,9 +338,11 @@ def handle_command(cmd):
             emit(err)
             emit(reply)
             return
-        jupyter_id = kc.execute(code, store_history=True, allow_stdin=False)
+        # Hold the lock across execute so iopub cannot see this request's outputs or
+        # idle status before it is registered.
         with lock:
-            pending[jupyter_id] = {"id": req_id, "cellId": cell_id}
+            jupyter_id = kc.execute(code, store_history=True, allow_stdin=False)
+            pending[jupyter_id] = {"id": req_id, "cellId": cell_id, "reply": None, "idle": False}
     elif kind == "interrupt":
         # Prefer KernelManager (Win32 event / SIGINT). Also send protocol
         # interrupt_request so a hidden-console Windows helper still aborts.

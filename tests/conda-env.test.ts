@@ -18,7 +18,8 @@ import {
   resolveCondaEnvPrefix,
   resolveProjectCondaEnv,
   setCachedCondaEnvsForTests,
-  wrapInteractiveShellWithCondaActivate
+  wrapInteractiveShellWithCondaActivate,
+  isPosixShell
 } from '../src/main/conda-env'
 
 const win = {
@@ -478,6 +479,16 @@ describe('wrapInteractiveShellWithCondaActivate', () => {
     const spawn = { file: '/bin/zsh', args: ['-l'] }
     expect(wrapInteractiveShellWithCondaActivate(spawn, null, posix)).toEqual(spawn)
     expect(wrapInteractiveShellWithCondaActivate(spawn, undefined, posix)).toEqual(spawn)
+  })
+
+  it('leaves non-POSIX shells alone, since fish/nushell cannot parse the wrapper', () => {
+    for (const file of ['/opt/homebrew/bin/fish', '/usr/local/bin/nu', 'C:\\tools\\nu.exe']) {
+      const spawn = { file, args: ['-l'] }
+      expect(wrapInteractiveShellWithCondaActivate(spawn, pec, posix)).toEqual(spawn)
+    }
+    expect(isPosixShell('/bin/bash')).toBe(true)
+    expect(isPosixShell('C:\\Program Files\\Git\\bin\\bash.exe')).toBe(true)
+    expect(isPosixShell('/usr/bin/fish')).toBe(false)
   })
 
   it('runs conda activate after login rc so init activating base cannot win', () => {

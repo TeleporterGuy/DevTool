@@ -24,13 +24,14 @@ describe('isIgnorableRendererError', () => {
     expect(isIgnorableRendererError(new Error('TextModel got disposed'))).toBe(true)
     expect(isIgnorableRendererError(new Error('Attempting to use a disposed editor'))).toBe(true)
     expect(isIgnorableRendererError(new Error('InstantiationService has been disposed'))).toBe(true)
-    expect(isIgnorableRendererError(undefined, 'Error: monaco.editor.create failed')).toBe(true)
-    expect(
-      isIgnorableRendererError(
-        new Error('Something went wrong'),
-        'at monaco-editor/esm/vs/editor/browser/widget/codeEditorWidget.js'
-      )
-    ).toBe(true)
+  })
+
+  it('does not ignore real errors that only mention Monaco or cancellation', () => {
+    const viaMonaco = new Error("Cannot read properties of null (reading 'getModel')")
+    viaMonaco.stack = `${viaMonaco.message}\n    at monaco-editor/esm/vs/editor/browser/widget/codeEditorWidget.js:1:1`
+    expect(isIgnorableRendererError(viaMonaco)).toBe(false)
+    expect(isIgnorableRendererError(new Error('Upload canceled by server'))).toBe(false)
+    expect(isIgnorableRendererError(new Error('Request was Canceled: retry failed'))).toBe(false)
   })
 
   it('does not ignore real renderer failures', () => {

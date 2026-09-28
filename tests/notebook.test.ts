@@ -185,6 +185,79 @@ describe('parseNotebook / serializeNotebook', () => {
     const roundTrip = parseNotebook(serializeNotebook(doc))
     expect(roundTrip.cells[0].outputs).toEqual(doc.cells[0].outputs)
   })
+
+  it('writes JSON mime outputs (widgets, plotly) back unchanged', () => {
+    const widget = { version_major: 2, version_minor: 0, model_id: 'abc' }
+    const plotly = { data: [{ x: [1, 2], y: [3, 4] }], layout: {} }
+    const text = JSON.stringify({
+      nbformat: 4,
+      nbformat_minor: 5,
+      metadata: {},
+      cells: [{
+        id: 'c1',
+        cell_type: 'code',
+        metadata: {},
+        execution_count: 1,
+        source: 'w',
+        outputs: [
+          {
+            output_type: 'display_data',
+            data: { 'application/vnd.jupyter.widget-view+json': widget, 'text/plain': 'Slider()' },
+            metadata: {}
+          },
+          {
+            output_type: 'execute_result',
+            execution_count: 1,
+            data: { 'application/vnd.plotly.v1+json': plotly, 'application/json': [1, 2] },
+            metadata: {}
+          }
+        ]
+      }]
+    })
+    const doc = parseNotebook(text)
+    expect(doc.cells[0].outputs[0]).toMatchObject({ type: 'display_data', data: { 'text/plain': 'Slider()' } })
+    const saved = JSON.parse(serializeNotebook(doc))
+    expect(saved.cells[0].outputs[0].data).toEqual({
+      'application/vnd.jupyter.widget-view+json': widget,
+      'text/plain': 'Slider()'
+    })
+    expect(saved.cells[0].outputs[1].data).toEqual({
+      'application/vnd.plotly.v1+json': plotly,
+      'application/json': [1, 2]
+    })
+  })
+
+  it('keeps JSON mime data from live kernel events', () => {
+    const outputs = applyKernelEventToOutputs([], {
+      event: 'display_data',
+      id: 'r1',
+      data: { 'application/json': { a: 1 }, 'text/plain': "{'a': 1}" }
+    })
+    expect(outputs?.[0]).toEqual({
+      type: 'display_data',
+      data: { 'text/plain': "{'a': 1}" },
+      jsonData: { 'application/json': { a: 1 } }
+    })
+  })
+
+  it('keeps markdown attachments and other unknown cell fields on save', () => {
+    const attachments = { 'image.png': { 'image/png': 'iVBORw0KGgo=' } }
+    const doc = parseNotebook(JSON.stringify({
+      nbformat: 4,
+      nbformat_minor: 5,
+      metadata: {},
+      cells: [
+        { id: 'm1', cell_type: 'markdown', metadata: {}, source: '![x](attachment:image.png)', attachments },
+        { id: 'c1', cell_type: 'code', metadata: {}, source: '', outputs: [], execution_count: null, custom: 7 }
+      ]
+    }))
+    const saved = JSON.parse(serializeNotebook(doc))
+    expect(saved.cells[0].attachments).toEqual(attachments)
+    expect(saved.cells[1].custom).toBe(7)
+    // nbformat allows attachments on markdown/raw cells only.
+    const asCode = JSON.parse(serializeNotebook(changeCellTypeAt(doc, 0, 'code')))
+    expect(asCode.cells[0].attachments).toBeUndefined()
+  })
 })
 
 describe('notebook kernel env control labels', () => {
@@ -549,6 +622,12 @@ describe('cell ids for notebooks that store none (nbformat < 4.5)', () => {
     expect(first).toEqual(['cell-0', 'cell-1'])
     expect(second).toEqual(first)
     expect(serializeNotebook(parseNotebook(legacy))).toBe(serializeNotebook(parseNotebook(legacy)))
+  })
+
+  it('saves as nbformat 4.5, since every saved cell carries an id', () => {
+    const saved = JSON.parse(serializeNotebook(parseNotebook(legacy)))
+    expect(saved.nbformat_minor).toBe(5)
+    expect(saved.cells.every((cell: { id?: unknown }) => typeof cell.id === 'string')).toBe(true)
   })
 
   it('keeps stored ids and makes repeated ones unique', () => {
