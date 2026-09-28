@@ -1,12 +1,14 @@
 {
-  // The only config that actually typechecks this project: `npm run typecheck`.
-  // The build does not — electron-vite strips types with esbuild — and the two
-  // environment configs are split by target, so neither covers src/shared on its
-  // own. This one spans all three source roots in a single program.
+  // The only config that actually typechecks this project: `npm run typecheck`
+  // (also the first step of `npm run build*`). electron-vite strips types with
+  // esbuild, and the two environment configs are split by target, so neither
+  // covers src/shared or tests/ on their own. This one spans all source roots
+  // plus the vitest suite in a single program.
   "extends": "./tsconfig.web.json",
   "compilerOptions": {
     "composite": false,
-    "noEmit": true
+    "noEmit": true,
+    "rootDir": "."
   },
-  "include": ["src/**/*"]
+  "include": ["src/**/*", "tests/**/*", "electron.vite.config.ts", "vitest.config.ts"]
 }

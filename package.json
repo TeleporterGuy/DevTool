@@ -7,15 +7,17 @@
   "scripts": {
     "dev": "electron-vite dev",
     "dev:cdp": "DEVTOOL_CDP_PORT=9222 electron-vite dev",
-    "build": "electron-vite build",
-    "build:mac": "electron-vite build && electron-builder --mac --dir",
-    "build:linux": "electron-vite build && electron-builder --linux --dir",
-    "build:win": "electron-vite build && electron-builder --win --dir",
+    "build": "npm run typecheck && electron-vite build",
+    "build:mac": "npm run build && electron-builder --mac --dir",
+    "build:linux": "npm run build && electron-builder --linux --dir",
+    "build:win": "npm run build && electron-builder --win --dir",
     "typecheck": "tsc --noEmit -p tsconfig.typecheck.json",
+    "lint": "eslint .",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:notebook-live": "vitest run tests/notebook-kernel.live.test.ts",
-    "postinstall": "node scripts/ensure-electron.mjs && npx @electron/rebuild -m . && node scripts/patch-dev-electron-plist.mjs"
+    "postinstall": "node scripts/ensure-electron.mjs && npx @electron/rebuild -m . && node scripts/patch-dev-electron-plist.mjs",
+    "prepare": "node scripts/setup-git-hooks.mjs"
   },
   "build": {
     "appId": "com.devtool.app",
@@ -61,6 +63,7 @@
   "type": "commonjs",
   "devDependencies": {
     "@electron/rebuild": "^4.2.0",
+    "@eslint/js": "^10.0.1",
     "@tailwindcss/vite": "^4.2.4",
     "@testing-library/dom": "^10.4.1",
     "@testing-library/react": "^16.3.2",
@@ -74,9 +77,13 @@
     "electron": "^43.6.0",
     "electron-builder": "^26.8.1",
     "electron-vite": "^5.0.0",
+    "eslint": "^10.11.0",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "globals": "^17.12.0",
     "jsdom": "^29.1.1",
     "tailwindcss": "^4.2.4",
     "typescript": "^5.9.3",
+    "typescript-eslint": "^8.70.1",
     "vite": "^7.3.1",
     "vitest": "^4.0.18"
   },

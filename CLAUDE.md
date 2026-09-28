@@ -8,6 +8,10 @@ Direction and phases: [ROADMAP.md](./ROADMAP.md).
 
 Persistent state lives in a config dir resolved in `src/main/config-dir.ts`: `~/.devtool` for packaged builds, `~/.devtool-dev` for dev runs (`npm run dev*`), overridable via `DEVTOOL_CONFIG_DIR`. Dev and production are isolated on purpose — saves write full snapshots of `projects.json` (last writer wins), so two instances sharing a dir silently lose each other's changes. Never point a dev instance at `~/.devtool` while the production app is running. On startup each instance also snapshots `projects.json` into `<config dir>/backups/` (last 10 kept).
 
+## Checks
+
+`npm run typecheck` (covers `src/` and `tests/`), `npm run lint` (must exit 0; warnings allowed), `npm test`. `npm run build*` runs typecheck first. `npm install` points `core.hooksPath` at `.githooks/` (pre-commit: eslint on staged files + typecheck). Leave `react-hooks/exhaustive-deps` warnings alone rather than adding deps blindly: that changes when effects run. CI (`.github/workflows/ci.yml`) uses Node 24.
+
 ## Electron binary install
 
 `npm install` can leave `node_modules/electron/dist` half-unpacked: Electron's postinstall extracts its zip with `extract-zip@2`/`yauzl@2`, which on Node >=26 can abort mid-extraction without settling its promise, so `install.js` exits 0 with a near-empty `dist` and no `path.txt`. npm reports success, then electron-vite fails later with `Error: Electron uninstall`. From Electron 42 the package also **skips downloading the binary in its own postinstall**. `scripts/ensure-electron.mjs` (first step of our `postinstall`) detects a missing/partial `dist`, runs `install.js` if the zip is not cached, and otherwise re-extracts the cached zip with a system unzip tool. Run it directly to repair an existing tree.

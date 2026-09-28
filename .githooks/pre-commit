@@ -1,0 +1,24 @@
+#!/bin/sh
+# Pre-commit: ESLint on staged JS/TS files, then a full typecheck.
+# Enabled by `npm install` (prepare -> scripts/setup-git-hooks.mjs), which sets
+# core.hooksPath=.githooks. Skip once with `git commit --no-verify`.
+set -e
+
+root=$(git rev-parse --show-toplevel)
+cd "$root"
+
+if [ ! -f node_modules/.bin/eslint ]; then
+  echo "pre-commit: node_modules missing, run npm install (skipping checks)" >&2
+  exit 0
+fi
+
+# Lints the working-tree copy of each staged file (not the index blob).
+staged=$(git diff --cached --name-only --diff-filter=ACMR -- '*.ts' '*.tsx' '*.mts' '*.cts' '*.js' '*.mjs' '*.cjs')
+if [ -n "$staged" ]; then
+  echo "pre-commit: eslint (staged files)"
+  git diff --cached --name-only --diff-filter=ACMR -z -- '*.ts' '*.tsx' '*.mts' '*.cts' '*.js' '*.mjs' '*.cjs' \
+    | xargs -0 node_modules/.bin/eslint --no-warn-ignored --
+fi
+
+echo "pre-commit: typecheck"
+npm run --silent typecheck

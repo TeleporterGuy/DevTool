@@ -26,6 +26,23 @@ function copyMainAssets(): Plugin {
   }
 }
 
+// index.html carries the production CSP. The dev server additionally needs the
+// inline React refresh preamble and the HMR websocket, so widen it in serve mode only.
+function devCsp(): Plugin {
+  return {
+    name: 'devtool-dev-csp',
+    apply: 'serve',
+    transformIndexHtml(html) {
+      return html.replace(/(<meta http-equiv="Content-Security-Policy" content=")([^"]*)"/, (_m, head: string, policy: string) => {
+        const widened = policy
+          .replace("script-src 'self'", "script-src 'self' 'unsafe-inline'")
+          .replace("connect-src 'self'", "connect-src 'self' ws://localhost:* http://localhost:*")
+        return `${head}${widened}"`
+      })
+    }
+  }
+}
+
 export default defineConfig({
   main: {
     plugins: [externalizeDepsPlugin(), copyMainAssets()],
@@ -40,7 +57,7 @@ export default defineConfig({
     }
   },
   renderer: {
-    plugins: [react(), tailwindcss()],
+    plugins: [react(), tailwindcss(), devCsp()],
     root: resolve('src/renderer'),
     // Fixed dev port so the window never picks up another project's vite server on 5173
     server: {

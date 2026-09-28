@@ -1,5 +1,6 @@
 // src/renderer/palette/sources/commands.ts
 import { commandRegistry } from '../CommandRegistry'
+import type { AppCtx } from '../types'
 import { getPaletteReturnFocus, paletteEvents } from '../paletteEvents'
 import { AI_TAB_TYPES, AI_TAB_META, isHomeTask, isShellCommandProject, pinnedItemKey, type AiTabType, type PinnedItem } from '../../../shared/types'
 import { shortcutPlatform } from '../../../shared/shortcut-label'
@@ -126,11 +127,11 @@ commandRegistry.register({
 // Ctrl+L / Ctrl+Shift+L are bound inside editor and notebook tabs (Monaco actions
 // and the notebook's own key handler); these entries make them findable and list
 // the shortcut. The tab that had focus when the palette opened answers.
-function selectedTaskHasFileTab(actions: any): boolean {
-  const project = actions.projects?.find((p: any) => p.id === actions.selectedProjectId)
-  const task = project?.tasks.find((t: any) => t.id === actions.selectedTaskId)
+function selectedTaskHasFileTab(actions: Pick<AppCtx['actions'], 'projects' | 'selectedProjectId' | 'selectedTaskId'>): boolean {
+  const project = actions.projects?.find(p => p.id === actions.selectedProjectId)
+  const task = project?.tasks.find(t => t.id === actions.selectedTaskId)
   if (!task) return false
-  return [...task.tabs.left, ...task.tabs.right].some((t: any) => t.type === 'editor' || t.type === 'notebook')
+  return [...task.tabs.left, ...task.tabs.right].some(t => t.type === 'editor' || t.type === 'notebook')
 }
 
 function emitLinkToAgent(kind: 'selection' | 'file'): void {

@@ -1,16 +1,18 @@
-import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { ArrowDown } from 'lucide-react'
 import { useApp } from '../../context/AppContext'
 import { useTabStatusStore } from '../../context/TabStatusContext'
 import type { SshConfig } from '../../../shared/types'
 import { classifyNotification, nextAiStatus, type AiNotificationKind, type AiStatusDecision, type AiStatusEvent } from '../../../shared/ai-status'
-import type { ChatImage, ChatPromptResponse } from '../../../shared/claude-chat'
+import { SIDE_QUESTION_COMMAND, type ChatImage, type ChatPromptResponse } from '../../../shared/claude-chat'
 import { parseExtraArgs } from '../aiToolTabUtils'
 import { ensureHookListeners, hookStatusCallbacks } from '../hookStatusListeners'
 import { normalizeBrowserUrl } from '../../browserUrl'
 import { attachChat, forgetChat, getChatState, setChatEventHandler, useChatState } from './chatStore'
-import Timeline from './Timeline'
+import Timeline, { type TimelineFocus } from './Timeline'
+import TaskIndicator from './TaskIndicator'
 import PromptCard from './PromptCards'
+import SideQuestion, { type SideQuestionState } from './SideQuestion'
 import Composer from './Composer'
 import { noteAgentTabTyped } from '../../agentLink/agentTabRecency'
 
@@ -48,6 +50,10 @@ export default function ClaudeChatTab({ tabId, visible, sessionId, pane, project
   const stickRef = useRef(true)
   const [atBottom, setAtBottom] = useState(true)
   const [attachError, setAttachError] = useState<string | null>(null)
+  const [focus, setFocus] = useState<TimelineFocus | null>(null)
+  const focusSeq = useRef(0)
+  const [side, setSide] = useState<SideQuestionState | null>(null)
+  const sideSeq = useRef(0)
 
   const applyStatus = useCallback((event: AiStatusEvent, notificationKind?: AiNotificationKind): AiStatusDecision => {
     const current = statusStore.getStatus(tabId)
@@ -169,10 +175,38 @@ export default function ClaudeChatTab({ tabId, visible, sessionId, pane, project
     })
   }, [tabId, projectId, taskId, markTaskInteracted])
 
+  // One side question at a time, like the CLI: a new one replaces the last, and a
+  // dismissed one's late answer is dropped.
+  const askSideQuestion = useCallback((question: string) => {
+    sideSeq.current += 1
+    const id = sideSeq.current
+    setSide({ id, question, status: 'asking' })
+    const settle = (next: Partial<SideQuestionState>): void => {
+      setSide((current) => (current?.id === id ? { ...current, ...next } : current))
+    }
+    window.api.chatSideQuestion(tabId, question).then((answer) => {
+      if (answer.response === null) settle({ status: 'error', error: 'No answer came back.' })
+      else settle({ status: 'done', answer: answer.response })
+    }).catch((err: unknown) => {
+      const raw = err instanceof Error ? err.message : String(err)
+      settle({ status: 'error', error: raw.replace(/^Error invoking remote method '[^']+': (?:Error: )?/u, '') })
+    })
+  }, [tabId])
+
+  // The CLI doesn't list /btw to SDK clients; the chat tab runs it itself.
+  const commands = useMemo(
+    () => (state.commands.some((c) => c.name === SIDE_QUESTION_COMMAND.name) ? state.commands : [SIDE_QUESTION_COMMAND, ...state.commands]),
+    [state.commands]
+  )
+
   const respond = useCallback((promptId: string, response: ChatPromptResponse) => {
     markTaskInteracted(projectId, taskId)
     void window.api.chatRespond(tabId, promptId, response)
   }, [tabId, projectId, taskId, markTaskInteracted])
+
+  const openLink = useCallback((url: string) => {
+    addTab(projectId, taskId, pane, 'browser', { url: normalizeBrowserUrl(url) })
+  }, [addTab, projectId, taskId, pane])
 
   const openInTerminal = useCallback(() => {
     convertClaudeTab(projectId, taskId, pane, tabId, 'claude')
@@ -183,29 +217,65 @@ export default function ClaudeChatTab({ tabId, visible, sessionId, pane, project
     [projectDir, projectId, sshConfig]
   )
 
+  const { tasks, toolIndex } = state
+  const taskTools = useMemo(() => {
+    const ids = new Set<string>()
+    for (const task of Object.values(tasks)) {
+      if (task.status === 'running' && task.toolUseId) ids.add(task.toolUseId)
+    }
+    return ids
+  }, [tasks])
+
+  const reportTaskError = useCallback((err: unknown) => {
+    setAttachError(err instanceof Error ? err.message : String(err))
+  }, [])
+  const stopTask = useCallback((taskId: string) => {
+    void window.api.chatStopTask(tabId, taskId).catch(reportTaskError)
+  }, [tabId, reportTaskError])
+  const backgroundTask = useCallback((toolUseId: string) => {
+    void window.api.chatBackgroundTask(tabId, toolUseId).catch(reportTaskError)
+  }, [tabId, reportTaskError])
+  const canJump = useCallback((toolUseId: string) => toolIndex[toolUseId] !== undefined, [toolIndex])
+  const jumpToTool = useCallback((toolUseId: string) => {
+    if (toolIndex[toolUseId] === undefined) return
+    // Looking back up the conversation: stop following the bottom.
+    stickRef.current = false
+    focusSeq.current += 1
+    setFocus({ toolId: toolUseId, seq: focusSeq.current })
+  }, [toolIndex])
+
+  const hasTasks = Object.keys(tasks).length > 0
   const empty = state.items.length === 0 && !state.busy
   const starting = state.process === 'starting' && state.items.length === 0
 
   return (
     <div className="absolute inset-0 flex-col bg-bg" style={{ display: visible ? 'flex' : 'none' }} onKeyDownCapture={() => noteAgentTabTyped(taskId, tabId)}>
-      <div ref={scrollRef} onScroll={onScroll} className="flex-1 overflow-y-auto relative">
-        <div className="max-w-[860px] mx-auto px-5 pt-4 pb-3">
-          {empty ? (
-            <div className="pt-[18vh] text-center select-none">
-              <div className="text-2xl text-accent mb-2">&#10022;</div>
-              <div className="text-md text-text">{starting ? 'Starting Claude…' : 'What should Claude work on?'}</div>
-              <div className="text-sm text-text-subtle mt-1 font-mono truncate">{projectDir || sshConfig?.remoteDir || '~'}</div>
-            </div>
-          ) : (
-            <Timeline
-              items={state.items}
-              busy={state.busy}
-              compacting={state.compacting}
-              waiting={state.pending.length > 0}
-              turnStartedAt={state.turnStartedAt}
-              onOpenLink={(url) => addTab(projectId, taskId, pane, 'browser', { url: normalizeBrowserUrl(url) })}
-            />
-          )}
+      <div className="flex-1 min-h-0 relative">
+        <div className="absolute top-2 right-3 z-(--z-sticky)">
+          <TaskIndicator tasks={tasks} onStop={stopTask} onBackground={backgroundTask} onJump={jumpToTool} canJump={canJump} />
+        </div>
+        <div ref={scrollRef} onScroll={onScroll} className="h-full overflow-y-auto relative">
+          {/* Room for the task pill so it never covers the first message. */}
+          <div className={`max-w-[860px] mx-auto px-5 pb-3 ${hasTasks ? 'pt-11' : 'pt-4'}`}>
+            {empty ? (
+              <div className="pt-[18vh] text-center select-none">
+                <div className="text-2xl text-accent mb-2">&#10022;</div>
+                <div className="text-md text-text">{starting ? 'Starting Claude…' : 'What should Claude work on?'}</div>
+                <div className="text-sm text-text-subtle mt-1 font-mono truncate">{projectDir || sshConfig?.remoteDir || '~'}</div>
+              </div>
+            ) : (
+              <Timeline
+                items={state.items}
+                busy={state.busy}
+                compacting={state.compacting}
+                waiting={state.pending.length > 0}
+                turnStartedAt={state.turnStartedAt}
+                onOpenLink={openLink}
+                taskTools={taskTools}
+                focus={focus}
+              />
+            )}
+          </div>
         </div>
       </div>
       <div className="max-w-[860px] w-full mx-auto px-5 pb-3 flex flex-col gap-2 relative">
@@ -224,14 +294,16 @@ export default function ClaudeChatTab({ tabId, visible, sessionId, pane, project
         {state.pending.map((prompt) => (
           <PromptCard key={prompt.id} prompt={prompt} onRespond={(response) => respond(prompt.id, response)} />
         ))}
+        {side && <SideQuestion side={side} onDismiss={() => setSide(null)} onOpenLink={openLink} />}
         <Composer
           busy={state.busy}
           info={state.info}
           usage={state.usage}
           models={state.models}
-          commands={state.commands}
+          commands={commands}
           loadFiles={loadFiles}
           onSend={send}
+          onSideQuestion={askSideQuestion}
           onStop={() => { void window.api.chatInterrupt(tabId) }}
           onSetModel={(model) => { void window.api.chatSetModel(tabId, model) }}
           onSetMode={(mode) => { void window.api.chatSetMode(tabId, mode) }}

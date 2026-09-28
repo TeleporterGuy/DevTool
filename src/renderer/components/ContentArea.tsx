@@ -175,7 +175,6 @@ export default function ContentArea(): React.ReactElement {
       const project = projects.find(p => p.id === selectedProjectId)
       const task = project?.tasks.find(t => t.id === selectedTaskId)
       if (!task) return
-      const taskView = getTaskViewState(task)
 
       const index = parseInt(digit, 10) - 1
       const pane: 'left' | 'right' = e.shiftKey ? 'right' : 'left'

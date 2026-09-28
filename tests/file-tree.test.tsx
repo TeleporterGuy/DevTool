@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import React from 'react'
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import FileTree, { type FileTreeHandle } from '../src/renderer/components/FileTree'
+import type { DirectoryEntry } from '../src/shared/types'
 import { FILE_BROWSER_REFRESH_MS } from '../src/renderer/hooks/fileBrowserRefresh'
 
 void React
@@ -133,7 +134,7 @@ describe('FileTree', () => {
 
   it('drops a deleted directory from the cache and from the expanded set', async () => {
     let rootEntries: any[] = [{ name: 'lib', type: 'directory', relativePath: 'lib' }]
-    window.api.fbReadDirectory = vi.fn((_dir: string, rel: string) => {
+    window.api.fbReadDirectory = vi.fn((_dir: string, rel: string): Promise<DirectoryEntry[]> => {
       if (rel === '') return Promise.resolve(rootEntries)
       if (rootEntries.some(e => e.relativePath === rel)) {
         return Promise.resolve([{ name: 'one.ts', type: 'file', relativePath: 'lib/one.ts' }])
@@ -160,7 +161,7 @@ describe('FileTree', () => {
 
   it('prunes descendants of a deleted directory, not just the directory itself', async () => {
     let libExists = true
-    window.api.fbReadDirectory = vi.fn((_dir: string, rel: string) => {
+    window.api.fbReadDirectory = vi.fn((_dir: string, rel: string): Promise<DirectoryEntry[]> => {
       if (rel === '') {
         return Promise.resolve(libExists ? [{ name: 'lib', type: 'directory', relativePath: 'lib' }] : [])
       }
@@ -188,7 +189,7 @@ describe('FileTree', () => {
 
   it('clears the unavailable-directory error once the directory reappears', async () => {
     let available = false
-    window.api.fbReadDirectory = vi.fn(() =>
+    window.api.fbReadDirectory = vi.fn((): Promise<DirectoryEntry[]> =>
       available
         ? Promise.resolve([{ name: 'src', type: 'directory', relativePath: 'src' }])
         : Promise.reject(new Error('ENOENT'))
@@ -391,7 +392,7 @@ describe('FileTree', () => {
   })
 
   it('expands nested folders and collapse-all hides them', async () => {
-    window.api.fbReadDirectory = vi.fn((_dir: string, rel: string) => {
+    window.api.fbReadDirectory = vi.fn((_dir: string, rel: string): Promise<DirectoryEntry[]> => {
       if (rel === '') return Promise.resolve([{ name: 'src', type: 'directory' as const, relativePath: 'src' }])
       if (rel === 'src') return Promise.resolve([{ name: 'lib', type: 'directory' as const, relativePath: 'src/lib' }])
       return Promise.resolve([{ name: 'a.ts', type: 'file' as const, relativePath: 'src/lib/a.ts' }])

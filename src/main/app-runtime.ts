@@ -1,16 +1,17 @@
-import { app, BrowserWindow, clipboard, dialog, ipcMain, nativeTheme, session, shell } from 'electron'
+import { BrowserWindow, ipcMain, nativeTheme } from 'electron'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
+import { execFile } from 'child_process'
+import { promisify } from 'util'
 import { Storage } from './storage'
 import { CONFIG_DIR } from './config-dir'
 import { ScrollbackStorage } from './scrollback-storage'
 import { PtyManager } from './pty-manager'
+import { PtySessions } from './pty-sessions'
 import { HookServer } from './hook-server'
 import { HookInjector, hookEndpointFor } from './hook-injector'
-import { ClaudeChatManager, type ChatTabConfig } from './claude-chat/chat-manager'
-import type { ChatImage, ChatPromptResponse } from '../shared/claude-chat'
-import { SshConnectionManager, spawnCdCommand } from './ssh-connection-manager'
+import { ClaudeChatManager } from './claude-chat/chat-manager'
+import { SshConnectionManager } from './ssh-connection-manager'
 import { CodexSessionManager } from './codex-session-manager'
 import { RemoteWorkspaceManager } from './remote-workspace-manager'
 import { WorkspaceManager } from './workspace-manager'
@@ -20,10 +21,22 @@ import { TabActivityRegistry } from './tab-activity-registry'
 import type { ActivityUpdate } from '../shared/agent-activity'
 import { runIdleCleanupSweep, type IdleCleanupEnvironment } from './idle-cleanup-sweep'
 import { tearDownTaskTabs } from './task-teardown'
-import { PaletteFrecencyStorage, type FrecencyFile } from './palette-frecency-storage'
-import { parseNumstat } from './git-diff-summary'
-import { GIT_STATUS_ARGS, parseGitStatusZ } from './git-status-parse'
-import { AI_TAB_META, isRemoteProject, isShellCommandProject } from '../shared/types'
+import { PaletteFrecencyStorage } from './palette-frecency-storage'
+import { agentCommandOverride, resolveAgentCommand } from './resolve-agent-command'
+import { getShellEnv, setPortableNodeDir } from './shell-env'
+import { createIpcRegistrar } from './ipc/registrar'
+import { createAppUrlMatcher } from './ipc/sender'
+import { allowedLocalRoots, resolveAllowedDirectory } from './ipc/path-allowlist'
+import { registerAppStateHandlers } from './ipc/app-state'
+import { registerWindowHandlers } from './ipc/window'
+import { registerSshHandlers, routeBrowserDirectQuietly, routeBrowserThroughSocks } from './ipc/ssh'
+import { registerAgentHandlers } from './ipc/agents'
+import { registerTerminalHandlers } from './ipc/terminals'
+import { registerWorkspaceHandlers } from './ipc/workspaces'
+import { registerFileBrowserHandlers } from './ipc/file-browser'
+import { registerGitHandlers } from './ipc/git'
+import { registerNotebookHandlers } from './ipc/notebooks'
+import { isRemoteProject, isShellCommandProject } from '../shared/types'
 import {
   NOTEBOOK_ERROR_REMOTE,
   NOTEBOOK_ERROR_SHELL_PROJECT,
@@ -31,47 +44,21 @@ import {
   type NotebookKernelCondaOverride
 } from '../shared/notebook'
 import { notebookAllowedCwdRoots, resolveNotebookKernelCwd } from './notebook-cwd'
-import { agentCommandOverride, conptySpawnArgv, isAiAgentCommand, resolveAgentCommand } from './resolve-agent-command'
-import { detectExternalEditors, openFolderInEditor } from './external-ide'
-import { isLocalInteractiveTerminal, resolveLocalTerminalSpawn } from './resolve-local-terminal'
-import { findGitBashExe, getShellEnv, setPortableNodeDir } from './shell-env'
-import { listCondaEnvs, listCondaEnvsForNotebookKernel, resolveProjectCondaEnv, wrapInteractiveShellWithCondaActivate } from './conda-env'
+import { listCondaEnvs, listCondaEnvsForNotebookKernel, resolveProjectCondaEnv } from './conda-env'
 import { NotebookKernelManager } from './notebook-kernel'
-import { parseNotebookExecuteIpc } from '../shared/notebook-execute'
 import { safeWebContentsSend } from './safe-ipc-send'
 import type { CondaEnvInfo } from '../shared/conda'
-import { resolveSafeProjectPath } from './project-fs-path'
-import {
-  createProjectDirectory,
-  createProjectFile,
-  deleteProjectEntry,
-  listProjectDirectory,
-  renameProjectEntry
-} from './file-browser-fs'
-import {
-  piExtensionLocalPath,
-  piExtensionRemotePath,
-  buildRemotePiExtensionScript
-} from './pi-extension-injector'
 import type {
   AppConfig,
-  CommitHistoryResult,
-  DirectoryEntry,
-  GitDiffSummary,
-  GitPostureLastCommit,
-  GitPostureResult,
-  GitStatusResult,
-  GitOperationResult,
+  CleanupActivity,
   PersistedWindowState,
   Project,
   ProjectsData,
   SshConfig,
   Task,
   TunnelConfig,
-  WorkspaceCreateRequest,
   WorkspaceDeleteRequest,
   WorkspaceDeleteResult,
-  WorkspaceListBranchesRequest,
   WindowGeometry,
   WindowViewState,
   NotesRecord
@@ -82,13 +69,9 @@ import {
   cloneWindowGeometry,
   cloneWindowViewState
 } from '../shared/types'
-import fsPromises from 'fs/promises'
-import { execFile } from 'child_process'
-import { promisify } from 'util'
 
 const execFileAsync = promisify(execFile)
 
-const MAX_SCROLLBACK_CHARS = 2_000_000
 /**
  * Let the windows come up before the first sweep: what is on screen, which
  * buffers are unsaved and which PTYs are alive are all safeguards main only
@@ -98,74 +81,8 @@ const IDLE_CLEANUP_STARTUP_DELAY_MS = 15_000
 const IDLE_CLEANUP_INTERVAL_MS = 60 * 60_000
 const DEBUG_LOG_PATH = path.join(CONFIG_DIR, 'debug.log')
 
-interface PtyRuntime {
-  attachedWindowIds: Set<number>
-  controllerWindowId: number | null
-  cols: number
-  rows: number
-  scrollback: string
-  exitCode: number | null
-}
-
-interface PtyAttachResult {
-  cols: number
-  rows: number
-  scrollback: string
-  exitCode: number | null
-}
-
 function clone<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T
-}
-
-function trimScrollback(scrollback: string): string {
-  if (scrollback.length <= MAX_SCROLLBACK_CHARS) return scrollback
-  return scrollback.slice(-MAX_SCROLLBACK_CHARS)
-}
-
-async function hasHeadCommit(resolvedCwd: string): Promise<boolean> {
-  try {
-    await execFileAsync('git', ['rev-parse', '--verify', 'HEAD'], { cwd: resolvedCwd })
-    return true
-  } catch {
-    return false
-  }
-}
-
-async function readUntrackedSummary(resolvedCwd: string): Promise<GitDiffSummary> {
-  try {
-    // Count lines via a shell pipeline instead of reading every untracked file
-    // into Node.js — projects with hundreds of untracked files (e.g. vendored
-    // dependencies) would otherwise cause 100% CPU on the 2-second poll.
-    const script =
-      'git ls-files --others --exclude-standard -z | xargs -0 wc -l 2>/dev/null | tail -1'
-    const file = process.platform === 'win32' ? findGitBashExe() : '/bin/sh'
-    if (!file) return { added: 0, deleted: 0 }
-    const args = process.platform === 'win32' ? ['-lc', script] : ['-c', script]
-    const { stdout } = await execFileAsync(file, args, { cwd: resolvedCwd, timeout: 5000 })
-    const added = parseInt(stdout.trim(), 10) || 0
-    return { added, deleted: 0 }
-  } catch {
-    return { added: 0, deleted: 0 }
-  }
-}
-
-async function readGitDiffSummary(resolvedCwd: string): Promise<GitDiffSummary> {
-  const untrackedSummary = await readUntrackedSummary(resolvedCwd)
-
-  try {
-    const diffArgs = await hasHeadCommit(resolvedCwd)
-      ? ['diff', '--numstat', 'HEAD', '--']
-      : ['diff', '--numstat', '--cached', '--']
-    const { stdout } = await execFileAsync('git', diffArgs, { cwd: resolvedCwd })
-    const trackedSummary = parseNumstat(stdout)
-    return {
-      added: trackedSummary.added + untrackedSummary.added,
-      deleted: trackedSummary.deleted + untrackedSummary.deleted
-    }
-  } catch {
-    return untrackedSummary
-  }
 }
 
 function getWindowGeometry(window: BrowserWindow): WindowGeometry {
@@ -185,6 +102,7 @@ export class AppRuntime {
   private readonly notesStorage = new NotesStorage(CONFIG_DIR)
   private readonly paletteFrecencyStorage = new PaletteFrecencyStorage(CONFIG_DIR)
   private readonly ptyManager = new PtyManager()
+  /** Fork: native notebook tabs' Jupyter kernels, one per tab. */
   private readonly notebookKernels = new NotebookKernelManager()
   private readonly hookServer = new HookServer((message) => this.logDebug(message))
   private readonly codexSessionManager = new CodexSessionManager()
@@ -192,14 +110,14 @@ export class AppRuntime {
   private readonly remoteWorkspaceManager = new RemoteWorkspaceManager()
   private readonly windows = new Map<number, BrowserWindow>()
   private readonly windowStates = new Map<number, PersistedWindowState>()
-  private readonly ptyRuntimes = new Map<string, PtyRuntime>()
+  private readonly ptySessions: PtySessions
   /** Main's authoritative view of what every tab's agent is doing. */
   private readonly activityRegistry = new TabActivityRegistry()
   /** Tabs with an unsaved editor buffer, per window — a task holding one is not swept. */
   private readonly dirtyTabsByWindow = new Map<number, Set<string>>()
   private hookInjector!: HookInjector
   private sshManager!: SshConnectionManager
-  /** Claude chat tabs' processes — the Agent SDK counterpart of `ptyRuntimes`. */
+  /** Claude chat tabs' processes — the Agent SDK counterpart of `ptySessions`. */
   private chatManager!: ClaudeChatManager
   private started = false
   private quitting = false
@@ -231,6 +149,21 @@ export class AppRuntime {
     })
     this.config = this.storage.loadConfig()
     setPortableNodeDir(this.config.portableNodeDir)
+    this.ptySessions = new PtySessions({
+      ptyManager: this.ptyManager,
+      scrollbackStorage: this.scrollbackStorage,
+      activityRegistry: this.activityRegistry,
+      sshManager: () => this.sshManager,
+      hookInjector: () => this.hookInjector,
+      hookPort: () => this.hookServer.getPort(),
+      hookToken: () => this.hookServer.getToken(),
+      getConfig: () => this.config,
+      broadcastAgentActivity: (tabId) => this.broadcastAgentActivity(tabId),
+      sendToWindow: (windowId, channel, ...args) => this.sendToWindow(windowId, channel, ...args),
+      log: (message) => this.logDebug(message),
+      condaEnvForProject: (projectId) => this.condaEnvForLocalProject(projectId),
+      onKill: (tabId) => this.notebookKernels.shutdown(tabId)
+    })
     this.startupWindowStates = this.storage.loadWindowSession(
       this.projectsStore.peek(),
       this.config.defaultSidebarTab
@@ -294,14 +227,7 @@ export class AppRuntime {
         this.persistWindowSession()
       }
       this.chatManager.detachWindow(window.id)
-      for (const [tabId, runtime] of this.ptyRuntimes.entries()) {
-        runtime.attachedWindowIds.delete(window.id)
-        if (runtime.controllerWindowId === window.id) {
-          const nextController = runtime.attachedWindowIds.values().next().value ?? null
-          runtime.controllerWindowId = nextController
-          this.logDebug(`ptyControllerReassigned id=${tabId} windowId=${nextController ?? 'none'}`)
-        }
-      }
+      this.ptySessions.detachWindow(window.id)
     })
   }
 
@@ -347,12 +273,7 @@ export class AppRuntime {
         return { projects: data.projects, pinnedItems: data.pinnedItems ?? [] }
       },
       readConfig: () => this.config.idleTaskCleanup,
-      readActivity: () => ({
-        openTaskIds: this.getOpenTaskIds(),
-        statuses: this.activityRegistry.getSnapshot(),
-        liveTabIds: this.getLiveTabIds(),
-        dirtyTabIds: this.getDirtyTabIds()
-      }),
+      readActivity: () => this.getCleanupActivity(),
       now: () => Date.now(),
       backupProjects: () => this.storage.backupProjectsOnStartup(),
       deleteWorkspace: (project, task) => this.deleteTaskWorkspace(project, task),
@@ -373,12 +294,7 @@ export class AppRuntime {
 
   /** Tabs whose process is still running, including ones no window currently shows. */
   private getLiveTabIds(): string[] {
-    const ids: string[] = []
-    for (const [tabId, runtime] of this.ptyRuntimes.entries()) {
-      if (runtime.exitCode === null) ids.push(tabId)
-    }
-    ids.push(...this.chatManager.liveTabIds())
-    return ids
+    return [...this.ptySessions.liveTabIds(), ...this.chatManager.liveTabIds()]
   }
 
   private getDirtyTabIds(): string[] {
@@ -431,8 +347,7 @@ export class AppRuntime {
   private async removeTaskFromMain(project: Project, task: Task): Promise<void> {
     const tabIds = await tearDownTaskTabs(project, task, {
       killPty: (tabId) => {
-        this.ptyManager.kill(tabId)
-        this.ptyRuntimes.delete(tabId)
+        this.ptySessions.discard(tabId)
         this.chatManager.close(tabId)
       },
       deleteScrollback: (tabId) => this.scrollbackStorage.delete(tabId),
@@ -486,10 +401,8 @@ export class AppRuntime {
       this.idleCleanupTimer = null
     }
     this.persistWindowSession()
-    for (const [tabId, runtime] of this.ptyRuntimes.entries()) {
-      this.scrollbackStorage.save(tabId, runtime.scrollback)
-    }
-    this.ptyManager.killAll()
+    this.ptySessions.saveAllScrollback()
+    this.ptySessions.killAll()
     this.notebookKernels.shutdownAll()
     this.chatManager.closeAll()
     this.hookInjector.cleanupAll()
@@ -507,9 +420,7 @@ export class AppRuntime {
       this.broadcastToAllWindows('ssh-status-changed', projectId, status)
 
       if (status === 'disconnected' && this.socksProxyEnabled.get(projectId)) {
-        const ses = session.fromPartition(`persist:browser-${projectId}`)
-        await ses.setProxy({ proxyRules: 'direct://' }).catch(() => {})
-        await ses.closeAllConnections().catch(() => {})
+        await routeBrowserDirectQuietly(projectId)
         this.broadcastToAllWindows('socks-proxy-status-changed', projectId, false)
       }
 
@@ -525,20 +436,14 @@ export class AppRuntime {
 
     this.sshManager.on('socks-proxy-status-changed', async (projectId: string, enabled: boolean) => {
       if (!enabled) {
-        const ses = session.fromPartition(`persist:browser-${projectId}`)
-        await ses.setProxy({ proxyRules: 'direct://' }).catch(() => {})
-        await ses.closeAllConnections().catch(() => {})
+        await routeBrowserDirectQuietly(projectId)
         this.broadcastToAllWindows('socks-proxy-status-changed', projectId, false)
 
         const config = this.sshManager.getConfig(projectId)
         if (this.socksProxyEnabled.get(projectId) && config && this.sshManager.getStatus(projectId) === 'connected') {
           try {
             const port = await this.sshManager.startSocksProxy(projectId, config)
-            await ses.setProxy({
-              proxyRules: `socks5://127.0.0.1:${port}`,
-              proxyBypassRules: '<-loopback>'
-            })
-            await ses.closeAllConnections()
+            await routeBrowserThroughSocks(projectId, port)
             this.broadcastToAllWindows('socks-proxy-status-changed', projectId, true, port)
           } catch {
             // Auto-restart failed — stay in direct mode
@@ -594,10 +499,7 @@ export class AppRuntime {
 
   private createChatManager(): ClaudeChatManager {
     return new ClaudeChatManager({
-      sendToWindow: (windowId, channel, ...args) => {
-        const window = this.windows.get(windowId)
-        if (window && !window.isDestroyed()) window.webContents.send(channel, ...args)
-      },
+      sendToWindow: (windowId, channel, ...args) => this.sendToWindow(windowId, channel, ...args),
       resolveLocalClaude: () => resolveAgentCommand(agentCommandOverride('claude', this.config).trim() || 'claude'),
       localEnv: () => getShellEnv(),
       ensureSsh: (projectId, sshConfig) => this.ensureSshConnected(projectId, sshConfig),
@@ -647,12 +549,7 @@ export class AppRuntime {
     if (!sshConfig) return
     try {
       const port = await this.sshManager.startSocksProxy(projectId, sshConfig)
-      const ses = session.fromPartition(`persist:browser-${projectId}`)
-      await ses.setProxy({
-        proxyRules: `socks5://127.0.0.1:${port}`,
-        proxyBypassRules: '<-loopback>'
-      })
-      await ses.closeAllConnections()
+      await routeBrowserThroughSocks(projectId, port)
       this.broadcastToAllWindows('socks-proxy-status-changed', projectId, true, port)
     } catch {
       // Keep SSH connected even when restoring the SOCKS proxy fails.
@@ -660,678 +557,129 @@ export class AppRuntime {
   }
 
   private registerIpcHandlers(): void {
-    ipcMain.handle('load-projects', () => this.projectsStore.get())
-    ipcMain.handle('save-projects', (_event, payload: { baseRevision: number; data: ProjectsData }) =>
-      this.projectsStore.save(payload.baseRevision, payload.data))
+    const log = (message: string) => this.logDebug(message)
+    const isAppUrl = createAppUrlMatcher(process.env.ELECTRON_RENDERER_URL)
+    const ipc = createIpcRegistrar({
+      ipcMain,
+      senderPolicy: {
+        isAppWebContents: (webContentsId) => {
+          for (const window of this.windows.values()) {
+            if (!window.isDestroyed() && window.webContents.id === webContentsId) return true
+          }
+          return false
+        },
+        isAppUrl
+      },
+      log
+    })
+    const resolveRoot = (dir: string) => this.resolveAllowedDirectory(dir)
 
-    // Everything the sweep exempts a task for, as the settings preview needs to show
-    // it: what is on screen in any window, what main has heard from the hooks, what
-    // still has a process, and what has an unsaved buffer open.
-    ipcMain.handle('get-agent-activity', () => this.activityRegistry.getActivitySnapshot())
-    ipcMain.handle('get-cleanup-activity', () => ({
+    registerAppStateHandlers(ipc, {
+      projectsStore: this.projectsStore,
+      notesStore: this.notesStore,
+      paletteFrecency: this.paletteFrecencyStorage,
+      getAgentActivity: () => this.activityRegistry.getActivitySnapshot(),
+      getCleanupActivity: () => this.getCleanupActivity(),
+      setDirtyTabs: (windowId, tabIds) => {
+        if (tabIds.length === 0) this.dirtyTabsByWindow.delete(windowId)
+        else this.dirtyTabsByWindow.set(windowId, new Set(tabIds))
+      },
+      backupProjects: () => this.storage.backupProjectsOnStartup(),
+      getConfig: () => this.config,
+      applyConfig: (patch) => this.applyConfig(patch),
+      log
+    })
+
+    registerWindowHandlers(ipc, {
+      loadViewState: (windowId) => {
+        const state = windowId !== null ? this.windowStates.get(windowId) ?? null : null
+        return state
+          ? cloneWindowViewState(state.viewState)
+          : buildWindowViewState(this.projectsStore.peek().projects, this.config)
+      },
+      saveViewState: (window, viewState) => {
+        const current = this.windowStates.get(window.id)
+        this.windowStates.set(window.id, {
+          geometry: current ? cloneWindowGeometry(current.geometry) : getWindowGeometry(window),
+          viewState: cloneWindowViewState(viewState)
+        })
+        this.persistWindowSession()
+      },
+      openWindow: (viewState) => {
+        this.logDebug(`openWindow seeded=${viewState ? 'yes' : 'no'}`)
+        this.createWindow(viewState, null)
+      },
+      getConfig: () => this.config,
+      assertAllowedDirectory: resolveRoot
+    })
+
+    registerSshHandlers(ipc, {
+      sshManager: () => this.sshManager,
+      getProjectTunnel: (projectId) => this.getProjectTunnel(projectId),
+      socksProxyEnabled: this.socksProxyEnabled,
+      socksProxyStarting: this.socksProxyStarting,
+      broadcast: (channel, ...args) => this.broadcastToAllWindows(channel, ...args),
+      log
+    })
+
+    registerAgentHandlers(ipc, {
+      sshManager: () => this.sshManager,
+      hookInjector: () => this.hookInjector,
+      codexSessionManager: this.codexSessionManager,
+      chatManager: () => this.chatManager,
+      ensureSshConnected: (projectId, sshConfig) => this.ensureSshConnected(projectId, sshConfig),
+      cleanupRemoteHooks: (projectId, sshConfig, remoteDir, tabId) =>
+        this.cleanupRemoteHooks(projectId, sshConfig, remoteDir, tabId),
+      forgetActivity: (tabId) => {
+        this.activityRegistry.remove(tabId)
+        this.broadcastAgentActivity(tabId)
+      },
+      assertAllowedDirectory: resolveRoot
+    })
+
+    registerTerminalHandlers(ipc, { ptySessions: this.ptySessions, log })
+
+    registerWorkspaceHandlers(ipc, {
+      workspaceManager: this.workspaceManager,
+      remoteWorkspaceManager: this.remoteWorkspaceManager,
+      ensureSshConnected: (projectId, sshConfig) => this.ensureSshConnected(projectId, sshConfig),
+      socketPath: (projectId) => this.sshManager.getSocketPath(projectId),
+      deleteWorkspace: (request) => this.deleteWorkspace(request)
+    })
+
+    registerFileBrowserHandlers(ipc, { resolveRoot })
+    registerGitHandlers(ipc, { resolveRoot })
+    registerNotebookHandlers(ipc, {
+      startKernel: (tabId, projectId, cwd, override) => this.startNotebookKernel(tabId, projectId, cwd, override),
+      execute: (tabId, requestId, code, cellId) => this.notebookKernels.execute(tabId, requestId, code, cellId),
+      interrupt: (tabId) => this.notebookKernels.interrupt(tabId),
+      shutdown: (tabId) => this.notebookKernels.shutdown(tabId),
+      listCondaEnvs: () => listCondaEnvs({}, { force: true })
+    })
+  }
+
+  /**
+   * A renderer-supplied local directory, accepted only when it is (inside) a
+   * known local project or one of its task worktrees; returns its real path.
+   */
+  private resolveAllowedDirectory(dir: string): Promise<string> {
+    return resolveAllowedDirectory(dir, allowedLocalRoots(this.projectsStore.peek().projects))
+  }
+
+  private getCleanupActivity(): CleanupActivity {
+    return {
       openTaskIds: this.getOpenTaskIds(),
       statuses: this.activityRegistry.getSnapshot(),
       liveTabIds: this.getLiveTabIds(),
       dirtyTabIds: this.getDirtyTabIds()
-    }))
-
-    // Windows publish their unsaved editors: a background sweep has nobody to show a
-    // Save/Discard dialog to, so a dirty buffer keeps its task out of the sweep.
-    ipcMain.handle('report-dirty-tabs', (event, tabIds: string[]) => {
-      const window = BrowserWindow.fromWebContents(event.sender)
-      if (!window) return undefined
-      if (tabIds.length === 0) this.dirtyTabsByWindow.delete(window.id)
-      else this.dirtyTabsByWindow.set(window.id, new Set(tabIds))
-      return undefined
-    })
-
-    ipcMain.handle('backup-projects-now', () => this.storage.backupProjectsOnStartup())
-
-    ipcMain.handle('load-config', () => clone(this.config))
-    ipcMain.handle('save-config', (_event, config: AppConfig) => {
-      this.config = { ...this.config, ...config }
-      this.storage.saveConfig(this.config)
-      setPortableNodeDir(this.config.portableNodeDir)
-      this.broadcastToAllWindows('config-updated', clone(this.config))
-      return undefined
-    })
-
-    ipcMain.handle('conda-list-envs', () => listCondaEnvs({}, { force: true }))
-    ipcMain.handle('external-ide-detect', () => detectExternalEditors())
-    ipcMain.handle('open-in-ide', async (_event, editorId: string, folder: string) => {
-      const editors = this.config.externalEditors?.editors ?? []
-      const editor = editors.find((item) => item.id === editorId)
-      if (!editor) throw new Error('That editor is not in Settings.')
-      await openFolderInEditor(editor, folder)
-      return undefined
-    })
-
-    ipcMain.handle('load-window-state', (event) => {
-      const window = BrowserWindow.fromWebContents(event.sender)
-      const state = window ? this.windowStates.get(window.id) ?? null : null
-      return state
-        ? cloneWindowViewState(state.viewState)
-        : buildWindowViewState(this.projectsStore.peek().projects, this.config)
-    })
-
-    ipcMain.handle('save-window-state', (event, viewState: WindowViewState) => {
-      const window = BrowserWindow.fromWebContents(event.sender)
-      if (!window) return undefined
-      const current = this.windowStates.get(window.id)
-      this.windowStates.set(window.id, {
-        geometry: current ? cloneWindowGeometry(current.geometry) : getWindowGeometry(window),
-        viewState: cloneWindowViewState(viewState)
-      })
-      this.persistWindowSession()
-      return undefined
-    })
-
-    ipcMain.handle('open-window', (_event, viewState?: WindowViewState | null) => {
-      this.logDebug(`openWindow seeded=${viewState ? 'yes' : 'no'}`)
-      this.createWindow(viewState ?? null, null)
-    })
-
-    ipcMain.handle('pick-directory', async (event) => {
-      // `showOpenDialog` is overloaded on arity, not on an optional owner, so the
-      // ownerless case has to be a separate call rather than passing undefined.
-      const owner = BrowserWindow.fromWebContents(event.sender)
-      const options: Electron.OpenDialogOptions = { properties: ['openDirectory'] }
-      const result = owner
-        ? await dialog.showOpenDialog(owner, options)
-        : await dialog.showOpenDialog(options)
-      return result.canceled ? null : result.filePaths[0]
-    })
-
-    ipcMain.handle('pick-file', async (event, title?: string) => {
-      const owner = BrowserWindow.fromWebContents(event.sender)
-      const options: Electron.OpenDialogOptions = {
-        title: title || 'Select file',
-        properties: ['openFile', 'showHiddenFiles']
-      }
-      const result = owner
-        ? await dialog.showOpenDialog(owner, options)
-        : await dialog.showOpenDialog(options)
-      return result.canceled ? null : result.filePaths[0]
-    })
-
-    ipcMain.handle('get-native-theme', () => nativeTheme.shouldUseDarkColors ? 'dark' : 'light')
-    ipcMain.handle('clipboard-write-text', (_event, text: string) => {
-      clipboard.writeText(text)
-      return undefined
-    })
-    ipcMain.handle('clipboard-read-text', () => clipboard.readText())
-    ipcMain.handle('open-external', async (_event, url: string) => {
-      let parsed: URL
-      try {
-        parsed = new URL(url)
-      } catch {
-        throw new Error('Invalid URL')
-      }
-      if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-        throw new Error('Only http and https URLs are allowed')
-      }
-      await shell.openExternal(parsed.toString())
-    })
-
-    ipcMain.handle('app:open-devtools', (event) => {
-      BrowserWindow.fromWebContents(event.sender)?.webContents.openDevTools()
-    })
-    ipcMain.handle('app:quit', () => app.quit())
-
-    ipcMain.handle('scrollback-save', (_event, tabId: string, data: string) => {
-      const scrollback = trimScrollback(data)
-      this.scrollbackStorage.save(tabId, scrollback)
-      const runtime = this.ptyRuntimes.get(tabId)
-      if (runtime) runtime.scrollback = scrollback
-      return undefined
-    })
-    ipcMain.handle('scrollback-load', (_event, tabId: string) => {
-      const runtime = this.ptyRuntimes.get(tabId)
-      return runtime ? runtime.scrollback : this.scrollbackStorage.load(tabId)
-    })
-    ipcMain.handle('scrollback-delete', (_event, tabId: string) => {
-      this.scrollbackStorage.delete(tabId)
-      return undefined
-    })
-    ipcMain.on('scrollback-save-sync', (event, tabId: string, data: string) => {
-      const scrollback = trimScrollback(data)
-      this.scrollbackStorage.save(tabId, scrollback)
-      const runtime = this.ptyRuntimes.get(tabId)
-      if (runtime) runtime.scrollback = scrollback
-      event.returnValue = true
-    })
-
-    ipcMain.handle('notes-load', () => this.notesStore.get())
-    ipcMain.handle('notes-save', (_event, payload: { baseRevision: number; data: NotesRecord }) =>
-      this.notesStore.save(payload.baseRevision, payload.data))
-
-    ipcMain.handle('palette-frecency:load', () => this.paletteFrecencyStorage.load())
-    ipcMain.handle('palette-frecency:save', (_event, file: FrecencyFile) => this.paletteFrecencyStorage.save(file))
-
-    ipcMain.handle('ssh-connect', async (_event, projectId: string, sshConfig: SshConfig) => {
-      // The tunnel and the SOCKS proxy are restored by the manager's connect
-      // path and the 'connected' status handler respectively, so that automatic
-      // reconnects go through exactly the same restoration as this one.
-      await this.sshManager.connect(projectId, sshConfig, { tunnel: this.getProjectTunnel(projectId) ?? null })
-      this.sshManager.startHealthChecks(projectId, sshConfig)
-    })
-
-    ipcMain.handle('ssh-disconnect', async (_event, projectId: string, sshConfig: SshConfig) => {
-      // Reset session proxy before disconnect since stopSocksProxy suppresses the exit event
-      if (this.socksProxyEnabled.get(projectId)) {
-        const ses = session.fromPartition(`persist:browser-${projectId}`)
-        await ses.setProxy({ proxyRules: 'direct://' }).catch(() => {})
-        await ses.closeAllConnections().catch(() => {})
-        this.broadcastToAllWindows('socks-proxy-status-changed', projectId, false)
-      }
-      await this.sshManager.disconnect(projectId, sshConfig)
-    })
-
-    ipcMain.handle('ssh-status', (_event, projectId: string) => {
-      return this.sshManager.getStatus(projectId)
-    })
-
-    ipcMain.handle('ssh-set-tunnel', async (_event, projectId: string, sshConfig: SshConfig, tunnel: TunnelConfig | null) => {
-      await this.sshManager.setTunnel(projectId, sshConfig, tunnel)
-    })
-
-    ipcMain.handle('ssh-tunnel-status', (_event, projectId: string) => {
-      return clone(this.sshManager.getTunnelState(projectId))
-    })
-
-    ipcMain.handle('socks-proxy-enable', async (_event, projectId: string, sshConfig: SshConfig) => {
-      this.logDebug(`socksProxyEnable projectId=${projectId} sshStatus=${this.sshManager.getStatus(projectId)}`)
-      this.socksProxyEnabled.set(projectId, true)
-
-      const pending = this.socksProxyStarting.get(projectId)
-      if (pending) {
-        const port = await pending
-        return { port }
-      }
-
-      const startPromise = (async () => {
-        this.logDebug(`socksProxyEnable starting proxy for ${projectId}`)
-        const port = await this.sshManager.startSocksProxy(projectId, sshConfig)
-        this.logDebug(`socksProxyEnable proxy started on port ${port}`)
-        // Re-check desired state after async startup — a disable may have raced us
-        if (!this.socksProxyEnabled.get(projectId)) {
-          await this.sshManager.stopSocksProxy(projectId)
-          throw new Error('SOCKS proxy was disabled during startup')
-        }
-        const ses = session.fromPartition(`persist:browser-${projectId}`)
-        await ses.setProxy({
-          proxyRules: `socks5://127.0.0.1:${port}`,
-          proxyBypassRules: '<-loopback>'
-        })
-        await ses.closeAllConnections()
-        this.logDebug(`socksProxyEnable session configured for ${projectId} port=${port}`)
-        this.broadcastToAllWindows('socks-proxy-status-changed', projectId, true, port)
-        return port
-      })()
-
-      this.socksProxyStarting.set(projectId, startPromise)
-      try {
-        const port = await startPromise
-        this.logDebug(`socksProxyEnable success projectId=${projectId} port=${port}`)
-        return { port }
-      } catch (err) {
-        this.logDebug(`socksProxyEnable FAILED projectId=${projectId} error=${err instanceof Error ? err.message : String(err)}`)
-        this.socksProxyEnabled.set(projectId, false)
-        throw err
-      } finally {
-        this.socksProxyStarting.delete(projectId)
-      }
-    })
-
-    ipcMain.handle('socks-proxy-disable', async (_event, projectId: string) => {
-      this.socksProxyEnabled.set(projectId, false)
-      await this.sshManager.stopSocksProxy(projectId)
-      const ses = session.fromPartition(`persist:browser-${projectId}`)
-      await ses.setProxy({ proxyRules: 'direct://' })
-      await ses.closeAllConnections()
-      this.broadcastToAllWindows('socks-proxy-status-changed', projectId, false)
-    })
-
-    ipcMain.handle('socks-proxy-status', (_event, projectId: string) => {
-      const hasEntry = this.socksProxyEnabled.has(projectId)
-      const enabled = hasEntry ? this.socksProxyEnabled.get(projectId)! : undefined
-      const proxy = this.sshManager.getSocksProxy(projectId)
-      this.logDebug(`socksProxyStatus projectId=${projectId} hasEntry=${hasEntry} enabled=${enabled} port=${proxy?.port}`)
-      return { enabled, port: proxy?.port }
-    })
-
-    ipcMain.handle('hooks-inject', (_event, projectDir: string, tabId: string) => {
-      this.hookInjector.inject(projectDir, tabId)
-    })
-    ipcMain.handle('hooks-cleanup', (_event, projectDir: string, tabId: string) => {
-      this.hookInjector.cleanup(projectDir, tabId)
-    })
-    ipcMain.handle('hooks-cleanup-remote', (_event, projectId: string, sshConfig: SshConfig, remoteDir: string | undefined, tabId: string) =>
-      this.cleanupRemoteHooks(projectId, sshConfig, remoteDir, tabId))
-
-    ipcMain.handle('codex-read-session', async (_event, cwd: string, afterTs?: number, projectId?: string, sshConfig?: SshConfig) => {
-      if (!sshConfig || !projectId) {
-        return { sessionId: await this.codexSessionManager.readLatestSessionId(cwd, afterTs) }
-      }
-
-      if (this.sshManager.getStatus(projectId) !== 'connected') {
-        throw new Error('SSH connection not established')
-      }
-
-      const readScript = this.codexSessionManager.buildRemoteReadSessionScript(cwd, afterTs)
-      const sshArgs = [
-        '-S', this.sshManager.getSocketPath(projectId),
-        `${sshConfig.username}@${sshConfig.host}`,
-        readScript
-      ]
-
-      try {
-        const { execFile: execFileCb } = await import('child_process')
-        const { promisify } = await import('util')
-        const { stdout } = await promisify(execFileCb)(this.sshManager.getSshCommand(), sshArgs, { timeout: 5000 })
-        return JSON.parse(stdout.trim()) as { sessionId: string | null }
-      } catch (error) {
-        throw new Error(`Failed to read Codex session: ${error instanceof Error ? error.message : String(error)}`)
-      }
-    })
-
-    // Claude prunes old sessions (and never persists sessions that got no user
-    // message), so a stored sessionId can go stale; spawning `claude --resume`
-    // with it dies with "No conversation found". The renderer checks here first
-    // and starts fresh when the session file is gone.
-    ipcMain.handle('claude-session-exists', async (_event, cwd: string, sessionId: string, projectId?: string, sshConfig?: SshConfig) => {
-      if (!/^[0-9a-fA-F-]{8,64}$/.test(sessionId)) return false
-
-      if (!sshConfig || !projectId) {
-        const projectsDir = path.join(os.homedir(), '.claude', 'projects')
-        const fileName = `${sessionId}.jsonl`
-        // Claude derives the project dir name by replacing non-alphanumerics with '-'
-        const slug = cwd.replace(/[^a-zA-Z0-9]/g, '-')
-        if (fs.existsSync(path.join(projectsDir, slug, fileName))) return true
-        // Fallback sweep across all projects in case the slug derivation ever
-        // diverges from Claude's — a hit anywhere preserves the resume attempt.
-        try {
-          return fs.readdirSync(projectsDir).some(dir => fs.existsSync(path.join(projectsDir, dir, fileName)))
-        } catch {
-          return false
-        }
-      }
-
-      if (this.sshManager.getStatus(projectId) !== 'connected') {
-        throw new Error('SSH connection not established')
-      }
-      const sshArgs = [
-        '-S', this.sshManager.getSocketPath(projectId),
-        `${sshConfig.username}@${sshConfig.host}`,
-        `ls "$HOME"/.claude/projects/*/${sessionId}.jsonl >/dev/null 2>&1 && echo yes || echo no`
-      ]
-      const { stdout } = await execFileAsync(this.sshManager.getSshCommand(), sshArgs, { timeout: 5000 })
-      return stdout.trim() === 'yes'
-    })
-
-    ipcMain.handle(
-      'pty-spawn',
-      async (
-        event,
-        id: string,
-        shell: string,
-        cwd: string,
-        cols: number,
-        rows: number,
-        args?: string[],
-        extraEnv?: Record<string, string>,
-        projectId?: string,
-        sshConfig?: SshConfig
-      ): Promise<PtyAttachResult> => {
-        const window = BrowserWindow.fromWebContents(event.sender)
-        if (!window) {
-          throw new Error('Unable to resolve window for PTY attach')
-        }
-        const resolvedShell = shell || '(local default)'
-        this.logDebug(`ptySpawnRequest windowId=${window.id} id=${id} shell=${resolvedShell} cwd=${cwd} cols=${cols} rows=${rows}`)
-        return this.attachOrCreatePty(window.id, id, resolvedShell, cwd, cols, rows, args, extraEnv, projectId, sshConfig)
-      }
-    )
-
-    ipcMain.on('pty-write', (event, id: string, data: string) => {
-      const window = BrowserWindow.fromWebContents(event.sender)
-      const runtime = this.ptyRuntimes.get(id)
-      if (!window || !runtime || !runtime.attachedWindowIds.has(window.id)) return
-      this.claimPtyControl(id, window.id)
-      this.ptyManager.write(id, data)
-    })
-
-    ipcMain.on('pty-resize', (event, id: string, cols: number, rows: number) => {
-      const window = BrowserWindow.fromWebContents(event.sender)
-      const runtime = this.ptyRuntimes.get(id)
-      if (!window || !runtime || !runtime.attachedWindowIds.has(window.id)) return
-      if (!window.isFocused() && runtime.controllerWindowId !== window.id) {
-        this.logDebug(`ptyResizeIgnored id=${id} windowId=${window.id} cols=${cols} rows=${rows}`)
-        return
-      }
-      this.claimPtyControl(id, window.id)
-      runtime.cols = cols
-      runtime.rows = rows
-      this.broadcastToAttachedWindows(id, 'pty-size-sync', id, cols, rows)
-      this.ptyManager.resize(id, cols, rows)
-    })
-
-    ipcMain.on('pty-kill', (_event, id: string) => {
-      this.killPty(id)
-    })
-
-    ipcMain.handle(
-      'notebook-kernel-start',
-      (
-        _event,
-        tabId: string,
-        projectId: string,
-        cwd: string,
-        condaOverride?: NotebookKernelCondaOverride | null
-      ): Promise<{ error?: string; code?: string }> => {
-        return this.startNotebookKernel(tabId, projectId, cwd, condaOverride)
-      }
-    )
-    ipcMain.handle(
-      'notebook-kernel-execute',
-      (_event, tabId: unknown, requestId: unknown, code: unknown, cellId?: unknown): { error?: string } => {
-        const parsed = parseNotebookExecuteIpc(tabId, requestId, code, cellId)
-        if (!parsed.ok) return { error: parsed.error }
-        return this.notebookKernels.execute(
-          parsed.value.tabId,
-          parsed.value.requestId,
-          parsed.value.code,
-          parsed.value.cellId
-        )
-      }
-    )
-    ipcMain.handle('notebook-kernel-interrupt', (_event, tabId: string) => {
-      this.notebookKernels.interrupt(tabId)
-      return undefined
-    })
-    ipcMain.handle(
-      'notebook-kernel-restart',
-      (
-        _event,
-        tabId: string,
-        projectId: string,
-        cwd: string,
-        condaOverride?: NotebookKernelCondaOverride | null
-      ): Promise<{ error?: string; code?: string }> => {
-        this.notebookKernels.shutdown(tabId)
-        return this.startNotebookKernel(tabId, projectId, cwd, condaOverride)
-      }
-    )
-    ipcMain.handle('notebook-kernel-shutdown', (_event, tabId: string) => {
-      this.notebookKernels.shutdown(tabId)
-      return undefined
-    })
-    ipcMain.handle('chat-attach', (event, tabId: string, config: ChatTabConfig) => {
-      const window = BrowserWindow.fromWebContents(event.sender)
-      if (!window) throw new Error('Unable to resolve window for chat attach')
-      return this.chatManager.attach(window.id, tabId, config)
-    })
-    ipcMain.on('chat-detach', (event, tabId: string) => {
-      const window = BrowserWindow.fromWebContents(event.sender)
-      if (window) this.chatManager.detach(window.id, tabId)
-    })
-    ipcMain.handle('chat-send', (_event, tabId: string, text: string, images?: ChatImage[]) =>
-      this.chatManager.send(tabId, text, images ?? []))
-    ipcMain.handle('chat-interrupt', (_event, tabId: string) => this.chatManager.interrupt(tabId))
-    ipcMain.handle('chat-respond', (_event, tabId: string, promptId: string, response: ChatPromptResponse) =>
-      this.chatManager.respond(tabId, promptId, response))
-    ipcMain.handle('chat-set-model', (_event, tabId: string, model?: string) => this.chatManager.setModel(tabId, model))
-    ipcMain.handle('chat-set-mode', (_event, tabId: string, mode: string) => this.chatManager.setPermissionMode(tabId, mode))
-    ipcMain.handle('chat-set-effort', (_event, tabId: string, effort?: string) => this.chatManager.setEffort(tabId, effort))
-    // Stop keeps the timeline (a tab turning into a terminal); close forgets the tab.
-    ipcMain.handle('chat-stop', (_event, tabId: string) => this.chatManager.stop(tabId))
-    ipcMain.on('chat-close', (_event, tabId: string) => {
-      this.chatManager.close(tabId)
-      this.activityRegistry.remove(tabId)
-      this.broadcastAgentActivity(tabId)
-    })
-    ipcMain.handle('chat-list-files', (_event, cwd: string, projectId?: string, sshConfig?: SshConfig) =>
-      this.listChatFiles(cwd, projectId, sshConfig))
-
-    ipcMain.handle('workspace-list-branches', async (_event, request: WorkspaceListBranchesRequest) => {
-      if (request.sshConfig && request.projectId) {
-        await this.ensureSshConnected(request.projectId, request.sshConfig)
-        return this.remoteWorkspaceManager.listBranches(this.sshManager.getSocketPath(request.projectId), {
-          ...request,
-          projectId: request.projectId,
-          sshConfig: request.sshConfig
-        })
-      }
-      return this.workspaceManager.listBranches(request.projectDir)
-    })
-
-    ipcMain.handle('workspace-create', async (_event, request: WorkspaceCreateRequest) => {
-      const result = request.sshConfig && request.projectId
-        ? await (async () => {
-            await this.ensureSshConnected(request.projectId!, request.sshConfig!)
-            return this.remoteWorkspaceManager.create(this.sshManager.getSocketPath(request.projectId!), {
-              ...request,
-              projectId: request.projectId!,
-              sshConfig: request.sshConfig!
-            })
-          })()
-        : await this.workspaceManager.create(request.projectDir, request.name, request.baseBranch)
-      return { ...result, baseBranch: request.baseBranch }
-    })
-
-    ipcMain.handle(
-      'workspace-delete',
-      (_event, request: WorkspaceDeleteRequest): Promise<WorkspaceDeleteResult> => this.deleteWorkspace(request)
-    )
-
-    // File browser
-    const validatePath = (projectCwd: string, relativePath: string): string => {
-      return resolveSafeProjectPath(projectCwd, relativePath)
     }
+  }
 
-    ipcMain.handle(
-      'fb-read-directory',
-      async (_event, projectCwd: string, relativeDirPath: string): Promise<DirectoryEntry[]> => {
-        return listProjectDirectory(projectCwd, relativeDirPath)
-      }
-    )
-
-    ipcMain.handle('fb-read-file', async (_event, projectCwd: string, relativeFilePath: string): Promise<string> => {
-      const fullPath = validatePath(projectCwd, relativeFilePath)
-      return fsPromises.readFile(fullPath, 'utf-8')
-    })
-
-    ipcMain.handle('fb-write-file', async (_event, projectCwd: string, relativeFilePath: string, content: string): Promise<void> => {
-      const fullPath = validatePath(projectCwd, relativeFilePath)
-      await fsPromises.writeFile(fullPath, content, 'utf-8')
-    })
-
-    ipcMain.handle(
-      'fb-create-file',
-      (_event, projectCwd: string, parentRelativePath: string, name: string): Promise<DirectoryEntry> =>
-        createProjectFile(projectCwd, parentRelativePath, name)
-    )
-    ipcMain.handle(
-      'fb-create-directory',
-      (_event, projectCwd: string, parentRelativePath: string, name: string): Promise<DirectoryEntry> =>
-        createProjectDirectory(projectCwd, parentRelativePath, name)
-    )
-    ipcMain.handle(
-      'fb-rename',
-      (_event, projectCwd: string, fromRelativePath: string, newName: string): Promise<DirectoryEntry> =>
-        renameProjectEntry(projectCwd, fromRelativePath, newName)
-    )
-    ipcMain.handle(
-      'fb-delete',
-      (_event, projectCwd: string, relativePath: string): Promise<void> =>
-        deleteProjectEntry(projectCwd, relativePath)
-    )
-
-    ipcMain.handle('git-project-posture', async (_event, projectCwd: string): Promise<GitPostureResult> => {
-      const resolvedCwd = path.resolve(projectCwd)
-      const empty: GitPostureResult = {
-        isGitRepo: false, branch: null, upstream: null,
-        ahead: 0, behind: 0, dirtyCount: 0, lastCommit: null
-      }
-      try {
-        const { stdout } = await execFileAsync(
-          'git', ['status', '--porcelain=v2', '--branch'],
-          { cwd: resolvedCwd }
-        )
-        let branch: string | null = null
-        let upstream: string | null = null
-        let ahead = 0
-        let behind = 0
-        let dirtyCount = 0
-        for (const line of stdout.split('\n')) {
-          if (!line) continue
-          if (line.startsWith('# branch.head ')) branch = line.slice('# branch.head '.length).trim()
-          else if (line.startsWith('# branch.upstream ')) upstream = line.slice('# branch.upstream '.length).trim()
-          else if (line.startsWith('# branch.ab ')) {
-            const m = line.match(/\+(\d+)\s+-(\d+)/)
-            if (m) { ahead = Number(m[1]); behind = Number(m[2]) }
-          } else if (!line.startsWith('#')) {
-            dirtyCount += 1
-          }
-        }
-        let lastCommit: GitPostureLastCommit | null = null
-        try {
-          const { stdout: logOut } = await execFileAsync(
-            'git', ['log', '-1', '--format=%H%x00%s%x00%an%x00%cI'],
-            { cwd: resolvedCwd }
-          )
-          const trimmed = logOut.replace(/\n+$/, '')
-          if (trimmed) {
-            const [sha, subject, author, isoDate] = trimmed.split('\x00')
-            if (sha) lastCommit = { sha, subject: subject ?? '', author: author ?? '', isoDate: isoDate ?? '' }
-          }
-        } catch { /* repo with zero commits */ }
-        return { isGitRepo: true, branch, upstream, ahead, behind, dirtyCount, lastCommit }
-      } catch {
-        return empty
-      }
-    })
-
-    ipcMain.handle('git-commit-history', async (_event, projectCwd: string): Promise<CommitHistoryResult> => {
-      const resolvedCwd = path.resolve(projectCwd)
-      try {
-        const { stdout } = await execFileAsync(
-          'git', ['log', '--format=%cI'],
-          { cwd: resolvedCwd, maxBuffer: 32 * 1024 * 1024 }
-        )
-        const commits = stdout.split('\n').map(s => s.trim()).filter(s => s.length > 0)
-        return { commits }
-      } catch {
-        return { commits: [] }
-      }
-    })
-
-    ipcMain.handle('fb-git-status', async (_event, projectCwd: string): Promise<GitStatusResult> => {
-      const resolvedCwd = path.resolve(projectCwd)
-      try {
-        const [{ stdout }, summary] = await Promise.all([
-          execFileAsync('git', GIT_STATUS_ARGS, { cwd: resolvedCwd }),
-          readGitDiffSummary(resolvedCwd)
-        ])
-        const { staged, unstaged, untracked } = parseGitStatusZ(stdout)
-
-        return { staged, unstaged, untracked, summary }
-      } catch {
-        return {
-          staged: [],
-          unstaged: [],
-          untracked: [],
-          summary: { added: 0, deleted: 0 }
-        }
-      }
-    })
-
-    ipcMain.handle('fb-git-diff', async (_event, projectCwd: string, relativeFilePath: string): Promise<string> => {
-      const resolvedCwd = path.resolve(projectCwd)
-      try {
-        // The trailing `--` keeps a path that starts with `-` from being read
-        // as an option; the raw path is passed through untouched.
-        const { stdout } = await execFileAsync('git', ['show', `HEAD:${relativeFilePath}`, '--'], { cwd: resolvedCwd })
-        return stdout
-      } catch {
-        return ''
-      }
-    })
-
-    ipcMain.handle('fb-git-stage', async (_event, projectCwd: string, files: string[]): Promise<GitOperationResult> => {
-      const resolvedCwd = path.resolve(projectCwd)
-      try {
-        await execFileAsync('git', ['add', '--', ...files], { cwd: resolvedCwd, timeout: 10000 })
-        return { success: true, message: `Staged ${files.length} file(s)` }
-      } catch (err: unknown) {
-        const stderr = (err as { stderr?: string })?.stderr?.trim()
-        const msg = stderr || (err instanceof Error ? err.message : String(err))
-        return { success: false, message: msg }
-      }
-    })
-
-    ipcMain.handle('fb-git-unstage', async (_event, projectCwd: string, files: string[]): Promise<GitOperationResult> => {
-      const resolvedCwd = path.resolve(projectCwd)
-      try {
-        await execFileAsync('git', ['reset', 'HEAD', '--', ...files], { cwd: resolvedCwd, timeout: 10000 })
-        return { success: true, message: `Unstaged ${files.length} file(s)` }
-      } catch (err: unknown) {
-        const stderr = (err as { stderr?: string })?.stderr?.trim()
-        const msg = stderr || (err instanceof Error ? err.message : String(err))
-        return { success: false, message: msg }
-      }
-    })
-
-    ipcMain.handle('fb-git-discard', async (_event, projectCwd: string, files: string[]): Promise<GitOperationResult> => {
-      const resolvedCwd = path.resolve(projectCwd)
-      try {
-        await execFileAsync('git', ['checkout', '--', ...files], { cwd: resolvedCwd, timeout: 10000 })
-        return { success: true, message: `Discarded changes in ${files.length} file(s)` }
-      } catch (err: unknown) {
-        const stderr = (err as { stderr?: string })?.stderr?.trim()
-        const msg = stderr || (err instanceof Error ? err.message : String(err))
-        return { success: false, message: msg }
-      }
-    })
-
-    ipcMain.handle('fb-git-pull', async (_event, projectCwd: string): Promise<GitOperationResult> => {
-      const resolvedCwd = path.resolve(projectCwd)
-      try {
-        const { stdout, stderr } = await execFileAsync('git', ['pull'], { cwd: resolvedCwd, timeout: 60000 })
-        return { success: true, message: stdout.trim() || stderr.trim() || 'Pull complete' }
-      } catch (err: unknown) {
-        const stderr = (err as { stderr?: string })?.stderr?.trim()
-        const msg = stderr || (err instanceof Error ? err.message : String(err))
-        return { success: false, message: msg }
-      }
-    })
-
-    ipcMain.handle('fb-git-commit', async (_event, projectCwd: string, commitMessage: string): Promise<GitOperationResult> => {
-      const resolvedCwd = path.resolve(projectCwd)
-      if (!commitMessage || !commitMessage.trim()) {
-        return { success: false, message: 'Commit message cannot be empty' }
-      }
-      try {
-        const { stdout } = await execFileAsync('git', ['commit', '-m', commitMessage.trim()], { cwd: resolvedCwd, timeout: 30000 })
-        return { success: true, message: stdout.trim() || 'Committed' }
-      } catch (err: unknown) {
-        const stderr = (err as { stderr?: string })?.stderr?.trim()
-        const msg = stderr || (err instanceof Error ? err.message : String(err))
-        return { success: false, message: msg }
-      }
-    })
-
-    ipcMain.handle('fb-git-push', async (_event, projectCwd: string): Promise<GitOperationResult> => {
-      const resolvedCwd = path.resolve(projectCwd)
-      try {
-        const { stdout, stderr } = await execFileAsync('git', ['push'], { cwd: resolvedCwd, timeout: 60000 })
-        return { success: true, message: stdout.trim() || stderr.trim() || 'Push complete' }
-      } catch (err: unknown) {
-        const stderr = (err as { stderr?: string })?.stderr?.trim()
-        const msg = stderr || (err instanceof Error ? err.message : String(err))
-        return { success: false, message: msg }
-      }
-    })
+  private applyConfig(patch: Partial<AppConfig>): void {
+    this.config = { ...this.config, ...patch }
+    this.storage.saveConfig(this.config)
+    setPortableNodeDir(this.config.portableNodeDir)
+    this.broadcastToAllWindows('config-updated', clone(this.config))
   }
 
   /** Shared by the `workspace-delete` IPC and the idle sweep, which runs it with no `force`. */
@@ -1369,319 +717,6 @@ export class AppRuntime {
       await execFileAsync(this.sshManager.getSshCommand(), cleanupArgs, { timeout: 5000 })
     } catch {
       // Best-effort cleanup
-    }
-  }
-
-  private async attachOrCreatePty(
-    windowId: number,
-    id: string,
-    shell: string,
-    cwd: string,
-    cols: number,
-    rows: number,
-    args?: string[],
-    extraEnv?: Record<string, string>,
-    projectId?: string,
-    sshConfig?: SshConfig
-  ): Promise<PtyAttachResult> {
-    let runtime = this.ptyRuntimes.get(id)
-    // If the stored runtime's PTY has already exited and this tab is an SSH tab
-    // whose project is currently connected, drop the dead runtime so we respawn
-    // fresh.  Happens when a tab is hidden (renderer-side spawnedRef=false) while
-    // SSH master dies and auto-reconnects: the renderer's false→true respawn
-    // effect skips hidden tabs, so main is the only place left to detect and
-    // clean up the stranded dead slave — otherwise the user sees a frozen
-    // "Shared connection closed" in scrollback when they switch back to the tab.
-    if (runtime && runtime.exitCode !== null && sshConfig && projectId
-        && this.sshManager.getStatus(projectId) === 'connected') {
-      this.logDebug(`ptyAttach refresh-dead id=${id} exitCode=${runtime.exitCode}`)
-      this.ptyManager.kill(id)
-      this.scrollbackStorage.delete(id)
-      this.ptyRuntimes.delete(id)
-      runtime = undefined
-    }
-    if (!runtime) {
-      this.logDebug(`ptyAttach create windowId=${windowId} id=${id}`)
-      runtime = {
-        attachedWindowIds: new Set<number>(),
-        controllerWindowId: windowId,
-        cols,
-        rows,
-        scrollback: this.scrollbackStorage.load(id) ?? '',
-        exitCode: null
-      }
-      this.ptyRuntimes.set(id, runtime)
-      runtime.attachedWindowIds.add(windowId)
-      this.spawnPty(id, shell, cwd, cols, rows, args, extraEnv, projectId, sshConfig)
-    } else {
-      this.logDebug(`ptyAttach reuse windowId=${windowId} id=${id} scrollback=${runtime.scrollback.length} exit=${runtime.exitCode}`)
-      runtime.attachedWindowIds.add(windowId)
-    }
-    return {
-      cols: runtime.cols,
-      rows: runtime.rows,
-      scrollback: runtime.scrollback,
-      exitCode: runtime.exitCode
-    }
-  }
-
-  private spawnPty(
-    id: string,
-    shell: string,
-    cwd: string,
-    cols: number,
-    rows: number,
-    args?: string[],
-    extraEnv?: Record<string, string>,
-    projectId?: string,
-    sshConfig?: SshConfig
-  ): void {
-    this.logDebug(`ptySpawn start id=${id} shell=${shell} cwd=${cwd}`)
-    // A fresh process for this tab: whatever the old one was doing (including
-    // 'exited') describes a process that no longer exists.
-    this.activityRegistry.reset(id)
-    this.broadcastAgentActivity(id)
-
-    // Capture the current runtime so callbacks can verify they belong to the
-    // right generation.  After a kill+respawn cycle the same `id` maps to a
-    // different runtime object — without this check the OLD process's delayed
-    // onData/onExit would pollute the NEW runtime (setting exitCode, pushing
-    // stale "Shared connection closed" output, etc.).
-    const expectedRuntime = this.ptyRuntimes.get(id)
-
-    const callbacks = {
-      onData: (data: string) => {
-        const runtime = this.ptyRuntimes.get(id)
-        if (!runtime || runtime !== expectedRuntime) return
-        runtime.scrollback = trimScrollback(runtime.scrollback + data)
-        this.broadcastToAttachedWindows(id, 'pty-data', id, data)
-        // Layer 3: a slave printing "Shared connection to <host> closed" means
-        // the master's tunnel is dead — force an immediate reconnect instead
-        // of waiting for the next health-check tick (up to 10s) and without
-        // trusting `-O check` (which returns true when the master process is
-        // alive but its TCP to the server has died).
-        if (sshConfig && projectId && /Shared connection to \S+ closed/.test(data)) {
-          this.sshManager.triggerReconnect(projectId, sshConfig)
-        }
-      },
-      onExit: (exitCode: number) => {
-        const runtime = this.ptyRuntimes.get(id)
-        if (!runtime || runtime !== expectedRuntime) return
-        runtime.exitCode = exitCode
-        this.activityRegistry.exited(id)
-        this.broadcastAgentActivity(id)
-        this.logDebug(`ptyExit id=${id} exitCode=${exitCode}`)
-        this.broadcastToAttachedWindows(id, 'pty-exit', id, exitCode)
-      }
-    }
-
-    if (sshConfig && projectId) {
-      if (this.sshManager.getStatus(projectId) !== 'connected') {
-        throw new Error('SSH connection not established')
-      }
-
-      const remoteCwd = cwd || sshConfig.remoteDir
-      const isClaudeRemote = shell === 'claude' && extraEnv?.DEVTOOL_TAB_ID
-      const isPiRemote = shell === AI_TAB_META.pi.command && extraEnv?.DEVTOOL_TAB_ID
-      let hookInjectPrefix = ''
-      let remoteArgs = args
-      let remoteEnv = extraEnv
-      if (isClaudeRemote) {
-        const remotePort = this.sshManager.getRemotePort(projectId)
-        if (remotePort) {
-          this.hookInjector.remoteInject(projectId, remoteCwd, extraEnv.DEVTOOL_TAB_ID)
-          hookInjectPrefix = this.hookInjector.buildRemoteInjectScript(remoteCwd, remotePort) + ' && '
-          this.logDebug(`hookInjectRemote dir=${remoteCwd} port=${remotePort} tabId=${extraEnv?.DEVTOOL_TAB_ID}`)
-        }
-      } else if (isPiRemote) {
-        // pi loads the status extension via `-e`; write it to the remote host and
-        // point its callback at the reverse-tunnel port (reaches the local hook-server).
-        const remotePort = this.sshManager.getRemotePort(projectId)
-        if (remotePort) {
-          const remoteExtPath = piExtensionRemotePath()
-          hookInjectPrefix = buildRemotePiExtensionScript() + ' && '
-          remoteArgs = [...(args ?? []), '-e', remoteExtPath]
-          remoteEnv = {
-            ...extraEnv,
-            DEVTOOL_HOOK_PORT: String(remotePort),
-            DEVTOOL_HOOK_TOKEN: this.hookServer.getToken()
-          }
-        }
-      }
-
-      const sshArgs = this.sshManager.buildSpawnArgs(projectId, sshConfig, shell, remoteArgs, remoteEnv, hookInjectPrefix, remoteCwd)
-      // Same binary as ControlMaster. On Windows that is Git ssh.exe (native
-      // OpenSSH cannot own the mux socket). ConPTY needs an absolute path.
-      const sshFile = this.sshManager.getSshCommand()
-      this.logDebug(`ptySpawn ssh id=${id} file=${sshFile}`)
-      this.ptyManager.spawn(id, sshFile, os.tmpdir(), cols, rows, sshArgs, undefined, callbacks)
-    } else {
-      const condaEnv = this.condaEnvForLocalProject(projectId)
-      const isClaudeLocal = shell === 'claude' && extraEnv?.DEVTOOL_TAB_ID
-      const isPiLocal = shell === AI_TAB_META.pi.command && extraEnv?.DEVTOOL_TAB_ID
-      if (isClaudeLocal) {
-        // Hooks land in the dir Claude is actually started in (a workspace task's
-        // worktree, not the project root) — logged so a missing status is easy to
-        // trace back to the settings file it should have been written to.
-        this.hookInjector.inject(cwd, extraEnv.DEVTOOL_TAB_ID)
-        this.logDebug(`hookInject dir=${cwd} tabId=${extraEnv?.DEVTOOL_TAB_ID}`)
-      }
-      let localArgs = args
-      let localEnv = extraEnv
-      if (isPiLocal) {
-        localArgs = [...(args ?? []), '-e', piExtensionLocalPath()]
-        localEnv = {
-          ...extraEnv,
-          DEVTOOL_HOOK_PORT: String(this.hookServer.getPort()),
-          DEVTOOL_HOOK_TOKEN: this.hookServer.getToken()
-        }
-      }
-      // Keep `shell` as `pi`/`claude`/`codex` for hook detection above. Resolve the
-      // actual file CreateProcess can open (Windows needs pi.cmd, not a bare `pi`).
-      let spawnFile = shell
-      let spawnArgs = localArgs ?? []
-      if (isAiAgentCommand(shell)) {
-        const override = agentCommandOverride(shell, this.config).trim()
-        spawnFile = resolveAgentCommand(override || shell)
-        const wrapped = conptySpawnArgv(spawnFile, spawnArgs)
-        spawnFile = wrapped.file
-        spawnArgs = wrapped.args
-        this.logDebug(`ptySpawn resolve id=${id} shell=${shell} file=${spawnFile} args=${spawnArgs.length}`)
-      } else if (isLocalInteractiveTerminal(shell, spawnArgs)) {
-        // Git Bash / $SHELL from Settings — do not inherit process.env.SHELL on Windows.
-        const resolved = resolveLocalTerminalSpawn(this.config)
-        const wrapped = wrapInteractiveShellWithCondaActivate(resolved, condaEnv)
-        spawnFile = wrapped.file
-        spawnArgs = wrapped.args
-        this.logDebug(`ptySpawn resolve id=${id} shell=${shell} file=${spawnFile} args=${spawnArgs.join(' ')}`)
-      }
-      this.ptyManager.spawn(id, spawnFile, cwd, cols, rows, spawnArgs, localEnv, callbacks, condaEnv)
-    }
-  }
-
-  /** Local PTYs only. Remote tabs run on the SSH host, which has its own python. */
-  private condaEnvForLocalProject(projectId?: string): CondaEnvInfo | undefined {
-    if (!projectId) return undefined
-    const project = this.projectsStore.peek().projects.find((item) => item.id === projectId)
-    if (!project) return undefined
-    const resolved = resolveProjectCondaEnv(project)
-    if (!resolved) {
-      if (project.condaEnvName?.trim() || project.condaEnvPrefix?.trim()) {
-        this.logDebug(
-          `condaEnv missing name=${project.condaEnvName ?? ''} prefix=${project.condaEnvPrefix ?? ''} projectId=${projectId}`
-        )
-      }
-      return undefined
-    }
-    this.logDebug(`condaEnv name=${resolved.name} prefix=${resolved.prefix} projectId=${projectId}`)
-    return resolved
-  }
-
-  private async startNotebookKernel(
-    tabId: string,
-    projectId: string,
-    cwd: string,
-    condaOverride?: NotebookKernelCondaOverride | null
-  ): Promise<{ error?: string; code?: string }> {
-    const project = this.projectsStore.peek().projects.find((item) => item.id === projectId)
-    if (!project) return { error: 'Project not found.', code: 'no-project' }
-    if (isRemoteProject(project)) {
-      this.broadcastToAllWindows('notebook-kernel-event', tabId, {
-        event: 'fail',
-        code: 'remote',
-        message: NOTEBOOK_ERROR_REMOTE
-      })
-      return { error: NOTEBOOK_ERROR_REMOTE, code: 'remote' }
-    }
-    if (isShellCommandProject(project)) {
-      this.broadcastToAllWindows('notebook-kernel-event', tabId, {
-        event: 'fail',
-        code: 'shell-project',
-        message: NOTEBOOK_ERROR_SHELL_PROJECT
-      })
-      return { error: NOTEBOOK_ERROR_SHELL_PROJECT, code: 'shell-project' }
-    }
-    const cwdResult = resolveNotebookKernelCwd(cwd, notebookAllowedCwdRoots(project))
-    if (!cwdResult.ok) {
-      this.broadcastToAllWindows('notebook-kernel-event', tabId, {
-        event: 'fail',
-        code: 'cwd',
-        message: cwdResult.error
-      })
-      return { error: cwdResult.error, code: 'cwd' }
-    }
-    const override = condaOverride
-      ? { condaEnvName: condaOverride.name, condaEnvPrefix: condaOverride.prefix }
-      : null
-    const hasOverride = !!(override?.condaEnvName?.trim() || override?.condaEnvPrefix?.trim())
-    // Override: live conda list only. No override: existing project-default resolve.
-    const listedEnvs = hasOverride ? await listCondaEnvsForNotebookKernel() : []
-    const projectResolved = hasOverride ? null : resolveProjectCondaEnv(project)
-    const resolved = resolveNotebookKernelCondaEnv(
-      override,
-      project,
-      listedEnvs,
-      projectResolved,
-      process.platform
-    )
-    if (!resolved.ok) {
-      this.broadcastToAllWindows('notebook-kernel-event', tabId, {
-        event: 'fail',
-        code: resolved.code,
-        message: resolved.error
-      })
-      return { error: resolved.error, code: resolved.code }
-    }
-    const condaEnv = resolved.env ?? undefined
-    this.logDebug(
-      `notebookKernelStart tabId=${tabId} projectId=${projectId} cwd=${cwdResult.cwd} conda=${condaEnv?.name ?? ''} prefix=${condaEnv?.prefix ?? ''}`
-    )
-    return this.notebookKernels.start(tabId, condaEnv, cwdResult.cwd)
-  }
-
-  /** Files the chat composer's @-mention offers: git's view (tracked + untracked, not ignored). */
-  private async listChatFiles(cwd: string, projectId?: string, sshConfig?: SshConfig): Promise<string[]> {
-    const script = 'git ls-files --cached --others --exclude-standard 2>/dev/null | head -20000'
-    try {
-      if (sshConfig && projectId) {
-        await this.ensureSshConnected(projectId, sshConfig)
-        const { stdout } = await execFileAsync(this.sshManager.getSshCommand(), [
-          '-S', this.sshManager.getSocketPath(projectId),
-          `${sshConfig.username}@${sshConfig.host}`,
-          `${spawnCdCommand(cwd || sshConfig.remoteDir)} && ${script}`
-        ], { timeout: 10_000, maxBuffer: 64 * 1024 * 1024 })
-        return stdout.split('\n').filter(Boolean)
-      }
-      const { stdout } = await execFileAsync('git', ['ls-files', '--cached', '--others', '--exclude-standard'], {
-        cwd, timeout: 10_000, maxBuffer: 64 * 1024 * 1024
-      })
-      return stdout.split('\n').filter(Boolean).slice(0, 20_000)
-    } catch {
-      return []
-    }
-  }
-
-  private killPty(id: string): void {
-    this.logDebug(`ptyKill id=${id}`)
-    const runtime = this.ptyRuntimes.get(id)
-    if (runtime) {
-      this.scrollbackStorage.save(id, runtime.scrollback)
-    }
-    this.ptyManager.kill(id)
-    this.ptyRuntimes.delete(id)
-    this.notebookKernels.shutdown(id)
-    // No process, no activity: a status left at 'working' here would protect the
-    // task from cleanup for the rest of the session.
-    this.activityRegistry.remove(id)
-    this.broadcastAgentActivity(id)
-  }
-
-  private claimPtyControl(tabId: string, windowId: number): void {
-    const runtime = this.ptyRuntimes.get(tabId)
-    if (!runtime) return
-    if (runtime.controllerWindowId !== windowId) {
-      runtime.controllerWindowId = windowId
-      this.logDebug(`ptyController id=${tabId} windowId=${windowId}`)
     }
   }
 
@@ -1733,16 +768,68 @@ export class AppRuntime {
     }
   }
 
+  /** Local PTYs only. Remote tabs run on the SSH host, which has its own python. */
+  private condaEnvForLocalProject(projectId?: string): CondaEnvInfo | undefined {
+    if (!projectId) return undefined
+    const project = this.projectsStore.peek().projects.find((item) => item.id === projectId)
+    if (!project) return undefined
+    const resolved = resolveProjectCondaEnv(project)
+    if (!resolved) {
+      if (project.condaEnvName?.trim() || project.condaEnvPrefix?.trim()) {
+        this.logDebug(
+          `condaEnv missing name=${project.condaEnvName ?? ''} prefix=${project.condaEnvPrefix ?? ''} projectId=${projectId}`
+        )
+      }
+      return undefined
+    }
+    this.logDebug(`condaEnv name=${resolved.name} prefix=${resolved.prefix} projectId=${projectId}`)
+    return resolved
+  }
+
+  private async startNotebookKernel(
+    tabId: string,
+    projectId: string,
+    cwd: string,
+    condaOverride?: NotebookKernelCondaOverride | null
+  ): Promise<{ error?: string; code?: string }> {
+    const fail = (code: string, message: string): { error: string; code: string } => {
+      this.broadcastToAllWindows('notebook-kernel-event', tabId, { event: 'fail', code, message })
+      return { error: message, code }
+    }
+    const project = this.projectsStore.peek().projects.find((item) => item.id === projectId)
+    if (!project) return { error: 'Project not found.', code: 'no-project' }
+    if (isRemoteProject(project)) return fail('remote', NOTEBOOK_ERROR_REMOTE)
+    if (isShellCommandProject(project)) return fail('shell-project', NOTEBOOK_ERROR_SHELL_PROJECT)
+    const cwdResult = resolveNotebookKernelCwd(cwd, notebookAllowedCwdRoots(project))
+    if (!cwdResult.ok) return fail('cwd', cwdResult.error)
+    const override = condaOverride
+      ? { condaEnvName: condaOverride.name, condaEnvPrefix: condaOverride.prefix }
+      : null
+    const hasOverride = !!(override?.condaEnvName?.trim() || override?.condaEnvPrefix?.trim())
+    // Override: live conda list only. No override: existing project-default resolve.
+    const listedEnvs = hasOverride ? await listCondaEnvsForNotebookKernel() : []
+    const projectResolved = hasOverride ? null : resolveProjectCondaEnv(project)
+    const resolved = resolveNotebookKernelCondaEnv(override, project, listedEnvs, projectResolved, process.platform)
+    if (!resolved.ok) return fail(resolved.code, resolved.error)
+    const condaEnv = resolved.env ?? undefined
+    this.logDebug(
+      `notebookKernelStart tabId=${tabId} projectId=${projectId} cwd=${cwdResult.cwd} conda=${condaEnv?.name ?? ''} prefix=${condaEnv?.prefix ?? ''}`
+    )
+    return this.notebookKernels.start(tabId, condaEnv, cwdResult.cwd)
+  }
+
   private getProjectTunnel(projectId: string): TunnelConfig | undefined {
     return this.projectsStore.peek().projects.find((project) => project.id === projectId)?.tunnel
   }
 
   private broadcastToAttachedWindows(tabId: string, channel: string, ...args: unknown[]): void {
-    const windowIds = this.ptyRuntimes.get(tabId)?.attachedWindowIds ?? this.chatManager?.attachedWindows(tabId)
+    const windowIds = this.ptySessions.attachedWindows(tabId) ?? this.chatManager?.attachedWindows(tabId)
     if (!windowIds) return
-    for (const windowId of windowIds) {
-      const window = this.windows.get(windowId)
-      if (window) safeWebContentsSend(window, channel, ...args)
-    }
+    for (const windowId of windowIds) this.sendToWindow(windowId, channel, ...args)
+  }
+
+  private sendToWindow(windowId: number, channel: string, ...args: unknown[]): void {
+    const window = this.windows.get(windowId)
+    if (window) safeWebContentsSend(window, channel, ...args)
   }
 }

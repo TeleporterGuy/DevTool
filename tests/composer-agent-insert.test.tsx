@@ -18,6 +18,7 @@ function renderComposer(tabId = 'chat-1') {
       commands={[]}
       loadFiles={async () => []}
       onSend={noop}
+      onSideQuestion={noop}
       onStop={noop}
       onSetModel={noop}
       onSetMode={noop}

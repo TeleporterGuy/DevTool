@@ -30,7 +30,7 @@ interface Props {
   effectiveTheme: 'dark' | 'light'
 }
 
-export default function EditorTab({ tabId, visible, filePath, projectDir, projectId, taskId, pane, effectiveTheme }: Props): React.ReactElement {
+export default function EditorTab({ tabId, visible, filePath, projectDir, projectId, taskId, effectiveTheme }: Props): React.ReactElement {
   const { config, projects } = useApp()
   const dirtyBuffers = useDirtyBufferStore()
   const [content, setContent] = useState<string | null>(null)

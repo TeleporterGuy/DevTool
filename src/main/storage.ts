@@ -29,10 +29,103 @@ function isFiniteNumber(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value)
 }
 
+const EMPTY_PROJECTS: () => ProjectsData = () => ({ projects: [], tags: [], projectOrder: [], pinnedItems: [] })
+
+/**
+ * Write `data` to `target` so a crash leaves either the old file or the new one,
+ * never a truncated mix: write a sibling temp file, fsync it, rename over the target.
+ * Same directory so the rename stays on one filesystem (and is atomic on POSIX).
+ */
+export function atomicWriteFileSync(target: string, data: string): void {
+  const tmp = `${target}.tmp-${process.pid}-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`
+  let fd: number | null = null
+  try {
+    fd = fs.openSync(tmp, 'w')
+    fs.writeSync(fd, data)
+    fs.fsyncSync(fd)
+    fs.closeSync(fd)
+    fd = null
+    renameWithRetry(tmp, target)
+  } catch (err) {
+    if (fd !== null) {
+      try { fs.closeSync(fd) } catch { /* already failing */ }
+    }
+    try { fs.unlinkSync(tmp) } catch { /* may not exist */ }
+    throw err
+  }
+  if (process.platform !== 'win32') {
+    // Persist the rename itself. Best effort: some filesystems refuse fsync on a dir.
+    try {
+      const dirFd = fs.openSync(path.dirname(target), 'r')
+      try { fs.fsyncSync(dirFd) } finally { fs.closeSync(dirFd) }
+    } catch { /* ignore */ }
+  }
+}
+
+function renameWithRetry(from: string, to: string): void {
+  // On Windows a reader (antivirus, indexer) holding the target briefly makes the
+  // replace fail with EPERM/EBUSY; a short retry clears nearly all of those.
+  for (let attempt = 0; ; attempt++) {
+    try {
+      fs.renameSync(from, to)
+      return
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code
+      if (process.platform !== 'win32' || attempt >= 4 || (code !== 'EPERM' && code !== 'EBUSY' && code !== 'EACCES')) {
+        throw err
+      }
+      const until = Date.now() + 20 * (attempt + 1)
+      while (Date.now() < until) { /* brief sync backoff */ }
+    }
+  }
+}
+
+type JsonReadResult =
+  | { kind: 'missing' }
+  | { kind: 'ok'; raw: string; data: Record<string, unknown> }
+  | { kind: 'corrupt'; error: unknown }
+
+/** Missing is a normal first run; anything else that fails is a file we must not overwrite blindly. */
+function readJsonRecord(file: string): JsonReadResult {
+  let raw: string
+  try {
+    raw = fs.readFileSync(file, 'utf-8')
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return { kind: 'missing' }
+    return { kind: 'corrupt', error: err }
+  }
+  try {
+    const data = JSON.parse(raw) as unknown
+    if (!isRecord(data) || Array.isArray(data)) {
+      return { kind: 'corrupt', error: new Error('top-level JSON value is not an object') }
+    }
+    return { kind: 'ok', raw, data }
+  } catch (err) {
+    return { kind: 'corrupt', error: err }
+  }
+}
+
+function fileStamp(): string {
+  return new Date().toISOString().replace(/[:.]/g, '-')
+}
+
+/** Rename a bad file out of the way so nothing later overwrites it. Returns the new path, or null. */
+function quarantine(file: string): string | null {
+  const dest = `${file}.corrupt-${fileStamp()}`
+  try {
+    fs.renameSync(file, dest)
+    return dest
+  } catch (err) {
+    console.error(`[storage] could not move unreadable ${file} aside:`, err)
+    return null
+  }
+}
+
 export class Storage {
   private configPath: string
   private projectsPath: string
   private windowSessionPath: string
+  private backupsDir: string
 
   constructor(dir: string) {
     if (!fs.existsSync(dir)) {
@@ -41,6 +134,19 @@ export class Storage {
     this.configPath = path.join(dir, 'config.json')
     this.projectsPath = path.join(dir, 'projects.json')
     this.windowSessionPath = path.join(dir, 'window-session.json')
+    this.backupsDir = path.join(dir, 'backups')
+  }
+
+  /** Snapshot file names, oldest first (ISO timestamps sort lexically). */
+  private listProjectBackups(): string[] {
+    try {
+      return fs
+        .readdirSync(this.backupsDir)
+        .filter(f => f.startsWith('projects-') && f.endsWith('.json'))
+        .sort()
+    } catch {
+      return []
+    }
   }
 
   /**
@@ -54,19 +160,30 @@ export class Storage {
    */
   backupProjectsOnStartup(keep = 10): boolean {
     try {
-      if (!fs.existsSync(this.projectsPath)) return true
-      const backupsDir = path.join(path.dirname(this.projectsPath), 'backups')
-      fs.mkdirSync(backupsDir, { recursive: true })
-      const stamp = new Date().toISOString().replace(/[:.]/g, '-')
-      const snapshotPath = path.join(backupsDir, `projects-${stamp}.json`)
-      fs.copyFileSync(this.projectsPath, snapshotPath)
+      const current = readJsonRecord(this.projectsPath)
+      if (current.kind === 'missing') return true
+      // Never snapshot a file we cannot parse: it would push good snapshots out of
+      // the rotation, and it is useless as a restore point.
+      if (current.kind === 'corrupt') return false
+      fs.mkdirSync(this.backupsDir, { recursive: true })
+      const existing = this.listProjectBackups()
+      const newest = existing[existing.length - 1]
+      if (newest) {
+        try {
+          if (fs.readFileSync(path.join(this.backupsDir, newest), 'utf-8') === current.raw) {
+            // Identical to the newest snapshot: it already covers us, and adding a
+            // duplicate would only rotate an older, distinct one out.
+            return true
+          }
+        } catch {
+          // Unreadable newest snapshot: fall through and write a fresh one.
+        }
+      }
+      const snapshotPath = path.join(this.backupsDir, `projects-${fileStamp()}.json`)
+      atomicWriteFileSync(snapshotPath, current.raw)
       try {
-        const snapshots = fs
-          .readdirSync(backupsDir)
-          .filter(f => f.startsWith('projects-') && f.endsWith('.json'))
-          .sort()
-        for (const f of snapshots.slice(0, -keep)) {
-          fs.unlinkSync(path.join(backupsDir, f))
+        for (const f of this.listProjectBackups().slice(0, -keep)) {
+          fs.unlinkSync(path.join(this.backupsDir, f))
         }
       } catch {
         // The snapshot is written; failing to prune old ones does not invalidate it.
@@ -78,9 +195,20 @@ export class Storage {
   }
 
   loadConfig(): AppConfig {
+    const result = readJsonRecord(this.configPath)
+    if (result.kind === 'missing') return { ...DEFAULT_CONFIG }
+    if (result.kind === 'corrupt') {
+      // Keep the user's settings file for manual recovery instead of letting the
+      // next save overwrite it with defaults.
+      const movedTo = quarantine(this.configPath)
+      console.error(
+        `[storage] config.json is unreadable (${String(result.error)}); ` +
+        (movedTo ? `moved to ${movedTo}; ` : '') + 'using default settings'
+      )
+      return { ...DEFAULT_CONFIG }
+    }
     try {
-      const raw = fs.readFileSync(this.configPath, 'utf-8')
-      const parsed = JSON.parse(raw) as Record<string, unknown>
+      const parsed = result.data
       const { collapsedFolderIds: _legacy, ...rest } = parsed
       const config = { ...DEFAULT_CONFIG, ...rest } as AppConfig
       config.windowsTerminal = coerceWindowsTerminal(config.windowsTerminal)
@@ -98,17 +226,54 @@ export class Storage {
   }
 
   saveConfig(config: AppConfig): void {
-    fs.writeFileSync(this.configPath, JSON.stringify(config, null, 2))
+    atomicWriteFileSync(this.configPath, JSON.stringify(config, null, 2))
   }
 
+  /**
+   * A missing file is a fresh start. An unreadable or unparseable one is not: the
+   * caller adopts whatever this returns and the next save replaces the file, so
+   * returning empty data here would wipe every project. Instead the bad file is
+   * moved aside and the newest parseable startup snapshot is restored.
+   */
   loadProjects(): ProjectsData {
-    try {
-      const raw = fs.readFileSync(this.projectsPath, 'utf-8')
-      const data = JSON.parse(raw)
-      return Storage.normalizeProjectsData(data)
-    } catch {
-      return { projects: [], tags: [], projectOrder: [], pinnedItems: [] }
+    const result = readJsonRecord(this.projectsPath)
+    if (result.kind === 'missing') return EMPTY_PROJECTS()
+    if (result.kind === 'ok') {
+      try {
+        return Storage.normalizeProjectsData(result.data)
+      } catch (err) {
+        return this.recoverProjects(err)
+      }
     }
+    return this.recoverProjects(result.error)
+  }
+
+  private recoverProjects(error: unknown): ProjectsData {
+    const movedTo = quarantine(this.projectsPath)
+    console.error(
+      `[storage] projects.json is unreadable (${String(error)})` + (movedTo ? `; moved to ${movedTo}` : '')
+    )
+    for (const name of this.listProjectBackups().reverse()) {
+      const backupPath = path.join(this.backupsDir, name)
+      const backup = readJsonRecord(backupPath)
+      if (backup.kind !== 'ok') continue
+      let data: ProjectsData
+      try {
+        data = Storage.normalizeProjectsData(backup.data)
+      } catch {
+        continue
+      }
+      try {
+        atomicWriteFileSync(this.projectsPath, backup.raw)
+      } catch (err) {
+        // Still return the data: the next regular save will write it.
+        console.error('[storage] could not write restored projects.json:', err)
+      }
+      console.error(`[storage] restored projects.json from backup ${backupPath}`)
+      return data
+    }
+    console.error('[storage] no usable projects backup found; starting with empty projects')
+    return EMPTY_PROJECTS()
   }
 
   static normalizeProjectsData(data: Record<string, unknown>): ProjectsData {
@@ -126,13 +291,13 @@ export class Storage {
         .map(t => t.id)
     )
 
-    let tags: Tag[] = Array.isArray(data.tags)
+    const tags: Tag[] = Array.isArray(data.tags)
       ? (data.tags as Tag[]).filter(
           (t): t is Tag => typeof t?.id === 'string' && typeof t?.name === 'string' && tagIds.has(t.id)
         )
       : []
 
-    let projectOrder: string[] = Array.isArray(data.projectOrder)
+    const projectOrder: string[] = Array.isArray(data.projectOrder)
       ? data.projectOrder.filter((id): id is string => typeof id === 'string' && projectIds.has(id))
       : projects.map(p => p.id)
 
@@ -177,7 +342,7 @@ export class Storage {
 
   saveProjects(data: ProjectsData): void {
     const normalized = Storage.normalizeProjectsData(data as unknown as Record<string, unknown>)
-    fs.writeFileSync(this.projectsPath, JSON.stringify(normalized, null, 2))
+    atomicWriteFileSync(this.projectsPath, JSON.stringify(normalized, null, 2))
   }
 
   /**
@@ -195,7 +360,7 @@ export class Storage {
   }
 
   saveWindowSession(data: WindowSessionState): void {
-    fs.writeFileSync(this.windowSessionPath, JSON.stringify(data, null, 2))
+    atomicWriteFileSync(this.windowSessionPath, JSON.stringify(data, null, 2))
   }
 
   static normalizeWindowSessionData(
