@@ -5,7 +5,7 @@ import type { RevisionStore } from '../revision-store'
 import type { PaletteFrecencyStorage } from '../palette-frecency-storage'
 import type { IpcRegistrar } from './registrar'
 import { frecencyFile, notesRecord, projectsData, revisionSave } from './schemas'
-import { sanitizeConfigUpdate } from './config-sanitize'
+import { MAIN_OWNED_CONFIG_KEYS, sanitizeConfigUpdate } from './config-sanitize'
 import { v } from './validate'
 
 export interface AppStateDeps {
@@ -55,6 +55,7 @@ export function registerAppStateHandlers(ipc: IpcRegistrar, deps: AppStateDeps):
     if (droppedKeys.length > 0) deps.log(`saveConfig ignoredKeys=${droppedKeys.join(',')}`)
     // Unsaved, and not merged: the stored value (or the default loadConfig filled in) stays.
     for (const { key, reason } of rejectedKeys) deps.log(`saveConfig rejectedKey=${key} reason=${reason}`)
+    for (const key of MAIN_OWNED_CONFIG_KEYS) delete config[key]
     deps.applyConfig(config)
     return undefined
   })

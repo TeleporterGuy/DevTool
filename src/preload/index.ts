@@ -26,6 +26,7 @@ import type {
 import type { CondaListResult } from '../shared/conda'
 import type { NotebookKernelCondaOverride, NotebookKernelEvent } from '../shared/notebook'
 import type { AgentActivity } from '../shared/agent-activity'
+import type { MobilePairingInvite, MobileState } from '../shared/mobile'
 import type { AiStatusEvent } from '../shared/ai-status'
 import type { ChatEvent, ChatImage, ChatPromptResponse, ChatSideAnswer, ChatSnapshot } from '../shared/claude-chat'
 
@@ -393,6 +394,20 @@ const api = {
     const handler = (_e: Electron.IpcRendererEvent, tabId: string, event: NotebookKernelEvent) => callback(tabId, event)
     ipcRenderer.on('notebook-kernel-event', handler)
     return () => ipcRenderer.removeListener('notebook-kernel-event', handler)
+  },
+  // Mobile (Settings → Mobile). Main owns the state; every change is also broadcast.
+  mobileGetState: (): Promise<MobileState> => ipcRenderer.invoke('mobile-get-state'),
+  mobileSetEnabled: (enabled: boolean): Promise<MobileState> => ipcRenderer.invoke('mobile-set-enabled', enabled),
+  mobileSetRelayUrl: (url: string): Promise<MobileState> => ipcRenderer.invoke('mobile-set-relay-url', url),
+  mobileStartPairing: (): Promise<MobilePairingInvite> => ipcRenderer.invoke('mobile-start-pairing'),
+  mobileCancelPairing: (): Promise<MobileState> => ipcRenderer.invoke('mobile-cancel-pairing'),
+  mobileAccept: (phoneId: string): Promise<MobileState> => ipcRenderer.invoke('mobile-accept', phoneId),
+  mobileReject: (phoneId: string): Promise<MobileState> => ipcRenderer.invoke('mobile-reject', phoneId),
+  mobileRevoke: (phoneId: string): Promise<MobileState> => ipcRenderer.invoke('mobile-revoke', phoneId),
+  onMobileStateChanged: (callback: (state: MobileState) => void): (() => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, state: MobileState) => callback(state)
+    ipcRenderer.on('mobile-state-changed', handler)
+    return () => ipcRenderer.removeListener('mobile-state-changed', handler)
   }
 }
 

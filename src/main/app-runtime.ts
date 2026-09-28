@@ -1,5 +1,6 @@
-import { BrowserWindow, ipcMain, nativeTheme } from 'electron'
+import { app, BrowserWindow, ipcMain, nativeTheme, safeStorage } from 'electron'
 import fs from 'fs'
+import os from 'os'
 import path from 'path'
 import { execFile } from 'child_process'
 import { promisify } from 'util'
@@ -48,6 +49,14 @@ import { listCondaEnvs, listCondaEnvsForNotebookKernel, resolveProjectCondaEnv }
 import { NotebookKernelManager } from './notebook-kernel'
 import { safeWebContentsSend } from './safe-ipc-send'
 import type { CondaEnvInfo } from '../shared/conda'
+import { registerMobileHandlers } from './ipc/mobile'
+import { MobileService } from './mobile/mobile-service'
+import { PairingsStore } from './mobile/pairings-store'
+import { IdentityStore } from './mobile/identity'
+import { createInvite } from './mobile/invite'
+import { RelayClient } from './mobile/relay-client'
+import { createNoiseChannelFactory } from './mobile/channel'
+import { normalizeMobileConfig } from '../shared/mobile'
 import type {
   AppConfig,
   CleanupActivity,
@@ -122,6 +131,8 @@ export class AppRuntime {
   private sshManager!: SshConnectionManager
   /** Claude chat tabs' processes — the Agent SDK counterpart of `ptySessions`. */
   private chatManager!: ClaudeChatManager
+  /** Phones: relay connection, pairing and the inbox they see. Dormant while Mobile is off. */
+  private mobileService!: MobileService
   private started = false
   private quitting = false
   private socksProxyEnabled = new Map<string, boolean>()
@@ -198,8 +209,49 @@ export class AppRuntime {
       this.broadcastToAllWindows('notebook-kernel-event', tabId, event)
     })
     this.chatManager = this.createChatManager()
+    this.mobileService = this.createMobileService()
     this.registerEventForwarders()
     this.registerIpcHandlers()
+    this.mobileService.start()
+  }
+
+  private createMobileService(): MobileService {
+    const mobileDir = path.join(CONFIG_DIR, 'mobile')
+    const log = (message: string) => this.logDebug(message)
+    // Loaded on first use (Mobile on, or a pairing started), never at startup:
+    // safeStorage can raise a Keychain prompt on macOS.
+    const identity = new IdentityStore(mobileDir, {
+      isAvailable: () => safeStorage.isEncryptionAvailable(),
+      encrypt: (plaintext) => safeStorage.encryptString(plaintext),
+      decrypt: (ciphertext) => safeStorage.decryptString(ciphertext)
+    }, log)
+    const desktopName = () => normalizeMobileConfig(this.config.mobile).desktopName?.trim() || os.hostname().replace(/\.local$/, '')
+    return new MobileService({
+      getConfig: () => normalizeMobileConfig(this.config.mobile),
+      saveConfig: (mobile) => this.applyConfig({ mobile }),
+      projects: {
+        peek: () => this.projectsStore.peek(),
+        subscribe: (listener) => this.projectsStore.subscribe(() => listener())
+      },
+      activity: this.activityRegistry,
+      pairings: new PairingsStore(mobileDir, log),
+      getDesktopId: () => identity.peekId(),
+      defaultDesktopName: () => os.hostname().replace(/\.local$/, ''),
+      createTransport: () => new RelayClient({
+        ed25519: () => identity.get().ed25519,
+        deviceId: () => identity.get().id,
+        log: (message) => this.logDebug(`mobile ${message}`)
+      }),
+      channels: createNoiseChannelFactory({
+        staticKey: () => identity.get().x25519,
+        app: `devtool/${app.getVersion()}`,
+        desktopName,
+        log
+      }),
+      createInvite: (options) => createInvite(identity.get(), options),
+      broadcastState: (state) => this.broadcastToAllWindows('mobile-state-changed', state),
+      log
+    })
   }
 
   registerWindow(window: BrowserWindow, initialViewState?: WindowViewState | null): void {
@@ -404,6 +456,7 @@ export class AppRuntime {
       this.idleCleanupTimer = null
     }
     this.persistWindowSession()
+    this.mobileService?.stop()
     this.ptySessions.saveAllScrollback()
     this.ptySessions.killAll()
     this.notebookKernels.shutdownAll()
@@ -659,6 +712,7 @@ export class AppRuntime {
       shutdown: (tabId) => this.shutdownNotebookKernel(tabId),
       listCondaEnvs: () => listCondaEnvs({}, { force: true })
     })
+    registerMobileHandlers(ipc, { mobile: () => this.mobileService })
   }
 
   /**

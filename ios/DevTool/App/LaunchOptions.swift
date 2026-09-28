@@ -1,0 +1,73 @@
+import Foundation
+
+/// Launch arguments and environment switches.
+///
+/// - `-mockDesktop` (or env `DEVTOOL_MOCK_DESKTOP=1`): preload two mock paired
+///   desktops (one online, one offline) and keep all state in memory, so the
+///   UI can be exercised and screenshotted without a relay.
+/// - `-demoRoute sidebar|task|pair|pairConfirm|pairWait|settings` (Debug builds, with `-mockDesktop`):
+///   open a screen directly, for screenshots.
+/// - `-demoRoute chat [-demoTab <tabId>]` (Debug builds): open a claude-chat tab
+///   (the first one that needs attention when `-demoTab` is absent). Works
+///   against mock and real desktops. With `-demoToolDetail <itemId>` the item's
+///   detail sheet opens too. `-demoChatScript` then sends `-demoMessage <text>`
+///   (default "Hello from the phone") and answers each prompt after
+///   `-demoAnswerDelay <seconds>` (default 6): Allow, the first option(s), Approve.
+/// - `-pairLink <devtool://pair?d=…>` (Debug builds): open that pairing link at
+///   launch, as if tapped; add `-autoConfirmPairing` to also press Pair. Lets
+///   scripts pair the simulator without the system "Open in DevTool?" prompt.
+struct LaunchOptions: Sendable {
+    enum DemoRoute: String, Sendable {
+        case sidebar
+        case task
+        case pair
+        case settings
+        /// Confirm step for a canned invite.
+        case pairConfirm
+        /// Confirm a canned invite and show the waiting step (mock accepts after 2 s).
+        case pairWait
+        /// A claude-chat tab (`-demoTab`).
+        case chat
+    }
+
+    var mockDesktop: Bool
+    var demoRoute: DemoRoute?
+    var pairLink: String?
+    var autoConfirmPairing = false
+    var demoTab: String?
+    var demoToolDetail: String?
+    var demoChatScript = false
+    var demoMessage: String?
+    var demoAnswerDelay: Double?
+
+    static let current = LaunchOptions(processInfo: .processInfo)
+
+    init(processInfo: ProcessInfo) {
+        let args = processInfo.arguments
+        let env = processInfo.environment
+        mockDesktop = args.contains("-mockDesktop") || env["DEVTOOL_MOCK_DESKTOP"] == "1"
+
+        #if DEBUG
+        if let index = args.firstIndex(of: "-demoRoute"), index + 1 < args.count {
+            demoRoute = DemoRoute(rawValue: args[index + 1])
+        } else {
+            demoRoute = env["DEVTOOL_DEMO_ROUTE"].flatMap(DemoRoute.init(rawValue:))
+        }
+        if let index = args.firstIndex(of: "-pairLink"), index + 1 < args.count {
+            pairLink = args[index + 1]
+        }
+        autoConfirmPairing = args.contains("-autoConfirmPairing")
+        func value(_ flag: String) -> String? {
+            guard let index = args.firstIndex(of: flag), index + 1 < args.count else { return nil }
+            return args[index + 1]
+        }
+        demoTab = value("-demoTab")
+        demoToolDetail = value("-demoToolDetail")
+        demoChatScript = args.contains("-demoChatScript")
+        demoMessage = value("-demoMessage")
+        demoAnswerDelay = value("-demoAnswerDelay").flatMap(Double.init)
+        #else
+        demoRoute = nil
+        #endif
+    }
+}

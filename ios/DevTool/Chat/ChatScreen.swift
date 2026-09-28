@@ -1,0 +1,301 @@
+import DevToolKit
+import SwiftUI
+
+/// A claude-chat tab: live transcript, prompt cards and composer (SPEC.md §6).
+struct ChatScreen: View {
+    @Environment(AppModel.self) private var app
+    @State private var model: ChatModel
+    @State private var draft = ""
+    @State private var atBottom = true
+    @State private var detailItem: ChatItem?
+    @FocusState private var composerFocused: Bool
+
+    private static let bottomID = "chat-bottom"
+
+    init(route: ChatRoute, app: AppModel) {
+        _model = State(initialValue: ChatModel(route: route) { [weak app] in
+            app?.connection(for: route.desktopId)
+        })
+    }
+
+    private var route: ChatRoute { model.route }
+    private var offline: Bool { app.isOffline(route.desktopId) }
+    private var found: (task: InboxTask, tab: InboxTab)? { app.tab(desktopId: route.desktopId, tabId: route.tabId) }
+
+    var body: some View {
+        content
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .principal) { titleView }
+            }
+            .sheet(item: $detailItem) { item in
+                ItemDetailSheet(item: item) { try await model.detail(for: item.id) }
+                    .presentationDetents([.medium, .large])
+                    .presentationDragIndicator(.visible)
+            }
+            .task { await model.run() }
+            #if DEBUG
+            .task { await DemoChatScript.run(model: model, openDetail: { detailItem = $0 }) }
+            #endif
+    }
+
+    @ViewBuilder
+    private var content: some View {
+        switch model.phase {
+        case .loading where model.state == nil:
+            ProgressView("Opening chat…")
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        case .waiting where model.state == nil:
+            VStack(spacing: 16) {
+                OfflineBanner(title: "Desktop", lastSeen: app.desktop(route.desktopId)?.lastSeen)
+                ContentUnavailableView("Waiting for the desktop", systemImage: "desktopcomputer",
+                                       description: Text("The chat opens when \(app.desktop(route.desktopId)?.name ?? "the desktop") is back online."))
+            }
+            .padding()
+        case .failed(let message):
+            ContentUnavailableView("Can't open this chat", systemImage: "bubble.left.and.exclamationmark.bubble.right",
+                                   description: Text(message))
+        default:
+            transcript
+        }
+    }
+
+    private var titleView: some View {
+        VStack(spacing: 0) {
+            Text(found?.tab.title.nonEmpty ?? model.view?.title.nonEmpty ?? "Claude")
+                .font(.headline)
+                .lineLimit(1)
+            if let subtitle {
+                Text(subtitle)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+        }
+        .accessibilityElement(children: .combine)
+    }
+
+    private var subtitle: String? {
+        var parts: [String] = []
+        if let task = found?.task.name { parts.append(task) }
+        if let mode = model.view?.status.permissionMode, let label = Self.permissionModeLabel(mode) { parts.append(label) }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
+
+    static func permissionModeLabel(_ mode: String) -> String? {
+        switch mode {
+        case "default": nil
+        case "plan": "Plan mode"
+        case "acceptEdits": "Accept edits"
+        case "bypassPermissions": "Bypass permissions"
+        default: mode
+        }
+    }
+
+    // MARK: Transcript
+
+    private var transcript: some View {
+        ScrollViewReader { proxy in
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 14) {
+                    if model.view?.hasEarlier == true {
+                        loadEarlierButton(proxy)
+                    }
+                    ForEach(model.view?.items ?? []) { item in
+                        ChatItemRow(item: item) { detailItem = $0 }
+                            .id(item.id)
+                    }
+                    if let view = model.view {
+                        processStatus(view.status)
+                    }
+                    Color.clear
+                        .frame(height: 1)
+                        .id(Self.bottomID)
+                        .onAppear { atBottom = true }
+                        .onDisappear { atBottom = false }
+                }
+                .padding(.horizontal, 16)
+                .padding(.top, 12)
+                .padding(.bottom, 8)
+                .frame(maxWidth: 780)
+                .frame(maxWidth: .infinity)
+            }
+            .defaultScrollAnchor(.bottom)
+            .scrollDismissesKeyboard(.interactively)
+            .onChange(of: model.view?.items.last) { _, _ in follow(proxy) }
+            .onChange(of: model.view?.items.count) { _, _ in follow(proxy) }
+            .onChange(of: model.view?.busy) { _, _ in follow(proxy) }
+            .onChange(of: model.view?.prompts.first?.id) { _, _ in follow(proxy) }
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                bottomBar(proxy)
+            }
+            .overlay(alignment: .bottomTrailing) {
+                if !atBottom {
+                    Button {
+                        withAnimation { proxy.scrollTo(Self.bottomID, anchor: .bottom) }
+                    } label: {
+                        Image(systemName: "arrow.down")
+                            .font(.footnote.weight(.bold))
+                            .frame(width: 34, height: 34)
+                            .background(.regularMaterial, in: Circle())
+                            .shadow(color: .black.opacity(0.12), radius: 4, y: 1)
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.trailing, 16)
+                    .padding(.bottom, 8)
+                    .accessibilityLabel("Scroll to latest")
+                    .transition(.opacity)
+                }
+            }
+        }
+    }
+
+    /// Keeps the newest content in view while the user is at the bottom.
+    private func follow(_ proxy: ScrollViewProxy) {
+        guard atBottom else { return }
+        withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo(Self.bottomID, anchor: .bottom) }
+    }
+
+    private func loadEarlierButton(_ proxy: ScrollViewProxy) -> some View {
+        Button {
+            let anchor = model.view?.items.first?.id
+            Task {
+                await model.loadEarlier()
+                // Stay on the message that was at the top.
+                if let anchor { proxy.scrollTo(anchor, anchor: .top) }
+            }
+        } label: {
+            HStack(spacing: 6) {
+                if model.loadingEarlier {
+                    ProgressView().controlSize(.small)
+                } else {
+                    Image(systemName: "arrow.up.circle")
+                }
+                Text("Load earlier messages")
+            }
+            .font(.footnote.weight(.medium))
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 6)
+        }
+        .buttonStyle(.borderless)
+        .disabled(model.loadingEarlier || offline)
+    }
+
+    @ViewBuilder
+    private func processStatus(_ status: ChatStatus) -> some View {
+        if status.busy {
+            WorkingRow(since: status.turnStartedAt.map { Date(unixMilliseconds: $0) })
+        } else if status.process == .starting {
+            NoticeRow(text: "Starting Claude…", tone: .muted, symbol: "hourglass")
+        } else if status.process == .exited {
+            NoticeRow(text: status.processError.map { "Claude stopped: \($0). Sending a message restarts it." }
+                      ?? "Claude isn't running. Sending a message starts it.",
+                      tone: status.processError == nil ? .muted : .error)
+        }
+    }
+
+    // MARK: Bottom bar
+
+    private func bottomBar(_ proxy: ScrollViewProxy) -> some View {
+        VStack(spacing: 8) {
+            if let toast = model.toast {
+                Text(toast)
+                    .font(.footnote.weight(.medium))
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .background(.thinMaterial, in: Capsule())
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+            if let prompts = model.view?.prompts, let prompt = prompts.first {
+                PromptCard(
+                    prompt: prompt,
+                    moreCount: prompts.count - 1,
+                    answering: model.answering.contains(prompt.id),
+                    error: model.answerErrors[prompt.id],
+                    enabled: !offline
+                ) { answer in
+                    Task { await model.answer(prompt, answer) }
+                }
+                .id(prompt.id)
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+            if offline {
+                OfflineBanner(title: "Desktop", lastSeen: lastSeen)
+            }
+            composer
+        }
+        .padding(.horizontal, 12)
+        .padding(.top, 8)
+        .padding(.bottom, 8)
+        .frame(maxWidth: 780)
+        .frame(maxWidth: .infinity)
+        .background(.bar)
+        .animation(.snappy, value: model.view?.prompts.first?.id)
+        .animation(.snappy, value: model.toast)
+    }
+
+    private var lastSeen: Date? {
+        if case .offline(let seen?) = app.state(of: route.desktopId) { return seen }
+        return app.desktop(route.desktopId)?.lastSeen
+    }
+
+    private var canSend: Bool {
+        !offline && !model.sending && !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && draft.count <= ChatOp.maxSendLength
+    }
+
+    private var composer: some View {
+        HStack(alignment: .bottom, spacing: 8) {
+            TextField(offline ? "Desktop offline" : (model.busy ? "Queue a message" : "Message Claude"),
+                      text: $draft, axis: .vertical)
+                .lineLimit(1...6)
+                .focused($composerFocused)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 9)
+                .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+                .disabled(offline)
+            if model.busy && draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                Button {
+                    Task { await model.interrupt() }
+                } label: {
+                    Image(systemName: "stop.circle.fill")
+                        .font(.system(size: 32))
+                        .symbolRenderingMode(.hierarchical)
+                        .foregroundStyle(offline ? Color.secondary : Color.red)
+                }
+                .disabled(offline || model.interrupting)
+                .accessibilityLabel("Stop")
+            } else {
+                Button(action: send) {
+                    Group {
+                        if model.sending {
+                            ProgressView().frame(width: 32, height: 32)
+                        } else {
+                            Image(systemName: "arrow.up.circle.fill")
+                                .font(.system(size: 32))
+                                .foregroundStyle(canSend ? Color.accentColor : Color.secondary.opacity(0.5))
+                        }
+                    }
+                }
+                .disabled(!canSend)
+                .accessibilityLabel("Send")
+            }
+        }
+    }
+
+    private func send() {
+        guard canSend else { return }
+        let text = draft
+        draft = ""
+        atBottom = true
+        Task {
+            if await !model.send(text), draft.isEmpty {
+                draft = text // Give the text back so it isn't lost.
+            }
+        }
+    }
+}
+
+extension String {
+    var nonEmpty: String? { isEmpty ? nil : self }
+}

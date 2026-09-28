@@ -1,0 +1,48 @@
+{
+  "description": "HKDF-SHA256 (empty salt, 32 bytes) derivations, device IDs, and raw key derivations. Hex unless named *B64u.",
+  "secrets": [
+    {
+      "secret": "de51081bfb4d5ca04784f72af31c7011d553b832b301eb86fa6ff43ff339dc08",
+      "relayToken": "ff4d540c52488603ddced2bc9475f0dcbb0c3cdee2dfee66e619a0e855f24bf3",
+      "pairProof": "21b193030ee433504f49f7269f279aadc001d92acc24c20658651e03f6768015",
+      "tokenHash": "e5e8a55386cd0fe56f5f23bb939960420053ad6af19ef44ad191314b8581ab2c",
+      "tokenHashB64u": "5eilU4bND-VvXyO7k5lgQgBTrWrxnvRK0ZExS4WBqyw"
+    },
+    {
+      "secret": "8743bb6801592d006de1d1b789303cdbd5086aa304da9ab05e0f64ff3904f6eb",
+      "relayToken": "8ed6825ccc6e3848bead004fa2900f0e9a629a9118ff512cdf746b43959098de",
+      "pairProof": "e4dce309c6cf04d74003e272e6ad5831452a6ac1909021d1b46acf5d7c975082",
+      "tokenHash": "3bf15efbf91bff9544f5ed64fc691d3e21a39ae40f543b692b66ec2847e20f9b",
+      "tokenHashB64u": "O_Fe-_kb_5VE9e1k_GkdPiGjmuQPVDtpK2bsKEfiD5s"
+    }
+  ],
+  "deviceIds": [
+    {
+      "seed": "7024281cf08108c9d6ed75d25ccfa343ef1ac7f780a1a38ddef010f4ef2fcc0a",
+      "pub": "7f1a8e8eabd19c4a13626bfe85c40f3afc57c445cdba07550c93ddc1abc5b849",
+      "deviceId": "adeae4935ee0d96b94e6b3cc82e0f7c0"
+    },
+    {
+      "seed": "a61011ae9070e7156081b0587d50e8cfdbe38ced6850732123e9ad673f0f9eef",
+      "pub": "49b5e688693e7819fa7a952d1a8659e373ed3214885fa186b3ce20fb6c288284",
+      "deviceId": "20671253fbf6054273bb719d3a34999b"
+    }
+  ],
+  "x25519": [
+    {
+      "priv": "d8e612de1324b3af941bc2cc857516cc22fc306bedecf180cd09fe1c2dee9ab2",
+      "pub": "81531d406a8052b2c96f6efde6d66125e5fbd9fdf931fbf2aec2a3d778f04f3a"
+    },
+    {
+      "priv": "0abe1321a5e50e2750918b856692f61385472092c7873b1e866f5d7f34590077",
+      "pub": "59193c102d76cadd0fb52a2dfbfca1c41f61e1c46e74516c4923e0368d162928"
+    }
+  ],
+  "x25519Dh": [
+    {
+      "priv": "d8e612de1324b3af941bc2cc857516cc22fc306bedecf180cd09fe1c2dee9ab2",
+      "pub": "59193c102d76cadd0fb52a2dfbfca1c41f61e1c46e74516c4923e0368d162928",
+      "shared": "c248d83ba747e5fe1778e0991e5cfa9bc10e4d83a5d301d60e979ca3a6a43662"
+    }
+  ]
+}

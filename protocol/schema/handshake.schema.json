@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://devtool.awantech.sk/schema/mobile/v1/handshake.schema.json",
+  "title": "Noise handshake payloads",
+  "description": "UTF-8 JSON payloads of Noise message 1 (phoneHello) and message 2 (desktopHello), SPEC.md §4.3. Unknown fields are ignored.",
+  "oneOf": [{ "$ref": "#/$defs/phoneHello" }, { "$ref": "#/$defs/desktopHello" }],
+  "$defs": {
+    "version": { "type": "integer", "minimum": 1 },
+    "b64u32": { "type": "string", "pattern": "^[A-Za-z0-9_-]{43}$", "description": "32 bytes, base64url without padding" },
+    "phoneHello": {
+      "type": "object",
+      "required": ["v", "min", "app", "features", "kind", "deviceName", "ed"],
+      "properties": {
+        "v": { "$ref": "#/$defs/version" },
+        "min": { "$ref": "#/$defs/version" },
+        "app": { "type": "string", "description": "e.g. ios/0.1.0" },
+        "features": { "type": "array", "items": { "type": "string" } },
+        "kind": { "enum": ["pair", "resume"] },
+        "proof": { "$ref": "#/$defs/b64u32", "description": "pairProof; required when kind is pair" },
+        "deviceName": { "type": "string" },
+        "ed": { "$ref": "#/$defs/b64u32", "description": "phone Ed25519 public key" }
+      },
+      "if": { "properties": { "kind": { "const": "pair" } } },
+      "then": { "required": ["proof"] }
+    },
+    "desktopHello": {
+      "type": "object",
+      "required": ["v", "min", "app", "features", "desktopName", "result"],
+      "properties": {
+        "v": { "$ref": "#/$defs/version" },
+        "min": { "$ref": "#/$defs/version" },
+        "app": { "type": "string", "description": "e.g. devtool/0.3.2" },
+        "features": { "type": "array", "items": { "type": "string" } },
+        "desktopName": { "type": "string" },
+        "result": { "enum": ["ok", "pending", "rejected", "incompatible", "unknown-device"] }
+      }
+    }
+  }
+}

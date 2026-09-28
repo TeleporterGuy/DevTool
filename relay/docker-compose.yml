@@ -1,0 +1,18 @@
+# Local development: `docker compose -f relay/docker-compose.yml up --build`
+# (or `cd relay && docker compose up --build`). The build context is the repo root.
+services:
+  relay:
+    build:
+      context: ..
+      dockerfile: relay/Dockerfile
+    image: devtool-relay
+    ports:
+      - "8787:8787"
+    environment:
+      LOG_LEVEL: debug
+    volumes:
+      - relay-data:/data
+    restart: unless-stopped
+
+volumes:
+  relay-data:

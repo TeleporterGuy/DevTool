@@ -21,8 +21,29 @@ export class TabActivityRegistry {
   private readonly since = new Map<string, number>()
   /** The "what is it doing" side (shared/agent-activity.ts), fed by every Claude hook body. */
   private readonly activities = new Map<string, AgentActivity>()
+  private readonly listeners = new Set<(tabId: string) => void>()
 
   constructor(private readonly now: () => number = () => Date.now()) {}
+
+  /**
+   * Called after anything about `tabId` changed (status, since or activity). For
+   * main-side consumers that are not windows (the mobile inbox); the windows keep
+   * getting their own broadcasts from AppRuntime.
+   */
+  subscribe(listener: (tabId: string) => void): () => void {
+    this.listeners.add(listener)
+    return () => { this.listeners.delete(listener) }
+  }
+
+  private changed(tabId: string): void {
+    for (const listener of this.listeners) {
+      try {
+        listener(tabId)
+      } catch {
+        // A consumer's failure must not break hook handling.
+      }
+    }
+  }
 
   /** Claude's UserPromptSubmit / pi's agent_start. */
   working(tabId: string): void {
@@ -62,6 +83,7 @@ export class TabActivityRegistry {
     const update = reduceAgentActivity(prev, body, this.now())
     if (!update.changed) return null
     this.activities.set(tabId, update.activity)
+    this.changed(tabId)
     return update
   }
 
@@ -78,12 +100,13 @@ export class TabActivityRegistry {
     if (this.statuses.has(tabId)) return
     this.statuses.set(tabId, null)
     this.since.set(tabId, this.now())
+    this.changed(tabId)
   }
 
   /** The PTY exited. Terminal until the tab respawns — and not a protective status. */
   exited(tabId: string): void {
     this.apply(tabId, (current) => nextAiStatus(current, 'exit', this.context()))
-    this.endTurn(tabId)
+    if (this.endTurn(tabId)) this.changed(tabId)
   }
 
   /** A fresh process for the same tab id — the old status describes a dead one. */
@@ -91,15 +114,16 @@ export class TabActivityRegistry {
     this.statuses.set(tabId, null)
     this.since.set(tabId, this.now())
     this.endTurn(tabId)
+    this.changed(tabId)
   }
 
   /**
    * Keep what the conversation was about (a resume continues it); drop anything
    * that described the dead process's in-flight turn.
    */
-  private endTurn(tabId: string): void {
+  private endTurn(tabId: string): boolean {
     const activity = this.activities.get(tabId)
-    if (!activity) return
+    if (!activity) return false
     this.activities.set(tabId, {
       ...activity,
       tool: undefined,
@@ -109,13 +133,16 @@ export class TabActivityRegistry {
       turnStartedAt: undefined,
       updatedAt: this.now()
     })
+    return true
   }
 
   /** The tab is gone (removed, or its task deleted). */
   remove(tabId: string): void {
+    const known = this.statuses.has(tabId) || this.activities.has(tabId)
     this.statuses.delete(tabId)
     this.since.delete(tabId)
     this.activities.delete(tabId)
+    if (known) this.changed(tabId)
   }
 
   getStatus(tabId: string): TabStatusValue {
@@ -124,6 +151,11 @@ export class TabActivityRegistry {
 
   getSnapshot(): Record<string, TabStatusValue> {
     return Object.fromEntries(this.statuses)
+  }
+
+  /** When the tab's current status began (epoch ms), or null when main has never heard of it. */
+  getSince(tabId: string): number | null {
+    return this.since.get(tabId) ?? null
   }
 
   getSinceSnapshot(): Record<string, number> {
@@ -146,5 +178,6 @@ export class TabActivityRegistry {
     if (this.statuses.has(tabId) && current === decision) return
     this.statuses.set(tabId, decision)
     this.since.set(tabId, this.now())
+    this.changed(tabId)
   }
 }

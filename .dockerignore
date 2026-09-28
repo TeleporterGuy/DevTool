@@ -1,0 +1,18 @@
+# Build context is the repo root (docker build -f relay/Dockerfile .). Only relay/ and
+# protocol/ are copied; keep everything else out of the context so builds stay fast.
+**/node_modules
+.git
+.worktrees
+.claude
+.superpowers
+ios
+out
+dist
+docs
+src
+tests
+resources
+build
+relay/data
+relay/test
+protocol/vectors

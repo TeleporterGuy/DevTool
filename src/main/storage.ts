@@ -20,6 +20,7 @@ import {
   type WindowSessionState,
   type WindowViewState
 } from '../shared/types'
+import { normalizeMobileConfig } from '../shared/mobile'
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null
@@ -36,11 +37,12 @@ const EMPTY_PROJECTS: () => ProjectsData = () => ({ projects: [], tags: [], proj
  * never a truncated mix: write a sibling temp file, fsync it, rename over the target.
  * Same directory so the rename stays on one filesystem (and is atomic on POSIX).
  */
-export function atomicWriteFileSync(target: string, data: string): void {
+export function atomicWriteFileSync(target: string, data: string, mode?: number): void {
   const tmp = `${target}.tmp-${process.pid}-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`
   let fd: number | null = null
   try {
-    fd = fs.openSync(tmp, 'w')
+    // `mode` applies from creation, so a secret is never briefly world-readable.
+    fd = fs.openSync(tmp, 'w', mode)
     fs.writeSync(fd, data)
     fs.fsyncSync(fd)
     fs.closeSync(fd)
@@ -219,6 +221,7 @@ export class Storage {
         editors: Array.isArray(savedEditors?.editors) ? savedEditors.editors as AppConfig['externalEditors']['editors'] : [],
         defaultId: typeof savedEditors?.defaultId === 'string' ? savedEditors.defaultId : null
       }
+      config.mobile = normalizeMobileConfig(rest.mobile)
       return config
     } catch {
       return { ...DEFAULT_CONFIG }

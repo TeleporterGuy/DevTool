@@ -1,3 +1,5 @@
+import { DEFAULT_MOBILE_CONFIG, type MobileConfig } from './mobile'
+
 export type TabType = 'terminal' | 'browser' | 'claude' | 'claude-chat' | 'codex' | 'pi' | 'diff' | 'editor' | 'notebook' | 'note' | 'home'
 
 export const AI_TAB_TYPES = ['claude', 'codex', 'pi'] as const
@@ -233,6 +235,8 @@ export interface Project {
    * is gone. Clearing the flag promotes it to an ordinary project.
    */
   ephemeral?: true
+  /** Left out of the inbox sent to paired phones — filtered before encryption. */
+  hideFromMobile?: true
 }
 
 export function isRemoteProject(project: Project): boolean {
@@ -437,6 +441,11 @@ export interface AppConfig {
     heightPx: number
   }
   idleTaskCleanup: IdleTaskCleanupConfig
+  /**
+   * Settings → Mobile. Owned by main's `mobile-*` IPC: `save-config` ignores it so a
+   * window's stale copy cannot flip it back.
+   */
+  mobile?: MobileConfig
 }
 
 /** One configured editor used to open the local project folder. */
@@ -661,7 +670,8 @@ export const DEFAULT_CONFIG: AppConfig = {
     settledOnly: true,
     includeCleanWorkspaces: false
   },
-  externalEditors: { editors: [], defaultId: null }
+  externalEditors: { editors: [], defaultId: null },
+  mobile: { ...DEFAULT_MOBILE_CONFIG }
 }
 
 export function createTaskViewState(task: Task): TaskViewState {
