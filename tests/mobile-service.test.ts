@@ -14,7 +14,7 @@ import {
   type RelayServerMessage,
   type VerifiedHello
 } from '../src/main/mobile/mobile-service'
-import type { MobilePairing } from '../src/main/mobile/pairings-store'
+import type { MobilePairing, MobilePushRegistration } from '../src/main/mobile/pairings-store'
 import { b64uEncode, deviceId, type PhoneHello } from '../protocol/ts/index.ts'
 import { DEFAULT_MOBILE_CONFIG, type MobileConfig, type MobileState } from '../src/shared/mobile'
 import { createHomeTask, type ProjectsData, type TabStatusValue } from '../src/shared/types'
@@ -101,6 +101,15 @@ class FakePairings {
   add(p: MobilePairing) { this.items = [...this.items.filter(x => x.id !== p.id), p] }
   remove(id: string) { const n = this.items.length; this.items = this.items.filter(x => x.id !== id); return n !== this.items.length }
   touchLastSeen(id: string, at: number) { this.items = this.items.map(p => p.id === id ? { ...p, lastSeen: at } : p) }
+  setPush(id: string, push: MobilePushRegistration | null) {
+    if (!this.items.some(p => p.id === id)) return false
+    this.items = this.items.map(p => {
+      if (p.id !== id) return p
+      const { push: _old, ...rest } = p
+      return push ? { ...rest, push } : rest
+    })
+    return true
+  }
   revokes: string[] = []
   pendingRevokes() { return [...this.revokes] }
   setPendingRevoke(id: string, pending: boolean) {
@@ -608,5 +617,67 @@ describe('MobileService inbox events', () => {
     env.setStatus('tab1', 'attention')
     env.timers.advance(0)
     expect(env.channel.inboxEvents().at(-1)?.seq).toBe(1)
+  })
+})
+
+describe('MobileService push (SPEC.md §7)', () => {
+  const REG = { cap: 'cap-1', key: b64u(new Uint8Array(32).fill(5)), keyId: b64u(new Uint8Array(8).fill(6)), kinds: ['permission', 'done'] }
+
+  function registered() {
+    const env = pairedSetup()
+    env.channel.hooks.onAppMessage({ t: 'req', id: 1, op: 'push.register', params: { ...REG, kinds: [...REG.kinds, 'later'] } })
+    return env
+  }
+
+  it('stores and clears a registration with push.register / push.unregister', () => {
+    const env = registered()
+    expect(env.channel.sent.at(-1)).toEqual({ t: 'res', id: 1, ok: true, result: {} })
+    expect(env.pairings.get(env.keys.id)?.push).toEqual(REG)
+    expect(env.service.pushTargets()).toEqual([{ phoneId: env.keys.id, push: REG }])
+    env.channel.hooks.onAppMessage({ t: 'req', id: 2, op: 'push.unregister' })
+    expect(env.channel.sent.at(-1)).toEqual({ t: 'res', id: 2, ok: true, result: {} })
+    expect(env.pairings.get(env.keys.id)?.push).toBeUndefined()
+    expect(env.service.pushTargets()).toEqual([])
+  })
+
+  it('answers bad-request for malformed params', () => {
+    const env = pairedSetup()
+    env.channel.hooks.onAppMessage({ t: 'req', id: 3, op: 'push.register', params: { ...REG, key: 'short' } })
+    expect(env.channel.sent.at(-1)).toMatchObject({ t: 'res', id: 3, ok: false, error: { code: 'bad-request' } })
+    expect(env.pairings.get(env.keys.id)?.push).toBeUndefined()
+  })
+
+  it('sends push over the relay and resolves with the relay result', async () => {
+    const env = registered()
+    const outcome = env.service.sendPush(env.keys.id, 'DATA')
+    const sent = env.transport().sent.at(-1)
+    expect(sent).toEqual({ t: 'push', id: 0, cap: 'cap-1', data: 'DATA' })
+    env.transport().deliver({ t: 'pushed', id: 0, result: 'ok' })
+    await expect(outcome).resolves.toBe('ok')
+    expect(env.pairings.get(env.keys.id)?.push).toEqual(REG)
+  })
+
+  it('drops the registration on gone', async () => {
+    const env = registered()
+    const outcome = env.service.sendPush(env.keys.id, 'DATA')
+    env.transport().deliver({ t: 'pushed', id: 0, result: 'gone' })
+    await expect(outcome).resolves.toBe('gone')
+    expect(env.pairings.get(env.keys.id)?.push).toBeUndefined()
+  })
+
+  it('is not-sent without a registration or a socket, and error when the socket drops or the relay is silent', async () => {
+    const env = registered()
+    await expect(env.service.sendPush('f'.repeat(32), 'DATA')).resolves.toBe('not-sent')
+    const dropped = env.service.sendPush(env.keys.id, 'DATA')
+    env.transport().setState({ kind: 'offline' })
+    await expect(dropped).resolves.toBe('error')
+    await expect(env.service.sendPush(env.keys.id, 'DATA')).resolves.toBe('not-sent')
+    env.transport().setState({ kind: 'online' })
+    const silent = env.service.sendPush(env.keys.id, 'DATA')
+    env.timers.advance(20_000)
+    await expect(silent).resolves.toBe('error')
+    // A late answer for a settled push is ignored.
+    env.transport().deliver({ t: 'pushed', id: 1, result: 'gone' })
+    expect(env.pairings.get(env.keys.id)?.push).toEqual(REG)
   })
 })

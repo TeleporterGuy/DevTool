@@ -14,6 +14,13 @@ final class AppModel {
 
     /// Non-nil while the pairing sheet is up.
     var pairing: PairingPhase?
+    /// The chat on screen, if any (set by `ChatScreen`). Its pushes don't show as banners.
+    var visibleChat: ChatRoute?
+    /// A chat to navigate to (a tapped notification). `RootView` opens it and clears it.
+    var requestedChat: ChatRoute?
+
+    /// Push registration (SPEC.md §7.4); told about every established session.
+    @ObservationIgnored weak var push: PushManager?
 
     @ObservationIgnored private let factory: any DesktopConnectionFactory
     @ObservationIgnored private let store: any AppPersistence
@@ -97,6 +104,7 @@ final class AppModel {
     }
 
     func forget(_ desktopId: String) {
+        push?.forget(desktopId)
         if let connection = connections.removeValue(forKey: desktopId) {
             Task { await connection.stop() }
         }
@@ -125,7 +133,11 @@ final class AppModel {
         case .state(let state):
             states[desktopId] = state
             if case .offline(let lastSeen?) = state { updateLastSeen(lastSeen, for: desktopId) }
-            if state == .online { updateLastSeen(Date(), for: desktopId) }
+            if state == .online {
+                updateLastSeen(Date(), for: desktopId)
+                // Each `.online` is a fresh handshake that ended `ok` (§7.4).
+                push?.sessionEstablished(desktopId)
+            }
         case .inbox(let inbox):
             inboxes[desktopId] = inbox
             store.saveInbox(inbox, for: desktopId)
@@ -149,6 +161,44 @@ final class AppModel {
         if let old = desktops[index].lastSeen, abs(old.timeIntervalSince(date)) < 60 { return }
         desktops[index].lastSeen = date
         store.saveDesktops(desktops)
+    }
+
+    // MARK: - Notification actions
+
+    /// Answers a permission prompt from a notification action (§7.7): connects
+    /// to the desktop if needed, waits for a session and sends `chat.answer`.
+    /// `gone` (already answered) counts as done. Gives up at `deadline`.
+    func answerFromNotification(desktopId: String, tabId: String, promptId: String, allow: Bool, deadline: ContinuousClock.Instant) async -> Bool {
+        guard desktop(desktopId) != nil else { return false }
+        connectAll()
+        let answer: ChatAnswer = allow ? .allow(always: false) : .deny(message: nil)
+        let clock = ContinuousClock()
+        while clock.now < deadline {
+            if let connection = connections[desktopId], state(of: desktopId) == .online {
+                let remaining = deadline - clock.now
+                do {
+                    try await connection.answerChat(tabId: tabId, promptId: promptId, answer: answer, timeout: min(remaining, .seconds(15)))
+                    return true
+                } catch let error as DesktopConnectionError {
+                    switch error {
+                    case .remote(AppErrorCode.gone, _):
+                        return true
+                    case .notConnected, .desktopOffline, .connectionLost:
+                        break // wait for the next session
+                    default:
+                        return false
+                    }
+                } catch {
+                    return false
+                }
+            }
+            switch state(of: desktopId) {
+            case .revoked, .unknownDevice, .incompatible: return false
+            default: break
+            }
+            try? await Task.sleep(for: .milliseconds(250))
+        }
+        return false
     }
 
     // MARK: - Pairing

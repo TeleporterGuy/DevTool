@@ -6,6 +6,7 @@ import type { StatementSync } from 'node:sqlite'
 /**
  * The relay's only durable state (§3.6): which phone is authorized for which desktop,
  * with both Ed25519 public keys. Offers, pending phones and lastSeen live in memory.
+ * A push gateway (§7.1) also keeps one generation counter per registered device.
  */
 
 export interface Pair {
@@ -30,8 +31,22 @@ export interface RelayStore {
   close(): void
 }
 
-export class MemoryStore implements RelayStore {
+/** §7.1 `push_devices`: the current push generation of each device. No tokens. */
+export interface PushStore {
+  /** The device's current generation, 0 if it never registered. */
+  pushGeneration(deviceId: string): number
+  /** A new registration: bumps the generation (first one is 1) and returns it. */
+  bumpPushGeneration(deviceId: string, now: number): number
+  /**
+   * Retires `generation` if it is still the current one (APNs said the token is dead),
+   * so a registration that raced ahead of it isn't invalidated. Returns whether it did.
+   */
+  retirePushGeneration(deviceId: string, generation: number, now: number): boolean
+}
+
+export class MemoryStore implements RelayStore, PushStore {
   readonly #pairs = new Map<string, Pair>()
+  readonly #push = new Map<string, number>()
 
   #key(desktopId: string, phoneId: string): string {
     return `${desktopId}:${phoneId}`
@@ -58,6 +73,22 @@ export class MemoryStore implements RelayStore {
     return [...this.#pairs.values()].filter((p) => p.desktopId === desktopId).map((p) => p.phoneId)
   }
 
+  pushGeneration(deviceId: string): number {
+    return this.#push.get(deviceId) ?? 0
+  }
+
+  bumpPushGeneration(deviceId: string): number {
+    const generation = this.pushGeneration(deviceId) + 1
+    this.#push.set(deviceId, generation)
+    return generation
+  }
+
+  retirePushGeneration(deviceId: string, generation: number): boolean {
+    if (this.#push.get(deviceId) !== generation) return false
+    this.#push.set(deviceId, generation + 1)
+    return true
+  }
+
   close(): void {}
 }
 
@@ -80,13 +111,16 @@ function rowToPair(row: PairRow): Pair {
 }
 
 /** `node:sqlite` at the given path (normally `$RELAY_DATA/relay.db`). */
-export class SqliteStore implements RelayStore {
+export class SqliteStore implements RelayStore, PushStore {
   readonly #db: DatabaseSync
   readonly #get: StatementSync
   readonly #put: StatementSync
   readonly #delete: StatementSync
   readonly #byPhone: StatementSync
   readonly #byDesktop: StatementSync
+  readonly #pushGet: StatementSync
+  readonly #pushBump: StatementSync
+  readonly #pushRetire: StatementSync
 
   constructor(path: string) {
     if (path !== ':memory:') mkdirSync(dirname(path), { recursive: true })
@@ -104,6 +138,11 @@ export class SqliteStore implements RelayStore {
         PRIMARY KEY (desktop_id, phone_id)
       );
       CREATE INDEX IF NOT EXISTS pairs_by_phone ON pairs (phone_id);
+      CREATE TABLE IF NOT EXISTS push_devices (
+        device_id  TEXT    PRIMARY KEY,
+        generation INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
     `)
     this.#get = this.#db.prepare('SELECT * FROM pairs WHERE desktop_id = ? AND phone_id = ?')
     this.#put = this.#db.prepare(
@@ -112,6 +151,15 @@ export class SqliteStore implements RelayStore {
     this.#delete = this.#db.prepare('DELETE FROM pairs WHERE desktop_id = ? AND phone_id = ?')
     this.#byPhone = this.#db.prepare('SELECT desktop_id FROM pairs WHERE phone_id = ?')
     this.#byDesktop = this.#db.prepare('SELECT phone_id FROM pairs WHERE desktop_id = ?')
+    this.#pushGet = this.#db.prepare('SELECT generation FROM push_devices WHERE device_id = ?')
+    this.#pushBump = this.#db.prepare(
+      `INSERT INTO push_devices (device_id, generation, updated_at) VALUES (?, 1, ?)
+       ON CONFLICT (device_id) DO UPDATE SET generation = generation + 1, updated_at = excluded.updated_at
+       RETURNING generation`
+    )
+    this.#pushRetire = this.#db.prepare(
+      'UPDATE push_devices SET generation = generation + 1, updated_at = ? WHERE device_id = ? AND generation = ?'
+    )
   }
 
   getPair(desktopId: string, phoneId: string): Pair | null {
@@ -133,6 +181,19 @@ export class SqliteStore implements RelayStore {
 
   phonesForDesktop(desktopId: string): string[] {
     return (this.#byDesktop.all(desktopId) as Array<{ phone_id: string }>).map((r) => r.phone_id)
+  }
+
+  pushGeneration(deviceId: string): number {
+    const row = this.#pushGet.get(deviceId) as { generation: number } | undefined
+    return row ? Number(row.generation) : 0
+  }
+
+  bumpPushGeneration(deviceId: string, now: number): number {
+    return Number((this.#pushBump.get(deviceId, now) as { generation: number }).generation)
+  }
+
+  retirePushGeneration(deviceId: string, generation: number, now: number): boolean {
+    return Number(this.#pushRetire.run(now, deviceId, generation).changes) > 0
   }
 
   close(): void {

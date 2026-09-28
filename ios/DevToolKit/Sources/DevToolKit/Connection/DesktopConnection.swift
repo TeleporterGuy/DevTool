@@ -185,10 +185,10 @@ extension DesktopConnection {
     }
 
     /// `chat.answer`. An already-answered prompt throws `.remote(code: "gone")`.
-    public func answerChat(tabId: String, promptId: String, answer: ChatAnswer) async throws {
+    public func answerChat(tabId: String, promptId: String, answer: ChatAnswer, timeout: Duration? = nil) async throws {
         _ = try await request(ChatOp.answer, params: .object([
             "tabId": .string(tabId), "promptId": .string(promptId), "answer": answer.json,
-        ]))
+        ]), timeout: timeout ?? Self.defaultRequestTimeout)
     }
 
     public func interruptChat(tabId: String) async throws {

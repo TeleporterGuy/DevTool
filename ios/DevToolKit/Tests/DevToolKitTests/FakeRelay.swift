@@ -78,6 +78,8 @@ actor FakeRelay: WebSocketConnector {
         var silentOps: Set<String> = []
         /// Every req the desktop got, in order.
         var requests: [(op: String, params: JSONValue?)] = []
+        /// The last `push.register` (nil after `push.unregister`).
+        var pushRegistration: PushRegisterParams?
 
         var id: String { identity.deviceId }
 
@@ -131,6 +133,18 @@ actor FakeRelay: WebSocketConnector {
                 }
                 if silentOps.contains(op) { return [] }
                 if op == AppOp.inboxGet { return app(.resOk(id: id, result: inbox.json), to: from) }
+                if PushOp.all.contains(op) {
+                    if op == PushOp.register {
+                        do {
+                            pushRegistration = try PushRegisterParams.parse(params)
+                        } catch {
+                            return app(.resError(id: id, code: AppErrorCode.badRequest, message: error.message), to: from)
+                        }
+                    } else {
+                        pushRegistration = nil
+                    }
+                    return app(.resOk(id: id, result: .object([:])), to: from)
+                }
                 if let replies = chat.handle(id: id, op: op, params: params) {
                     return replies.flatMap { app($0, to: from) }
                 }

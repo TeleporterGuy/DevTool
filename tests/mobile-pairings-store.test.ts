@@ -63,6 +63,22 @@ describe('PairingsStore', () => {
     expect(new PairingsStore(dir).get('a')?.lastSeen).toBe(500)
   })
 
+  it('stores, reloads and clears a push registration; drops a malformed one on load', () => {
+    const store = new PairingsStore(dir)
+    store.add(pairing('a'))
+    const push = { cap: 'cap', key: 'AAAA', keyId: 'BBBB', kinds: ['permission' as const, 'done' as const] }
+    expect(store.setPush('a', push)).toBe(true)
+    expect(store.setPush('missing', push)).toBe(false)
+    expect(new PairingsStore(dir).get('a')?.push).toEqual(push)
+    expect(store.setPush('a', null)).toBe(true)
+    expect(new PairingsStore(dir).get('a')).not.toHaveProperty('push')
+
+    fs.writeFileSync(file, JSON.stringify([{ ...pairing('b'), push: { ...push, kinds: ['bogus'] } }]))
+    const reloaded = new PairingsStore(dir).get('b')
+    expect(reloaded).not.toBeNull()
+    expect(reloaded).not.toHaveProperty('push')
+  })
+
   it('hands out copies', () => {
     const store = new PairingsStore(dir)
     store.add(pairing('a'))

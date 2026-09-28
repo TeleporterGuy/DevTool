@@ -102,3 +102,14 @@ Tolerance rules the samples exercise (a newer desktop must not break an older ph
 - Flags (`queued`, `failed`, `streaming`, `agent`, `always`) are either `true` or absent; `false` is dropped. `images: 0` is dropped.
 - A known kind with a missing or wrong-typed required field fails the whole message.
 - Parsed objects put the session fields in the order `busy, turnStartedAt, process, processError, permissionMode, model`, after `tabId`/`title` (view) or `t, e, tabId, seq` (event). Plain JSON equality doesn't care, but a byte comparison would.
+
+## `push.json` (§7)
+
+Hex fields are lowercase hex. Strings that go on the wire (`cap`, `data`, `sig`) are as sent.
+
+| field | meaning |
+|---|---|
+| `register` | `{ phone: {seed, pub, deviceId}, token, env, ts, message, body }`. `message` is the exact string that is signed (JSON-encoded here so the newlines show), `body` the `POST /v1/push/register` JSON the phone sends. RFC 8032 Ed25519 is deterministic, so a deterministic signer (Node) must reproduce `body.sig` byte for byte. CryptoKit randomizes its Ed25519 signatures, so Swift instead checks that `body.sig` verifies against `phone.pub`, and that its own signature does too. |
+| `cap` | `{ sealKey, nonce, payload, cap }`: sealing `payload` (as `{"d","g","t","e"}` JSON in that key order) with `sealKey` and the fixed `nonce` gives exactly `cap`; opening `cap` gives `payload`. |
+| `payload` | `{ key, keyId, nonce, cases[] }`. Each case is `{ name, input, data, opened }`: the desktop seals `input` with `key`, `keyId` and the fixed `nonce` to exactly `data`; the phone opens `data` to `opened`. `opened` shows the cuts: title and body end in "…" at 120 and 400 characters, and the last case's body was shortened further so `data` fits in 3072 characters. |
+| `params[]` | `{ op, params, parsed }`: the desktop's `push.*` params parser. Unknown `kinds` are dropped. |

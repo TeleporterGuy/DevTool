@@ -106,6 +106,8 @@ export interface MobilePairedDevice {
   /** Epoch ms; null before the phone was ever seen after pairing. */
   lastSeen: number | null
   online: boolean
+  /** The phone registered for push notifications (SPEC.md §7.4). */
+  push: boolean
 }
 
 /** A live QR code. `exp` is unix **seconds**, as in the pairing URI. */

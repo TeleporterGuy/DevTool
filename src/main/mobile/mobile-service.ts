@@ -11,7 +11,7 @@ import {
 import type { ProjectsData, TabStatusValue } from '../../shared/types'
 import { buildInbox, inboxContentKey } from './inbox'
 import type { ChatBridge, ChatPhone } from './chat-bridge'
-import type { MobilePairing } from './pairings-store'
+import type { MobilePairing, MobilePushRegistration } from './pairings-store'
 import {
   AppErrorCode,
   AppOp,
@@ -20,6 +20,8 @@ import {
   constantTimeEqual,
   deviceId,
   parseChatParams,
+  parsePushParams,
+  PushOp,
   ProtocolError
 } from '../../../protocol/ts/index.ts'
 import type {
@@ -33,13 +35,16 @@ import type {
   OfferMessage,
   PeerMessage,
   PhoneHello,
-  RevokeMessage
+  PushResultValue,
+  RevokeMessage,
+  PushMessage,
+  PushedMessage
 } from '../../../protocol/ts/index.ts'
 
 /** What the service sends through the relay once authenticated (SPEC.md §3.2, §3.4). */
-export type RelayDesktopMessage = OfferMessage | AuthorizeMessage | RevokeMessage | FrameOutMessage
-/** What the relay client hands the service (§3.4); challenge/ready/ping/pong stay inside it. */
-export type RelayServerMessage = FrameInMessage | PeerMessage | ErrorMessage
+export type RelayDesktopMessage = OfferMessage | AuthorizeMessage | RevokeMessage | FrameOutMessage | PushMessage
+/** What the relay client hands the service (§3.4, §7.2); challenge/ready/ping/pong stay inside it. */
+export type RelayServerMessage = FrameInMessage | PeerMessage | ErrorMessage | PushedMessage
 /** Every app message the desktop sends (§4.4). */
 export type DesktopAppMessage = AppMessage
 
@@ -131,6 +136,7 @@ export interface PairingsStoreLike {
   add(pairing: MobilePairing): void
   remove(id: string): boolean
   touchLastSeen(id: string, at: number): void
+  setPush(id: string, push: MobilePushRegistration | null): boolean
   /** Revocations the relay has not acknowledged yet; kept across restarts. */
   pendingRevokes(): string[]
   setPendingRevoke(id: string, pending: boolean): void
@@ -175,6 +181,12 @@ export interface MobileServiceDeps {
 
 /** Inbox events go out at most this often per phone, trailing edge included. */
 export const INBOX_THROTTLE_MS = 1000
+
+/** A `push` the relay hasn't answered by now counts as `error` (it forwards within 10 s, §7.2). */
+export const PUSH_REPLY_TIMEOUT_MS = 20_000
+
+/** What became of a push: the relay's result, or `not-sent` when there was no socket or registration. */
+export type PushOutcome = PushResultValue | 'not-sent'
 
 const defaultTimers: MobileTimers = {
   now: () => Date.now(),
@@ -246,6 +258,8 @@ export class MobileService {
   private lastInboxFlushAt = Number.NEGATIVE_INFINITY
   private lastBroadcastKey: string | null = null
   private started = false
+  private nextPushId = 0
+  private readonly pushReplies = new Map<number, { phoneId: string; resolve: (outcome: PushOutcome) => void; timer: unknown }>()
 
   constructor(private readonly deps: MobileServiceDeps) {
     this.timers = deps.timers ?? defaultTimers
@@ -280,7 +294,7 @@ export class MobileService {
     const config = this.deps.getConfig()
     const pairings = this.deps.pairings.list()
     const devices: MobilePairedDevice[] = pairings
-      .map((p) => ({ id: p.id, name: p.name, pairedAt: p.pairedAt, lastSeen: p.lastSeen, online: this.online.has(p.id) }))
+      .map((p) => ({ id: p.id, name: p.name, pairedAt: p.pairedAt, lastSeen: p.lastSeen, online: this.online.has(p.id), push: !!p.push }))
       .sort((a, b) => a.pairedAt - b.pairedAt)
     return {
       enabled: config.enabled,
@@ -420,6 +434,68 @@ export class MobileService {
     this.emitState()
   }
 
+  // ---- push (SPEC.md §7) ------------------------------------------------------------
+
+  /** Paired phones that registered for pushes, with their registrations. */
+  pushTargets(): { phoneId: string; push: MobilePushRegistration }[] {
+    return this.deps.pairings.list().flatMap((p) => (p.push ? [{ phoneId: p.id, push: p.push }] : []))
+  }
+
+  /**
+   * Hand one sealed payload to the relay for this phone. Nothing is queued: with no
+   * socket (or no registration) it is `not-sent`. A `gone` result drops the
+   * registration, since that cap can never deliver again (§7.2).
+   */
+  sendPush(phoneId: string, data: string): Promise<PushOutcome> {
+    const push = this.deps.pairings.get(phoneId)?.push
+    const transport = this.transport
+    if (!push || !transport || transport.getState().kind !== 'online') return Promise.resolve('not-sent')
+    const id = this.nextPushId++
+    if (!transport.send({ t: 'push', id, cap: push.cap, data })) return Promise.resolve('not-sent')
+    return new Promise<PushOutcome>((resolve) => {
+      const timer = this.timers.setTimeout(() => this.settlePush(id, 'error'), PUSH_REPLY_TIMEOUT_MS)
+      this.pushReplies.set(id, { phoneId, resolve, timer })
+    })
+  }
+
+  private settlePush(id: number, outcome: PushOutcome): void {
+    const reply = this.pushReplies.get(id)
+    if (!reply) return
+    this.pushReplies.delete(id)
+    this.timers.clearTimeout(reply.timer)
+    if (outcome === 'gone') {
+      this.deps.pairings.setPush(reply.phoneId, null)
+      this.emitState()
+      this.log(`push gone phone=${reply.phoneId}; registration dropped`)
+    } else if (outcome !== 'ok') {
+      this.log(`push phone=${reply.phoneId} result=${outcome}`)
+    }
+    reply.resolve(outcome)
+  }
+
+  /** The socket went away: the relay will never answer these. */
+  private failPendingPushes(): void {
+    for (const id of [...this.pushReplies.keys()]) this.settlePush(id, 'error')
+  }
+
+  private handlePushOp(session: Session, id: number, op: string, params: unknown): boolean {
+    let parsed: ReturnType<typeof parsePushParams>
+    try {
+      parsed = parsePushParams(op, params)
+    } catch (err) {
+      if (!(err instanceof ProtocolError)) throw err
+      session.channel.send({ t: 'res', id, ok: false, error: { code: AppErrorCode.BadRequest, message: err.message } })
+      return true
+    }
+    if (!parsed) return false
+    const registration = op === PushOp.Register ? (parsed as MobilePushRegistration) : null
+    this.deps.pairings.setPush(session.phoneId, registration)
+    this.emitState()
+    this.log(`push ${registration ? `register kinds=${registration.kinds.join(',') || 'none'}` : 'unregister'} phone=${session.phoneId}`)
+    session.channel.send({ t: 'res', id, ok: true, result: {} })
+    return true
+  }
+
   // ---- connection ----------------------------------------------------------------
 
   private connect(): void {
@@ -440,6 +516,7 @@ export class MobileService {
     this.transport = null
     this.dropAllSessions()
     this.online.clear()
+    this.failPendingPushes()
     transport?.close()
   }
 
@@ -453,6 +530,7 @@ export class MobileService {
       // Every channel is bound to the socket that carried its handshake (SPEC.md §4.2).
       this.dropAllSessions()
       this.online.clear()
+      this.failPendingPushes()
       // A pending request outlives the socket: the relay keeps the phone pending until
       // the offer's exp (§3.7), and the phone handshakes again when we're back.
     }
@@ -499,6 +577,9 @@ export class MobileService {
           this.phoneGone(message.id, message.lastSeen)
         }
         this.emitState()
+        return
+      case 'pushed':
+        this.settlePush(message.id, message.result)
         return
       case 'error':
         if (message.code === 'offline' && message.to) {
@@ -660,6 +741,7 @@ export class MobileService {
       }
       return
     }
+    if (this.handlePushOp(session, id, message.op, message.params)) return
     if (this.deps.chat) {
       let chatParams: ReturnType<typeof parseChatParams>
       try {

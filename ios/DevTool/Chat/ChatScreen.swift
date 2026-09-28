@@ -36,6 +36,9 @@ struct ChatScreen: View {
                     .presentationDragIndicator(.visible)
             }
             .task { await model.run() }
+            // Pushes for the chat on screen aren't shown as banners.
+            .onAppear { app.visibleChat = route }
+            .onDisappear { if app.visibleChat == route { app.visibleChat = nil } }
             #if DEBUG
             .task { await DemoChatScript.run(model: model, openDetail: { detailItem = $0 }) }
             #endif

@@ -66,6 +66,8 @@ export interface ChatBridgeDeps {
   projects: { peek(): ProjectsData }
   timers: ChatBridgeTimers
   log(message: string): void
+  /** A phone is about to send into a chat: the turn it starts is that phone's (push "done", §7.6). */
+  onPhoneSend?(phoneId: string, tabId: string): void
 }
 
 /**
@@ -152,6 +154,11 @@ export class ChatBridge {
     for (const phoneId of [...this.phones.keys()]) this.dropPhone(phoneId)
   }
 
+  /** The chat this phone has open in its live session, if any. */
+  openTab(phoneId: string): string | null {
+    return this.phones.get(phoneId)?.sub?.tabId ?? null
+  }
+
   /** Projects changed: a tab that was closed or hidden stops streaming. */
   projectsChanged(): void {
     for (const state of this.phones.values()) {
@@ -190,6 +197,7 @@ export class ChatBridge {
       }
       case ChatOp.Send:
         await this.ensureRuntime(resolved)
+        this.deps.onPhoneSend?.(state.phone.id, params.tabId)
         await this.deps.chats.send(params.tabId, (params as ChatSendParams).text)
         return {}
       case ChatOp.Answer: {

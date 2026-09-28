@@ -14,6 +14,8 @@ import { encodeJson, negotiateVersion, parseAppMessage, parseDesktopHello, parse
 import type { DesktopHello, PhoneHello } from './app-messages.ts'
 import { FRAGMENT_CHUNK, Reassembler, fragmentMessage } from './fragments.ts'
 import { parseChatParams, parseChatResult } from './chat-messages.ts'
+import { openPushCap, openPushPayload, parsePushParams, pushRegisterMessage, sealPushCap, sealPushPayload, signPushRegister } from './push.ts'
+import type { PushPayload } from './push.ts'
 
 /**
  * Writes `protocol/vectors/*.json` (§5). Every byte comes from fixed labels, so running
@@ -561,6 +563,66 @@ function chatMessages(): unknown {
 }
 
 /** File name → exact file contents (pretty JSON, trailing newline). */
+/** §7: registration signature, the sealed cap, payload sealing and `push.*` params. */
+function push(): unknown {
+  const phone = ed25519FromPrivate(seed('push-phone-ed25519'))
+  const token = hex(seed('push-apns-token'))
+  const ts = 1790000000
+  const register = signPushRegister(phone.priv, phone.pub, token, 'sandbox', ts)
+
+  const sealKey = seed('push-gateway-seal-key')
+  const capNonce = seed('push-cap-nonce').subarray(0, 12)
+  const capPayload = { d: deviceId(phone.pub), g: 3, t: token, e: 'sandbox' as const }
+  const cap = sealPushCap(sealKey, capPayload, capNonce)
+  if (JSON.stringify(openPushCap(sealKey, cap)) !== JSON.stringify(capPayload)) throw new Error('cap does not round-trip')
+
+  const key = seed('push-payload-key')
+  const keyId = seed('push-payload-key-id').subarray(0, 8)
+  const nonce = seed('push-payload-nonce').subarray(0, 12)
+  const payloads: { name: string; payload: PushPayload }[] = [
+    {
+      name: 'permission',
+      payload: { v: 1, kind: 'permission', desktop: 'd'.repeat(32), tab: 'tab-chat', prompt: 'toolu_01', title: 'api-server / fix-auth', body: 'Bash · npm test', at: 1790000000000 }
+    },
+    {
+      name: 'done without prompt',
+      payload: { v: 1, kind: 'done', desktop: 'd'.repeat(32), tab: 'tab-chat', title: 'api-server / fix-auth', body: 'All 42 tests pass.', at: 1790000000001 }
+    },
+    {
+      name: 'long body is cut',
+      payload: { v: 1, kind: 'question', desktop: 'd'.repeat(32), tab: 'tab-chat', prompt: 'q1', title: 'x'.repeat(200), body: 'é'.repeat(1000), at: 1790000000002 }
+    },
+    {
+      // Control characters escape to six bytes each, so 400 of them overflow 3072.
+      name: 'body shortened to fit',
+      payload: { v: 1, kind: 'plan', desktop: 'd'.repeat(32), tab: 'tab-chat', prompt: 'p1', title: 't', body: '\u0001'.repeat(400), at: 1790000000003 }
+    }
+  ]
+  const sealed = payloads.map(({ name, payload }) => {
+    const data = sealPushPayload(key, keyId, payload, nonce)
+    return { name, input: payload, data, opened: openPushPayload(key, data) }
+  })
+
+  const params = [
+    { op: 'push.register', params: { cap, key: b64uEncode(key), keyId: b64uEncode(keyId), kinds: ['permission', 'done', 'future-kind'] } },
+    { op: 'push.unregister', params: {} }
+  ].map((c) => ({ ...c, parsed: parsePushParams(c.op, c.params) }))
+
+  return {
+    register: {
+      phone: ed25519Json(phone),
+      token,
+      env: 'sandbox',
+      ts,
+      message: text(new TextDecoder().decode(pushRegisterMessage(token, 'sandbox', ts))),
+      body: register
+    },
+    cap: { sealKey: hex(sealKey), nonce: hex(capNonce), payload: capPayload, cap },
+    payload: { key: hex(key), keyId: hex(keyId), nonce: hex(nonce), cases: sealed },
+    params
+  }
+}
+
 export function buildVectors(): Record<string, string> {
   const files: Record<string, unknown> = {
     'noise-ik.json': noiseIk(),
@@ -569,7 +631,8 @@ export function buildVectors(): Record<string, string> {
     'pairing-uri.json': pairingUri(),
     'app-messages.json': appMessages(),
     'fragments.json': fragments(),
-    'chat-messages.json': chatMessages()
+    'chat-messages.json': chatMessages(),
+    'push.json': push()
   }
   return Object.fromEntries(Object.entries(files).map(([name, value]) => [name, JSON.stringify(value, null, 2) + '\n']))
 }

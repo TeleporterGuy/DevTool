@@ -2,18 +2,25 @@ import { createServer } from 'node:http'
 import type { IncomingMessage, Server, ServerResponse } from 'node:http'
 import type { AddressInfo, Socket } from 'node:net'
 import type { Duplex } from 'node:stream'
-import { RELAY_PATH } from '../../protocol/ts/index.ts'
+import { PUSH_REGISTER_PATH, PUSH_SEND_PATH, RELAY_PATH } from '../../protocol/ts/index.ts'
 import { silentLogger } from './log.ts'
 import type { Logger } from './log.ts'
+import { gatewayForwarder, upstreamForwarder } from './push/gateway.ts'
+import type { PushGateway } from './push/gateway.ts'
 import { createRelay } from './relay.ts'
-import type { Clock, Relay, RelayLimits } from './relay.ts'
+import type { Clock, PushForwarder, Relay, RelayLimits } from './relay.ts'
 import type { RelayStore } from './store.ts'
 import { upgradeToWebSocket } from './ws/connection.ts'
 
 /**
  * Binds the relay core to `node:http` and our own RFC 6455 implementation.
- * `GET /healthz` answers 200 "ok"; the WebSocket lives at `/v1`; everything else is 404.
+ * `GET /healthz` answers 200 "ok"; the WebSocket lives at `/v1`; a gateway serves
+ * `POST /v1/push/register` and `POST /v1/push/send` (503 on any other relay); everything
+ * else is 404.
  */
+
+/** Largest JSON body the push endpoints read. */
+export const PUSH_MAX_BODY_BYTES = 16 * 1024
 
 export interface RelayServerOptions {
   store: RelayStore
@@ -25,6 +32,12 @@ export interface RelayServerOptions {
   logger?: Logger
   /** Take the client IP from `X-Forwarded-For` (set only behind a trusted reverse proxy). */
   trustProxy?: boolean
+  /** Makes this relay the push gateway (§7): serves the push API and handles `push` in-process. */
+  gateway?: PushGateway
+  /** Not a gateway: forward `push` to this gateway's base URL. Absent or empty: `unavailable`. */
+  pushUpstream?: string
+  /** Replaces the forwarder derived from `gateway`/`pushUpstream` (tests). */
+  pushForwarder?: PushForwarder
 }
 
 export interface RelayServer {
@@ -59,6 +72,55 @@ function pathOf(req: IncomingMessage): string {
   }
 }
 
+function sendJson(res: ServerResponse, status: number, json: unknown, extra: Record<string, string> = {}): void {
+  const body = JSON.stringify(json)
+  res.writeHead(status, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', 'Content-Length': Buffer.byteLength(body), ...extra })
+  res.end(body)
+}
+
+class BodyTooLarge extends Error {}
+
+/** Reads at most `limit` bytes; rejects with BodyTooLarge beyond that. */
+function readBody(req: IncomingMessage, limit: number): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    const declared = Number(req.headers['content-length'])
+    if (Number.isFinite(declared) && declared > limit) return reject(new BodyTooLarge())
+    const chunks: Buffer[] = []
+    let size = 0
+    req.on('data', (chunk: Buffer) => {
+      size += chunk.length
+      if (size > limit) {
+        req.removeAllListeners('data')
+        req.resume()
+        reject(new BodyTooLarge())
+        return
+      }
+      chunks.push(chunk)
+    })
+    req.on('end', () => resolve(Buffer.concat(chunks)))
+    req.on('error', reject)
+  })
+}
+
+async function handlePush(req: IncomingMessage, res: ServerResponse, path: string, gateway: PushGateway | null, ip: string): Promise<void> {
+  if (!gateway) return sendJson(res, 503, { error: 'unavailable' })
+  if (req.method !== 'POST') return sendJson(res, 405, { error: 'method' }, { Allow: 'POST' })
+  let body: unknown
+  try {
+    body = JSON.parse((await readBody(req, PUSH_MAX_BODY_BYTES)).toString('utf8'))
+  } catch (err) {
+    if (err instanceof BodyTooLarge) return sendJson(res, 413, { error: 'too-large' }, { Connection: 'close' })
+    return sendJson(res, 400, { error: 'bad-request' })
+  }
+  if (path === PUSH_REGISTER_PATH) {
+    const reply = gateway.register(body, ip)
+    return sendJson(res, reply.status, reply.json)
+  }
+  const o = typeof body === 'object' && body !== null && !Array.isArray(body) ? (body as Record<string, unknown>) : {}
+  if (typeof o.cap !== 'string' || typeof o.data !== 'string') return sendJson(res, 200, { result: 'bad-request' })
+  sendJson(res, 200, { result: await gateway.send(o.cap, o.data) })
+}
+
 function rejectUpgrade(socket: Duplex, status: number, text: string): void {
   socket.end(`HTTP/1.1 ${status} ${text}\r\nConnection: close\r\nContent-Type: text/plain\r\nContent-Length: ${text.length}\r\n\r\n${text}`)
 }
@@ -66,7 +128,11 @@ function rejectUpgrade(socket: Duplex, status: number, text: string): void {
 export async function startRelayServer(options: RelayServerOptions): Promise<RelayServer> {
   const log = options.logger ?? silentLogger
   const trustProxy = options.trustProxy ?? false
-  const relay = createRelay({ store: options.store, limits: options.limits, clock: options.clock, logger: log })
+  const gateway = options.gateway ?? null
+  const forwarder =
+    options.pushForwarder ??
+    (gateway ? gatewayForwarder(gateway) : options.pushUpstream ? upstreamForwarder(options.pushUpstream, { logger: log }) : undefined)
+  const relay = createRelay({ store: options.store, limits: options.limits, clock: options.clock, logger: log, push: forwarder })
   const sockets = new Set<Socket>()
 
   const http = createServer((req: IncomingMessage, res: ServerResponse) => {
@@ -74,6 +140,14 @@ export async function startRelayServer(options: RelayServerOptions): Promise<Rel
     if (path === '/healthz' && (req.method === 'GET' || req.method === 'HEAD')) {
       res.writeHead(200, { 'Content-Type': 'text/plain', 'Cache-Control': 'no-store' })
       res.end('ok')
+      return
+    }
+    if (path === PUSH_REGISTER_PATH || path === PUSH_SEND_PATH) {
+      handlePush(req, res, path, gateway, clientIp(req, trustProxy)).catch((err: Error) => {
+        log.error('push-http-failed', { error: err.message })
+        if (!res.headersSent) sendJson(res, 500, { error: 'error' })
+        else res.destroy()
+      })
       return
     }
     if (path === RELAY_PATH) {

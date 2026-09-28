@@ -1,6 +1,19 @@
 import { resolve } from 'node:path'
+import { DEFAULT_PUSH_GATEWAY, b64uDecode } from '../../protocol/ts/index.ts'
 import { parseLogLevel } from './log.ts'
 import type { LogLevel } from './log.ts'
+import { DEFAULT_APNS_TOPIC } from './push/apns.ts'
+
+export type PushSenderConfig =
+  | { mode: 'apns'; keyFile: string; keyId: string; teamId: string; topic: string }
+  | { mode: 'simctl'; device: string; topic: string }
+  | { mode: 'log' }
+
+/** §7: this relay is the gateway, forwards to one, or has push off. */
+export type PushConfig =
+  | { role: 'gateway'; sealKey: Uint8Array; sender: PushSenderConfig }
+  | { role: 'forward'; upstream: string }
+  | { role: 'off' }
 
 export interface RelayConfig {
   port: number
@@ -9,10 +22,74 @@ export interface RelayConfig {
   dataDir: string
   trustProxy: boolean
   logLevel: LogLevel
+  push: PushConfig
 }
 
-/** Reads PORT, HOST, RELAY_DATA, RELAY_TRUST_PROXY and LOG_LEVEL. */
-export function loadConfig(env: Record<string, string | undefined> = process.env): RelayConfig {
+type Env = Record<string, string | undefined>
+
+const APPLE_ID_RE = /^[A-Z0-9]{10}$/
+
+function parseSealKey(value: string): Uint8Array {
+  let key: Uint8Array
+  try {
+    key = b64uDecode(value.trim())
+  } catch {
+    throw new Error('RELAY_PUSH_SEAL_KEY must be base64url (no padding) of 32 random bytes')
+  }
+  if (key.length !== 32) throw new Error(`RELAY_PUSH_SEAL_KEY must be 32 bytes, got ${key.length}`)
+  return key
+}
+
+function parseSender(env: Env): PushSenderConfig {
+  const topic = env.RELAY_APNS_TOPIC || DEFAULT_APNS_TOPIC
+  const mode = env.RELAY_APNS_MODE || (env.RELAY_APNS_KEY_FILE ? 'apns' : '')
+  switch (mode) {
+    case 'apns': {
+      const keyFile = env.RELAY_APNS_KEY_FILE
+      const keyId = env.RELAY_APNS_KEY_ID ?? ''
+      const teamId = env.RELAY_APNS_TEAM_ID ?? ''
+      if (!keyFile) throw new Error('RELAY_APNS_MODE=apns needs RELAY_APNS_KEY_FILE (the .p8 auth key from Apple)')
+      if (!APPLE_ID_RE.test(keyId)) throw new Error('RELAY_APNS_KEY_ID must be the 10-character key ID of the .p8 key')
+      if (!APPLE_ID_RE.test(teamId)) throw new Error('RELAY_APNS_TEAM_ID must be the 10-character Apple team ID')
+      return { mode: 'apns', keyFile: resolve(keyFile), keyId, teamId, topic }
+    }
+    case 'simctl':
+      return { mode: 'simctl', device: env.RELAY_SIMCTL_DEVICE || 'booted', topic }
+    case 'log':
+      return { mode: 'log' }
+    case '':
+      throw new Error('RELAY_PUSH_SEAL_KEY is set, so this relay is a push gateway: set RELAY_APNS_KEY_FILE (with RELAY_APNS_KEY_ID and RELAY_APNS_TEAM_ID), or RELAY_APNS_MODE=simctl or log')
+    default:
+      throw new Error(`RELAY_APNS_MODE must be apns, simctl or log, got ${mode}`)
+  }
+}
+
+function parseUpstream(value: string): string {
+  let url: URL
+  try {
+    url = new URL(value)
+  } catch {
+    throw new Error(`RELAY_PUSH_UPSTREAM must be an http(s) URL, got ${value}`)
+  }
+  if (url.protocol !== 'https:' && url.protocol !== 'http:') throw new Error(`RELAY_PUSH_UPSTREAM must be an http(s) URL, got ${value}`)
+  return value.replace(/\/+$/, '')
+}
+
+export function parsePushConfig(env: Env): PushConfig {
+  if (env.RELAY_PUSH_SEAL_KEY) return { role: 'gateway', sealKey: parseSealKey(env.RELAY_PUSH_SEAL_KEY), sender: parseSender(env) }
+  if (env.RELAY_APNS_MODE || env.RELAY_APNS_KEY_FILE) {
+    throw new Error('RELAY_APNS_MODE / RELAY_APNS_KEY_FILE need RELAY_PUSH_SEAL_KEY (32 random bytes, base64url) to run a push gateway')
+  }
+  const upstream = env.RELAY_PUSH_UPSTREAM === undefined ? DEFAULT_PUSH_GATEWAY : env.RELAY_PUSH_UPSTREAM.trim()
+  if (upstream === '') return { role: 'off' }
+  return { role: 'forward', upstream: parseUpstream(upstream) }
+}
+
+/**
+ * Reads PORT, HOST, RELAY_DATA, RELAY_TRUST_PROXY, LOG_LEVEL and the push settings
+ * (RELAY_PUSH_SEAL_KEY, RELAY_APNS_*, RELAY_SIMCTL_DEVICE, RELAY_PUSH_UPSTREAM).
+ */
+export function loadConfig(env: Env = process.env): RelayConfig {
   const port = env.PORT === undefined || env.PORT === '' ? 8787 : Number(env.PORT)
   if (!Number.isInteger(port) || port < 0 || port > 65535) throw new Error(`PORT must be a port number, got ${env.PORT}`)
   return {
@@ -20,6 +97,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     host: env.HOST || '0.0.0.0',
     dataDir: resolve(env.RELAY_DATA || './data'),
     trustProxy: env.RELAY_TRUST_PROXY === '1' || env.RELAY_TRUST_PROXY === 'true',
-    logLevel: parseLogLevel(env.LOG_LEVEL)
+    logLevel: parseLogLevel(env.LOG_LEVEL),
+    push: parsePushConfig(env)
   }
 }

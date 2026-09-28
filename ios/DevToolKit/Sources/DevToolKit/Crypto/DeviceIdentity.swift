@@ -20,6 +20,7 @@ public final class InMemorySecretStore: SecretStore, @unchecked Sendable {
     public func data(for label: String) -> Data? { lock.withLock { items[label] } }
     public func set(_ data: Data, for label: String) { lock.withLock { items[label] = data } }
     public func delete(_ label: String) { lock.withLock { _ = items.removeValue(forKey: label) } }
+    public func allItems() -> [String: Data] { lock.withLock { items } }
 }
 
 /// This phone's long-term keys (SPEC.md §1): X25519 for Noise, Ed25519 for relay

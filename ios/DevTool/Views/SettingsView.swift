@@ -1,5 +1,6 @@
 import DevToolKit
 import SwiftUI
+import UIKit
 
 struct SettingsView: View {
     @Environment(AppModel.self) private var model
@@ -27,6 +28,8 @@ struct SettingsView: View {
                 } footer: {
                     Text("Forgetting removes the desktop from this device. To cut off access completely, also revoke this device in DevTool → Settings → Mobile.")
                 }
+
+                NotificationsSection()
 
                 Section("About") {
                     LabeledContent("Version", value: Self.version)
@@ -57,6 +60,49 @@ struct SettingsView: View {
         let short = info?["CFBundleShortVersionString"] as? String ?? "?"
         let build = info?["CFBundleVersion"] as? String ?? "?"
         return "\(short) (\(build))"
+    }
+}
+
+/// Master switch plus one toggle per push kind (SPEC.md §7.7).
+private struct NotificationsSection: View {
+    @Environment(PushManager.self) private var push
+    @Environment(\.openURL) private var openURL
+
+    var body: some View {
+        Section {
+            Toggle("Notifications", isOn: Binding(get: { push.enabled }, set: { push.setEnabled($0) }))
+            if push.enabled {
+                kindToggle("Permission requests", .permission)
+                kindToggle("Questions & plans", .question)
+                kindToggle("Finished turns", .done)
+            }
+        } header: {
+            Text("Notifications")
+        } footer: {
+            footer
+        }
+    }
+
+    private func kindToggle(_ title: String, _ kind: PushKind) -> some View {
+        Toggle(title, isOn: Binding(get: { push.isOn(kind) }, set: { push.set(kind, on: $0) }))
+            .disabled(push.isDenied)
+    }
+
+    @ViewBuilder
+    private var footer: some View {
+        if push.enabled, push.isDenied {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Notifications are turned off for DevTool in iOS Settings.")
+                Button("Open Settings") {
+                    if let url = URL(string: UIApplication.openNotificationSettingsURLString) { openURL(url) }
+                }
+                .font(.footnote)
+            }
+        } else if push.enabled, let error = push.lastError {
+            Text(error)
+        } else {
+            Text("Get notified when an agent asks for permission, asks a question or presents a plan, and when a turn you started here finishes. Only this phone can read them.")
+        }
     }
 }
 

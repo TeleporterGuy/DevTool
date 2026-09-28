@@ -206,6 +206,7 @@ export class RelayClient implements RelayTransport {
         return
       case 'frame':
       case 'peer':
+      case 'pushed':
       case 'error':
         if (!this.ready) {
           if (message.t === 'error') this.lastError = message.message ?? `Relay error: ${message.code}`

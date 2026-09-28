@@ -193,7 +193,7 @@ export default function MobileSettings(): React.ReactElement {
               key={device.id}
               icon={<span className={`w-1.5 h-1.5 rounded-full ${device.online ? 'bg-ssh-connected' : 'bg-status-exited'}`} />}
               label={device.name}
-              sub={device.online ? 'Online' : formatLastSeen(device.lastSeen, now)}
+              sub={`${device.online ? 'Online' : formatLastSeen(device.lastSeen, now)}${device.push ? ' · Notifications on' : ''}`}
               trailing={
                 <InlineConfirm
                   trigger="Revoke"

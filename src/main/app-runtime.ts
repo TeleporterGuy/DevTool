@@ -57,6 +57,7 @@ import { createInvite } from './mobile/invite'
 import { RelayClient } from './mobile/relay-client'
 import { createNoiseChannelFactory } from './mobile/channel'
 import { ChatBridge } from './mobile/chat-bridge'
+import { PushEmitter } from './mobile/push-emitter'
 import { normalizeMobileConfig } from '../shared/mobile'
 import type {
   AppConfig,
@@ -229,7 +230,33 @@ export class AppRuntime {
       decrypt: (ciphertext) => safeStorage.decryptString(ciphertext)
     }, log)
     const desktopName = () => normalizeMobileConfig(this.config.mobile).desktopName?.trim() || os.hostname().replace(/\.local$/, '')
-    return new MobileService({
+    // The emitter and the service need each other: it sends through the service, and
+    // the bridge (inside the service's deps) tells it which turns a phone started.
+    let service: MobileService | null = null
+    let bridge: ChatBridge | null = null
+    const push = new PushEmitter({
+      chats: this.chatManager,
+      projects: { peek: () => this.projectsStore.peek() },
+      targets: () => service?.pushTargets() ?? [],
+      openTab: (phoneId) => bridge?.openTab(phoneId) ?? null,
+      send: (phoneId, data) => service?.sendPush(phoneId, data) ?? Promise.resolve('not-sent'),
+      desktopId: () => identity.peekId(),
+      now: () => Date.now(),
+      log
+    })
+    bridge = new ChatBridge({
+      chats: this.chatManager,
+      projects: { peek: () => this.projectsStore.peek() },
+      timers: {
+        now: () => Date.now(),
+        setTimeout: (fn, ms) => setTimeout(fn, ms),
+        clearTimeout: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>)
+      },
+      log,
+      onPhoneSend: (phoneId, tabId) => push.phoneSent(phoneId, tabId)
+    })
+    push.start()
+    service = new MobileService({
       getConfig: () => normalizeMobileConfig(this.config.mobile),
       saveConfig: (mobile) => this.applyConfig({ mobile }),
       projects: {
@@ -254,17 +281,9 @@ export class AppRuntime {
       createInvite: (options) => createInvite(identity.get(), options),
       broadcastState: (state) => this.broadcastToAllWindows('mobile-state-changed', state),
       log,
-      chat: new ChatBridge({
-        chats: this.chatManager,
-        projects: { peek: () => this.projectsStore.peek() },
-        timers: {
-          now: () => Date.now(),
-          setTimeout: (fn, ms) => setTimeout(fn, ms),
-          clearTimeout: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>)
-        },
-        log
-      })
+      chat: bridge
     })
+    return service
   }
 
   registerWindow(window: BrowserWindow, initialViewState?: WindowViewState | null): void {

@@ -2,7 +2,7 @@
 
 This is the normative wire spec for the DevTool mobile client: identities, the pairing URI, the relay protocol, the encrypted phone ↔ desktop channel, and the test vectors. `protocol/ts`, `relay/`, the desktop (`src/main/mobile/`) and the iOS `DevToolKit` implement exactly what it says. If an implementation has to deviate, change this file in the same change. [PROTOCOL.md](PROTOCOL.md) is the short map.
 
-Section numbers (§1–§6) are the ones code comments cite. §6 (chat) was added in M2; nothing had shipped yet, so it is part of protocol v1 with no version bump or feature flag.
+Section numbers (§1–§7) are the ones code comments cite. §6 (chat) was added in M2 and §7 (push) in M3. Nothing had shipped yet, so both are part of protocol v1 with no version bump or feature flag.
 
 ## 1. Identities and encodings
 
@@ -85,7 +85,7 @@ The rules above left these open. `relay/` implements them, and clients may rely 
 - **Close codes.** Idle timeout and server shutdown close with **1001**. The others are 1009, 4401, 4403, 4408, 4409 and 4429. `RelayCloseCode` in `protocol/ts` (and `RelayProtocol.CloseCode` in Swift) lists all of them, 1001 as `GoingAway` and 4403 as `PairingExpired`.
 - **Rate.** Every client message costs a token, including `hello` and `ping`. The first message over the limit is dropped and answered with `error rate`. Another over-limit message within 10 s of it gets `error rate` again and the relay closes with 4429. The per-IP limit counts refused attempts too. It answers HTTP 429 during the upgrade. With `RELAY_TRUST_PROXY=1` the client IP is the **last** `X-Forwarded-For` entry.
 - **Errors.** The relay checks `forbidden` before `offline`, so an unpaired device can't probe presence. A frame addressed to oneself is `forbidden`. Before auth, anything except a valid `hello` (including binary or malformed JSON) gets `error auth` and 4401. After auth, binary frames and malformed messages get `bad-request` and the socket stays open. Role violations (a phone sending `offer`/`authorize`/`revoke`, or a desktop sending `watch`) get `forbidden`.
-- **HTTP.** `GET /healthz` returns 200 `ok`. A plain GET on `/v1` returns 426, and every other path returns 404 (including upgrades).
+- **HTTP.** `GET /healthz` returns 200 `ok`. A plain GET on `/v1` returns 426. `/v1/push/register` and `/v1/push/send` (§7) answer 503 `{"error":"unavailable"}` on a relay that isn't a gateway. On the gateway they take `POST` only (405 otherwise) with a JSON body of at most 16 KiB (413 beyond, 400 `bad-request` if it isn't JSON). `/v1/push/send` answers 200 `{"result":"bad-request"}` when `cap` or `data` isn't a string. Every other path returns 404 (including upgrades).
 
 ## 4. Channel between phone and desktop
 
@@ -267,3 +267,82 @@ All ops take `params` in the `req` object: `{ t:'req', id, op, params }`.
 
 
 `protocol/vectors/fragments.json`: a message of 150000 bytes, its fragments as hex, and step-by-step receiver scenarios for the rules in §6.1. `protocol/vectors/chat-messages.json`: sample `chat.*` reqs, params and results, and `evt chat` messages, including unknown kinds and fields. Layouts are in `protocol/vectors/README.md`.
+
+## 7. Push (M3)
+
+A phone gets a notification when a Claude chat asks for a permission, asks a question or presents a plan, and when a turn it started from the phone finishes. Allow and Deny work straight from the notification. `protocol/ts/push.ts` implements the wire formats of this section.
+
+Three parties are involved, and none of them reads the notification's content except the phone:
+- The **gateway** is an HTTP API that only our hosted relay runs (`relay.devtool.awantech.sk`), because only our APNs key can push to our app. It turns an APNs device token into a sealed **push capability** (`cap`) and later turns `{cap, data}` into an APNs request.
+- The **relay** (ours or self-hosted) accepts `push` from desktops over the socket and hands it to the gateway: in-process when it is the gateway, otherwise by one HTTPS call to its upstream gateway. No relay ever sees an APNs token.
+- The **desktop** decides what is worth a push and encrypts it with a key only the phone has.
+
+### 7.1 Registration (phone → gateway, HTTPS)
+
+`POST <gateway>/v1/push/register`, JSON body:
+```json
+{ "pub": "<b64u phone ed25519 pub>", "token": "<APNs device token, lowercase hex>",
+  "env": "production" | "sandbox", "ts": <unix seconds>, "sig": "<b64u>" }
+```
+- `sig = Ed25519.sign(utf8("devtool-push-register-v1\n" + token + "\n" + env + "\n" + ts))` with the phone's relay key, so the gateway knows which `deviceId(pub)` it is sealing for. `ts` must be within **300 s** of the gateway's clock. `token` is 32 to 100 bytes (64 to 200 hex chars).
+- `200 {"cap":"<string>"}`. Errors are a JSON body `{"error":"<code>"}` with status 400 `bad-request`, 401 `auth` (bad signature or `ts` out of range), 429 `rate` (per IP, 30 per hour), 503 `unavailable` (this server is not a gateway).
+- Every registration bumps the device's **generation**, so it invalidates every older `cap` of that device. A phone registers at launch whenever it has a token and push is on, and hands the new `cap` to every paired desktop (§7.4).
+- The gateway's only state is `push_devices(device_id PRIMARY KEY, generation, updated_at)` in the relay database. The token itself lives only inside the `cap`.
+
+`cap` = b64u( `0x01` ‖ nonce (12) ‖ AES-256-GCM(sealKey, utf8(JSON `{"d":deviceId,"g":generation,"t":token,"e":env}`), aad = utf8("devtool-pushcap-v1")) ), with a random nonce. `sealKey` is the gateway's secret (32 bytes). A `cap` is at most 1024 characters. To everyone but the gateway it is opaque.
+
+### 7.2 Relay socket messages (extends §3)
+
+- Desktop → relay: `{ "t":"push", "id":<int ≥ 0>, "cap":"<string, 1–1024 chars>", "data":"<b64u, 1–3072 chars>" }`. From a phone it is `forbidden`.
+- Relay → desktop: `{ "t":"pushed", "id":<int>, "result":"ok"|"gone"|"rate"|"unavailable"|"bad-request"|"error" }`, one per `push`, in any order.
+  - `gone`: the `cap` is stale (a newer registration, or APNs said the token is dead). The desktop forgets that phone's registration.
+  - `rate`: the device is over its budget. `unavailable`: this relay has no gateway. `error`: the gateway or APNs failed; nothing is retried.
+- A relay that is not the gateway forwards as `POST <upstream>/v1/push/send` with body `{"cap","data"}`, and the gateway answers `200 {"result":…}` with the same values. A transport failure or timeout (10 s) is `error`. The upstream defaults to `https://relay.devtool.awantech.sk`, and an empty setting turns push off (`unavailable`).
+- A connection may have at most 64 pushes awaiting a result. Further pushes are answered `rate` right away.
+- Clients from before M3 never send `push`. A client that gets a server message type it doesn't know ignores it.
+
+### 7.3 Delivery (gateway → APNs)
+
+- The gateway opens the `cap`. A `cap` that doesn't open or parse is `bad-request`. A generation other than the device's current one is `gone`.
+- Budget: **60 pushes per device per hour** (a token bucket with a burst of 20). Over it is `rate`.
+- The APNs request goes over HTTP/2 to `api.push.apple.com` (or `api.sandbox.push.apple.com` for `env: "sandbox"`), with a provider JWT (ES256, refreshed every 50 minutes), `apns-push-type: alert`, `apns-priority: 10`, `apns-expiration` one hour ahead and `apns-topic` set to the app's bundle ID. The body is:
+  ```json
+  { "aps": { "alert": { "title": "DevTool", "body": "An agent needs you" }, "sound": "default", "mutable-content": 1 }, "d": "<data>" }
+  ```
+  The alert text is the fallback the phone shows if it can't decrypt `d`.
+- APNs `410`, or `400` with reason `BadDeviceToken` or `DeviceTokenNotForTopic`, is `gone`, and the gateway bumps the device's generation so that `cap` stays dead. Any other failure is `error`.
+
+### 7.4 Push registration on a desktop (extends §4.4 ops)
+
+| op | params | result |
+|---|---|---|
+| `push.register` | `{ cap, key: b64u(32), keyId: b64u(8), kinds: string[] }` | `{}`. Replaces this phone's registration. `kinds` is a subset of `"permission"`, `"question"`, `"done"`. Unknown kinds are dropped. `"question"` also covers plan approvals. |
+| `push.unregister` | `{}` | `{}`. Forgets it. |
+
+- The phone generates `key` and `keyId` per desktop pairing and keeps them for as long as the pairing lasts. It sends `push.register` after every established session while push is on, and whenever its toggles or `cap` change. With push off it sends `push.unregister`.
+- The desktop stores the registration with the pairing, and deletes it on revoke or on a `gone` result.
+
+### 7.5 Push payload (`data`)
+
+`data` = b64u( keyId (8) ‖ nonce (12) ‖ AES-256-GCM(key, utf8(JSON), aad = keyId) ), with a random nonce. `keyId` tells the phone which desktop's key to use. The plaintext is:
+```json
+{ "v": 1, "kind": "permission" | "question" | "plan" | "done",
+  "desktop": "<desktopId>", "tab": "<tabId>", "prompt": "<promptId>",
+  "title": "api-server / fix-auth", "body": "Bash · npm test", "at": <unix ms> }
+```
+- `prompt` is present for `permission`, `question` and `plan`. `title` is at most 120 characters and `body` at most 400. Longer values are cut and end in "…". The encoded `data` must fit in 3072 characters, and a sender shortens `body` further until it does.
+- A phone shows an unknown `kind` as plain text with no actions. An unknown `v` or a payload that doesn't decrypt leaves the fallback alert alone.
+
+### 7.6 When a desktop pushes
+
+Only Claude chat tabs (`claude-chat`) in projects visible on mobile (§4.4) push, and only to phones with a registration whose `kinds` include the push's kind:
+- **permission / question / plan:** a prompt appears in the chat's open prompts. One push per (phone, prompt ID). `body` is the permission's `summary` (§6.2, e.g. "Bash · npm test"), the first question's text, or "Plan ready for review".
+- **done:** the chat goes from busy to idle, and the turn that just ended was started by a `chat.send` from this phone. One push per such turn. `body` is the first line of the last assistant text, or "Finished".
+- A phone that has this tab open (`chat.open`) in a live session gets no push for it. It is already looking.
+- Pushes go out only while the desktop's relay socket is up. Nothing is queued or retried.
+
+### 7.7 Phone behaviour
+
+- A Notification Service Extension decrypts `d` with the key named by `keyId`, and replaces the alert with `title` and `body`. It sets the category to `kind` and keeps `desktop`, `tab` and `prompt` in the notification's `userInfo`.
+- The `permission` category has two actions, **Allow** and **Deny** (destructive), and both require the device to be unlocked. Either one wakes the app in the background, which connects to that desktop and sends `chat.answer` (`{behavior:"allow"}` or `{behavior:"deny"}`). `gone` counts as done. Tapping any notification opens that chat.
+- Settings has one toggle per kind (`permission`, `question`, `done`) and a master switch.

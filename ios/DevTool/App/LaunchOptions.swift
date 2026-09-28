@@ -16,6 +16,13 @@ import Foundation
 /// - `-pairLink <devtool://pair?d=…>` (Debug builds): open that pairing link at
 ///   launch, as if tapped; add `-autoConfirmPairing` to also press Pair. Lets
 ///   scripts pair the simulator without the system "Open in DevTool?" prompt.
+/// - `-pushGateway <url>` (or env `DEVTOOL_PUSH_GATEWAY`; Debug builds): the push
+///   gateway to register with (SPEC.md §7.1) instead of
+///   `https://relay.devtool.awantech.sk`, e.g. `http://127.0.0.1:8791`.
+/// - `-fakePushToken <hex>` (or env `DEVTOOL_FAKE_PUSH_TOKEN`; Debug builds): skip
+///   APNs and register this device token (32–100 bytes of lowercase hex). The
+///   simulator can't get a token APNs accepts for our topic, but a gateway in
+///   simctl mode ignores it, so the whole chain can run on a simulator.
 struct LaunchOptions: Sendable {
     enum DemoRoute: String, Sendable {
         case sidebar
@@ -39,6 +46,8 @@ struct LaunchOptions: Sendable {
     var demoChatScript = false
     var demoMessage: String?
     var demoAnswerDelay: Double?
+    var pushGateway: URL?
+    var fakePushToken: String?
 
     static let current = LaunchOptions(processInfo: .processInfo)
 
@@ -66,6 +75,8 @@ struct LaunchOptions: Sendable {
         demoChatScript = args.contains("-demoChatScript")
         demoMessage = value("-demoMessage")
         demoAnswerDelay = value("-demoAnswerDelay").flatMap(Double.init)
+        pushGateway = (value("-pushGateway") ?? env["DEVTOOL_PUSH_GATEWAY"]).flatMap { URL(string: $0) }
+        fakePushToken = (value("-fakePushToken") ?? env["DEVTOOL_FAKE_PUSH_TOKEN"])?.lowercased()
         #else
         demoRoute = nil
         #endif

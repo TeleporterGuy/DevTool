@@ -24,6 +24,8 @@ import type {
   HelloMessage,
   OfferMessage,
   PeerState,
+  PushMessage,
+  PushResult,
   RelayErrorCode,
   RevokeMessage,
   Role,
@@ -55,6 +57,8 @@ export interface RelayLimits {
   maxOfferTtlSeconds: number
   /** Most IDs one `watch` may carry. */
   maxWatch: number
+  /** Pushes one connection may have awaiting a result; more are answered `rate`. */
+  maxPushesInFlight: number
 }
 
 export const DEFAULT_LIMITS: RelayLimits = {
@@ -66,7 +70,8 @@ export const DEFAULT_LIMITS: RelayLimits = {
   rateStrikeWindowMs: 10_000,
   connectionsPerIpPerMinute: RELAY_CONNECTIONS_PER_IP_PER_MINUTE,
   maxOfferTtlSeconds: 900,
-  maxWatch: 256
+  maxWatch: 256,
+  maxPushesInFlight: 64
 }
 
 export interface Clock {
@@ -89,11 +94,22 @@ export interface ConnectionHandle {
   closed(): void
 }
 
+/**
+ * Where a desktop's `push` goes (§7.2): the in-process gateway, or the upstream one over
+ * HTTPS. Resolves with the result to send back; it should not reject (a rejection is
+ * reported as `error`).
+ */
+export interface PushForwarder {
+  push(cap: string, data: string): Promise<PushResult>
+}
+
 export interface RelayOptions {
   store: RelayStore
   clock?: Clock
   limits?: Partial<RelayLimits>
   logger?: Logger
+  /** Absent: every `push` is answered `unavailable`. */
+  push?: PushForwarder
 }
 
 export interface RelayStats {
@@ -127,6 +143,8 @@ interface Client {
   rateStrikeAt: number | null
   /** Phones only: authorized desktops whose presence this phone asked for. */
   watched: Set<string>
+  /** Desktops only: pushes awaiting a result. */
+  pushesInFlight: number
 }
 
 interface Offer {
@@ -149,6 +167,7 @@ export function createRelay(options: RelayOptions): Relay {
   const clock = options.clock ?? systemClock
   const limits: RelayLimits = { ...DEFAULT_LIMITS, ...options.limits }
   const log = options.logger ?? silentLogger
+  const forwarder = options.push ?? null
   const ipLimiter = new IpLimiter(limits.connectionsPerIpPerMinute)
 
   const clients = new Set<Client>()
@@ -410,6 +429,21 @@ export function createRelay(options: RelayOptions): Relay {
     send(recipient, { t: 'frame', from: senderId, data: msg.data })
   }
 
+  function onPush(desktop: Client, msg: PushMessage): void {
+    const reply = (result: PushResult): void => send(desktop, { t: 'pushed', id: msg.id, result })
+    if (!forwarder) return reply('unavailable')
+    if (desktop.pushesInFlight >= limits.maxPushesInFlight) return reply('rate')
+    desktop.pushesInFlight++
+    forwarder
+      .push(msg.cap, msg.data)
+      .catch((): PushResult => 'error')
+      .then((result) => {
+        desktop.pushesInFlight--
+        log.debug('pushed', { desktop: desktop.id, result })
+        reply(result)
+      })
+  }
+
   function onMessage(client: Client, text: string): void {
     let msg: ClientMessage
     try {
@@ -436,6 +470,8 @@ export function createRelay(options: RelayOptions): Relay {
         return role === 'desktop' ? onRevoke(client, msg) : sendError(client, 'forbidden', 'desktops only')
       case 'watch':
         return role === 'phone' ? onWatch(client, msg) : sendError(client, 'forbidden', 'phones only')
+      case 'push':
+        return role === 'desktop' ? onPush(client, msg) : sendError(client, 'forbidden', 'desktops only')
     }
   }
 
@@ -482,7 +518,8 @@ export function createRelay(options: RelayOptions): Relay {
         helloTimer: null,
         idleTimer: null,
         rateStrikeAt: null,
-        watched: new Set()
+        watched: new Set(),
+        pushesInFlight: 0
       }
       clients.add(client)
       client.helloTimer = setTimeout(() => {

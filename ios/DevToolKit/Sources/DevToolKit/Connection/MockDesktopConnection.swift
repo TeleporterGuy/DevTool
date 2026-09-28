@@ -170,6 +170,16 @@ public actor MockDesktopConnection: DesktopConnection {
             guard chats[tabId] != nil else { throw notFound() }
             interrupt(tabId: tabId)
             return .object([:])
+        case PushOp.register:
+            // No pushes in mock mode; just check the params like a desktop would.
+            do {
+                _ = try PushRegisterParams.parse(params)
+            } catch {
+                throw DesktopConnectionError.remote(code: AppErrorCode.badRequest, message: error.message)
+            }
+            return .object([:])
+        case PushOp.unregister:
+            return .object([:])
         default:
             throw DesktopConnectionError.remote(code: AppErrorCode.unsupported, message: "Unknown op \(op)")
         }

@@ -20,6 +20,7 @@ export class FakeChats implements ChatBridgeChats {
   readonly sent: { tabId: string; text: string }[] = []
   readonly responses: { tabId: string; promptId: string; response: ChatPromptResponse }[] = []
   readonly interrupts: string[] = []
+  readonly watchers = new Set<(tabId: string, event: ChatEvent, state: ChatState) => void>()
   /** Resolves `listen` only when released (to test an open that is still loading). */
   holdListen: Promise<void> | null = null
 
@@ -33,6 +34,11 @@ export class FakeChats implements ChatBridgeChats {
     if (this.holdListen) await this.holdListen
     const r = runtime
     return { snapshot: { seq: r.seq, state: r.state }, stop: () => r.listeners.delete(listener) }
+  }
+
+  watch(watcher: (tabId: string, event: ChatEvent, state: ChatState) => void): () => void {
+    this.watchers.add(watcher)
+    return () => { this.watchers.delete(watcher) }
   }
 
   snapshot(tabId: string): ChatSnapshot | null {
@@ -66,7 +72,9 @@ export class FakeChats implements ChatBridgeChats {
     }
     runtime.state = change(runtime.state)
     runtime.seq += 1
-    for (const listener of [...runtime.listeners]) listener(runtime.seq, { t: 'meta', info: {} } as ChatEvent, runtime.state)
+    const event = { t: 'meta', info: {} } as ChatEvent
+    for (const listener of [...runtime.listeners]) listener(runtime.seq, event, runtime.state)
+    for (const watcher of [...this.watchers]) watcher(tabId, event, runtime.state)
   }
 
   listenerCount(tabId: string): number {

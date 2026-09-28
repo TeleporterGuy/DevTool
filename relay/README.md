@@ -2,6 +2,8 @@
 
 The relay connects DevTool desktops and the iOS app across the internet. Each device keeps a WebSocket open to it, authenticates with its Ed25519 key, and the relay forwards opaque frames between a desktop and the phones paired with it. Traffic is end-to-end encrypted with Noise IK between phone and desktop, so the relay can't read any of it.
 
+It also carries push notifications (§7 of the spec): desktops send `push` over the socket, and the relay hands it to the **push gateway**, which only our hosted relay runs because only our APNs key can reach our app. A self-hosted relay forwards pushes to the hosted gateway over HTTPS.
+
 The normative protocol is §3 of [`../protocol/SPEC.md`](../protocol/SPEC.md), summarized in [`../protocol/PROTOCOL.md`](../protocol/PROTOCOL.md). The relay reuses the message parsers, auth check and limits in `../protocol/ts`.
 
 - **No runtime dependencies.** The WebSocket server is a small RFC 6455 implementation in `src/ws/`, on top of `node:http`. Persistence is `node:sqlite`.
@@ -12,9 +14,11 @@ The normative protocol is §3 of [`../protocol/SPEC.md`](../protocol/SPEC.md), s
 | path | what |
 |---|---|
 | `src/main.ts` | Entry point: reads the environment, opens the database, starts the server, shuts down on SIGTERM/SIGINT |
-| `src/server.ts` | `startRelayServer()`: `node:http` + `/healthz` + the `/v1` upgrade + per-IP admission |
+| `src/server.ts` | `startRelayServer()`: `node:http` + `/healthz` + the `/v1` upgrade + per-IP admission + the push HTTP API |
 | `src/relay.ts` | `createRelay({ store, clock, limits, logger })`: the protocol core, independent of sockets |
-| `src/store.ts` | `RelayStore`, with `SqliteStore` (production) and `MemoryStore` (tests) |
+| `src/store.ts` | `RelayStore` and `PushStore`, with `SqliteStore` (production) and `MemoryStore` (tests) |
+| `src/push/gateway.ts` | `createPushGateway()`: registration, cap sealing, per-device budget, APNs result mapping. Also the in-process and upstream `PushForwarder`s |
+| `src/push/apns.ts` | `ApnsSender`: the HTTP/2 APNs client with its ES256 provider token, the `simctl` sender and the `log` sender |
 | `src/rate.ts` | Token bucket (per connection) and sliding-window IP limiter |
 | `src/ws/` | RFC 6455 server side: opening handshake, frame parser/encoder, fragmentation, ping/pong, close handshake, payload cap |
 | `src/log.ts`, `src/config.ts` | JSON logs, environment parsing |
@@ -45,8 +49,40 @@ node protocol/tools/fake-desktop.ts ws://localhost:8787
 | `RELAY_DATA` | `./data` | Directory for `relay.db` (created if missing) |
 | `RELAY_TRUST_PROXY` | unset | `1` makes the per-IP limit use the **last** `X-Forwarded-For` entry, which is what your own proxy appended. Only set it behind a proxy you control, or clients can pick their own IP |
 | `LOG_LEVEL` | `info` | `debug`, `info`, `warn` or `error` |
+| `RELAY_PUSH_UPSTREAM` | `https://relay.devtool.awantech.sk` | Gateway that a non-gateway relay forwards `push` to. Set it to an empty string to turn push off (desktops get `unavailable`). A gateway ignores it |
+| `RELAY_PUSH_SEAL_KEY` | unset | Setting it makes this relay the push gateway. 32 random bytes, base64url without padding. Every cap is sealed with it, so changing it invalidates every phone's registration until the phone registers again |
+| `RELAY_APNS_MODE` | `apns` if `RELAY_APNS_KEY_FILE` is set | Gateway only. `apns` talks to Apple, `simctl` pushes to a local iOS simulator with `xcrun simctl push`, `log` accepts every push and only logs it |
+| `RELAY_APNS_KEY_FILE` | unset | `apns` mode: path to the `.p8` auth key from Apple |
+| `RELAY_APNS_KEY_ID` | unset | `apns` mode: the key's 10-character ID |
+| `RELAY_APNS_TEAM_ID` | unset | `apns` mode: the 10-character team ID |
+| `RELAY_APNS_TOPIC` | `sk.awantech.devtool` | `apns` and `simctl` modes: the app's bundle ID |
+| `RELAY_SIMCTL_DEVICE` | `booted` | `simctl` mode: the simulator's UDID |
 
-Logs are one JSON object per line on stdout (`ts`, `level`, `event`, plus fields such as `id`, `role`, `ip`, `code`). Frame data, tokens and signatures are never logged.
+Logs are one JSON object per line on stdout (`ts`, `level`, `event`, plus fields such as `id`, `role`, `ip`, `code`). Frame data, tokens and signatures are never logged, and neither are APNs tokens, caps, push payloads or keys. Startup logs which push role is active (`push-gateway` with its mode, `push-forward` with the upstream, or `push-off`), and a bad push setting stops the relay with a message on stderr.
+
+## Push gateway
+
+The gateway serves `POST /v1/push/register` (phone → gateway: a signed APNs token in, a sealed `cap` out) and `POST /v1/push/send` (`{cap, data}` from another relay → `{result}`), and handles `push` from its own desktops in-process. Its only state is the `push_devices` table in `relay.db`: a generation counter per device, which every registration bumps. The APNs token lives only inside the cap. On a relay that isn't a gateway both paths answer 503.
+
+For a gateway that talks to Apple:
+
+```bash
+RELAY_PUSH_SEAL_KEY=$(node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))") \
+RELAY_APNS_KEY_FILE=/secrets/AuthKey_ABCDEF1234.p8 RELAY_APNS_KEY_ID=ABCDEF1234 RELAY_APNS_TEAM_ID=TEAM123456 \
+npm start
+```
+
+Keep the seal key stable across restarts (store it with the other secrets), or every cap dies with it. The HTTP/2 client keeps one session per APNs host and reconnects after it closes. Each request times out after 10 s.
+
+To try push against a local iOS simulator, run a gateway in `simctl` mode and point the app's gateway and the desktop's relay at it. The simulator can't receive real APNs pushes, so `xcrun simctl push` stands in for Apple, with the same JSON body. The token and `env` in the cap are ignored.
+
+```bash
+PORT=8791 HOST=127.0.0.1 RELAY_DATA=/tmp/devtool-gw \
+RELAY_PUSH_SEAL_KEY=$(node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))") \
+RELAY_APNS_MODE=simctl RELAY_SIMCTL_DEVICE=booted \
+node --disable-warning=ExperimentalWarning relay/src/main.ts
+```
+
 
 ## Test and typecheck
 
@@ -64,7 +100,8 @@ The suites:
 - `test/relay.test.ts` covers HTTP routing, auth (success, bad signature, wrong role, non-hello, 10 s timeout), offers (one use, expired, replaced, wrong token), pending phones (routing both ways, reconnect, lapse), authorize (persisted, and still there after a restart on the same SQLite file), revoke, `forbidden` and `offline` routing errors, presence and `lastSeen`, watch filtering, max frame size, rate limiting, per-IP limits with and without `X-Forwarded-For`, replacing a duplicate connection, idle timeout and shutdown.
 - `test/integration.test.ts` runs `protocol/tools/fake-desktop-core.ts` and a phone built from `protocol/ts` through the relay: a real Noise IK pair handshake, accept, `authorize`, the inbox, a resume handshake after reconnecting, a stale QR code refused, and revoke.
 - `test/ws.test.ts` covers the WebSocket layer: Node's own `WebSocket` client end to end, fragmentation, ping during a fragmented message, and the payload cap enforced from the frame header alone. It also checks unmasked frames, invalid UTF-8, stray continuations, the close handshake both ways, and bad upgrade requests.
-- `test/store.test.ts` covers both stores, the token bucket, the IP limiter and config parsing.
+- `test/store.test.ts` covers both stores (pairs and push generations), the token bucket, the IP limiter and config parsing.
+- `test/push.test.ts` covers the gateway (registration, skew, bad signatures, the per-IP limit, generations, every `send` result and the APNs response mapping), the HTTP/2 APNs client against a local cleartext fake (headers, body, the ES256 token and its 50-minute refresh, reconnects, timeouts), the `simctl` and `log` senders, `push` over the socket (forbidden for phones, `unavailable`, in-process, relay A forwarding to gateway B, upstream failures, the in-flight cap), the push HTTP endpoints, and push config.
 
 ## Docker
 
@@ -90,6 +127,8 @@ The image is `node:24-alpine` running as the unprivileged `node` user. It declar
    ```
 3. Copy `deploy/Caddyfile.example` to `/etc/caddy/Caddyfile` (change the host name if needed) and `systemctl reload caddy`. Caddy obtains the TLS certificate itself and proxies the WebSocket upgrade.
 4. Check it: `curl https://relay.devtool.awantech.sk/healthz` → `ok`. Desktops and phones use `wss://relay.devtool.awantech.sk`.
+
+For the hosted gateway, add the push settings to step 2 and mount the key read-only, for example `-e RELAY_PUSH_SEAL_KEY=... -e RELAY_APNS_KEY_FILE=/secrets/AuthKey.p8 -e RELAY_APNS_KEY_ID=... -e RELAY_APNS_TEAM_ID=... -v /etc/devtool/AuthKey.p8:/secrets/AuthKey.p8:ro`. The `node` user in the container must be able to read the file. A self-hosted relay needs nothing: it forwards pushes to `https://relay.devtool.awantech.sk` by default.
 
 The relay sends 1001 to every socket on `SIGTERM` (`docker stop`), and clients reconnect with backoff. Back up the `/data` volume if you want pairings to survive losing the machine. If it's lost, users pair their phones again.
 

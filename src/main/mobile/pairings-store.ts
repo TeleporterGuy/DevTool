@@ -12,6 +12,29 @@ export interface MobilePairing {
   pairedAt: number
   /** Epoch ms; null until the phone is seen after pairing. */
   lastSeen: number | null
+  /** The phone's `push.register` (SPEC.md §7.4); absent when it gets no pushes. */
+  push?: MobilePushRegistration
+}
+
+export interface MobilePushRegistration {
+  /** Opaque gateway capability. */
+  cap: string
+  /** b64u, 32 bytes: the key this desktop seals payloads with. */
+  key: string
+  /** b64u, 8 bytes. */
+  keyId: string
+  kinds: ('permission' | 'question' | 'done')[]
+}
+
+const PUSH_KINDS: readonly string[] = ['permission', 'question', 'done']
+
+function isPushRegistration(value: unknown): value is MobilePushRegistration {
+  if (typeof value !== 'object' || value === null) return false
+  const p = value as Record<string, unknown>
+  return typeof p.cap === 'string' && p.cap.length > 0
+    && typeof p.key === 'string' && B64U.test(p.key)
+    && typeof p.keyId === 'string' && B64U.test(p.keyId)
+    && Array.isArray(p.kinds) && p.kinds.every((k) => typeof k === 'string' && PUSH_KINDS.includes(k))
 }
 
 const B64U = /^[A-Za-z0-9_-]+$/
@@ -94,6 +117,20 @@ export class PairingsStore {
     return true
   }
 
+  /** Sets or (with null) clears a phone's push registration. False when there is no such pairing. */
+  setPush(id: string, push: MobilePushRegistration | null): boolean {
+    const current = this.pairings.find((p) => p.id === id)
+    if (!current) return false
+    if (!push && !current.push) return true
+    this.pairings = this.pairings.map((p) => {
+      if (p.id !== id) return p
+      const { push: _old, ...rest } = p
+      return push ? { ...rest, push: { ...push, kinds: [...push.kinds] } } : rest
+    })
+    this.persist()
+    return true
+  }
+
   touchLastSeen(id: string, at: number): void {
     const current = this.pairings.find((p) => p.id === id)
     if (!current || (current.lastSeen !== null && current.lastSeen >= at)) return
@@ -114,7 +151,11 @@ export class PairingsStore {
     try {
       const parsed = JSON.parse(raw) as unknown
       if (!Array.isArray(parsed)) throw new Error('top-level JSON value is not an array')
-      return parsed.filter(isPairing).map((p) => ({ ...p, lastSeen: p.lastSeen ?? null }))
+      return parsed.filter(isPairing).map((p) => {
+        const { push, ...rest } = p
+        // A malformed registration only costs pushes until the phone registers again.
+        return { ...rest, lastSeen: p.lastSeen ?? null, ...(isPushRegistration(push) ? { push } : {}) }
+      })
     } catch (err) {
       this.log(`mobilePairings corrupt error=${String(err)}`)
       this.quarantine()
@@ -133,6 +174,7 @@ export class PairingsStore {
 
   private persist(): void {
     fs.mkdirSync(this.dir, { recursive: true })
-    atomicWriteFileSync(this.file, JSON.stringify(this.pairings, null, 2))
+    // Owner-only: push registrations carry each phone's payload key and capability.
+    atomicWriteFileSync(this.file, JSON.stringify(this.pairings, null, 2), 0o600)
   }
 }

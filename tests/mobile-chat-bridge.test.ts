@@ -271,6 +271,24 @@ describe('ChatBridge', () => {
     expect(events()).toMatchObject([{ upserts: [{ id: 'i5', markdown: 'edited again' }], removes: [] }])
   })
 
+  it('reports the open tab per phone and announces phone sends before they happen (push, §7.6)', async () => {
+    const sends: string[] = []
+    bridge = new ChatBridge({
+      chats,
+      projects: { peek: () => data },
+      timers: { now: () => Date.now(), setTimeout: (fn, ms) => setTimeout(fn, ms), clearTimeout: (h) => clearTimeout(h as ReturnType<typeof setTimeout>) },
+      log: () => {},
+      onPhoneSend: (phoneId, tabId) => sends.push(`${phoneId}:${tabId}:${chats.sent.length}`)
+    })
+    expect(bridge.openTab('phone-1')).toBeNull()
+    await req('chat.open', { tabId: 'tab-chat' })
+    expect(bridge.openTab('phone-1')).toBe('tab-chat')
+    await req('chat.send', { tabId: 'tab-chat', text: 'hi' })
+    expect(sends).toEqual(['phone-1:tab-chat:0'])
+    bridge.dropPhone('phone-1')
+    expect(bridge.openTab('phone-1')).toBeNull()
+  })
+
   it('reports a failing manager call as internal', async () => {
     chats.send = async () => { throw new Error('boom') }
     expect(await req('chat.send', { tabId: 'tab-chat', text: 'x' })).toMatchObject({ ok: false, error: { code: 'internal', message: 'boom' } })

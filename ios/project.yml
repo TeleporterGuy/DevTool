@@ -28,6 +28,7 @@ targets:
       - path: DevTool
     dependencies:
       - package: DevToolKit
+      - target: DevToolNotifications
     info:
       path: DevTool/Info.plist
       properties:
@@ -56,6 +57,8 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: sk.awantech.devtool
         PRODUCT_NAME: DevTool
+        # aps-environment, the App Group and keychain groups (push, SPEC.md §7).
+        CODE_SIGN_ENTITLEMENTS: DevTool/DevTool.entitlements
         TARGETED_DEVICE_FAMILY: "1,2"
         CODE_SIGN_STYLE: Automatic
         DEVELOPMENT_TEAM: ""
@@ -67,3 +70,33 @@ targets:
       commandLineArguments:
         # Preloads mock desktops (no relay needed). Untick to use persisted pairings.
         "-mockDesktop": true
+
+  # Notification Service Extension: decrypts pushes (SPEC.md §7.5, §7.7).
+  DevToolNotifications:
+    type: app-extension
+    platform: iOS
+    deploymentTarget: "17.0"
+    sources:
+      - path: DevToolNotifications
+    dependencies:
+      - package: DevToolKit
+    info:
+      path: DevToolNotifications/Info.plist
+      properties:
+        CFBundleDisplayName: DevTool Notifications
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.usernotifications.service
+          NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).NotificationService
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: sk.awantech.devtool.notifications
+        PRODUCT_NAME: DevToolNotifications
+        TARGETED_DEVICE_FAMILY: "1,2"
+        CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: ""
+        CODE_SIGN_ENTITLEMENTS: DevToolNotifications/DevToolNotifications.entitlements
+        SWIFT_STRICT_CONCURRENCY: complete
+        ENABLE_USER_SCRIPT_SANDBOXING: YES
+        APPLICATION_EXTENSION_API_ONLY: YES

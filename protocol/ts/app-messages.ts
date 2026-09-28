@@ -2,6 +2,7 @@ import { b64uDecode, utf8Decode, utf8Encode } from './encoding.ts'
 import { ProtocolError } from './errors.ts'
 import { ChatOp, parseChatViewEvent } from './chat-messages.ts'
 import type { ChatViewEvent } from './chat-messages.ts'
+import { PushOp } from './push.ts'
 
 /**
  * The phone ↔ desktop channel above Noise (SPEC.md §4.3, §4.4). All of it is UTF-8
@@ -129,7 +130,9 @@ export const AppOp = {
   ChatSend: ChatOp.Send,
   ChatAnswer: ChatOp.Answer,
   ChatInterrupt: ChatOp.Interrupt,
-  ChatDetail: ChatOp.Detail
+  ChatDetail: ChatOp.Detail,
+  PushRegister: PushOp.Register,
+  PushUnregister: PushOp.Unregister
 } as const
 
 /** `res.error.code` values (M1 + §6.3). Unknown codes from a newer peer are still strings. */

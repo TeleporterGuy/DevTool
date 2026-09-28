@@ -1,6 +1,7 @@
 import { b64uDecode, b64uEncode, utf8Encode } from './encoding.ts'
 import { ProtocolError } from './errors.ts'
 import { deviceId, ed25519Sign, ed25519Verify, isDeviceId } from './keys.ts'
+import { PushLimits, type PushResult } from './push.ts'
 
 /**
  * Relay protocol v1 (SPEC.md §3): one JSON object per WebSocket text frame,
@@ -59,6 +60,12 @@ export interface FrameInMessage { t: 'frame'; from: string; data: string }
 export interface PeerMessage { t: 'peer'; id: string; state: PeerState; lastSeen?: number }
 export interface PingMessage { t: 'ping' }
 export interface PongMessage { t: 'pong' }
+/** §7.2 desktop → relay: hand `data` to the gateway for the phone behind `cap`. */
+export interface PushMessage { t: 'push'; id: number; cap: string; data: string }
+/** §7.2 relay → desktop: what became of push `id`. */
+export interface PushedMessage { t: 'pushed'; id: number; result: PushResultValue }
+/** A push result as received; a newer relay may add values (treat unknown ones as `error`). */
+export type PushResultValue = PushResult | (string & {})
 export interface ErrorMessage { t: 'error'; code: RelayErrorCodeValue; message?: string; to?: string }
 
 /** Everything a client may send to the relay. */
@@ -69,6 +76,7 @@ export type ClientMessage =
   | RevokeMessage
   | WatchMessage
   | FrameOutMessage
+  | PushMessage
   | PingMessage
   | PongMessage
 
@@ -78,6 +86,7 @@ export type ServerMessage =
   | ReadyMessage
   | FrameInMessage
   | PeerMessage
+  | PushedMessage
   | ErrorMessage
   | PingMessage
   | PongMessage
@@ -179,6 +188,13 @@ function parseClientObject(o: Obj): ClientMessage {
     case 'frame':
       if (o.from !== undefined) fail('client frames carry `to`, not `from`')
       return { t: 'frame', to: id(o, 'to'), data: b64u(o, 'data') }
+    case 'push': {
+      const cap = str(o, 'cap')
+      if (cap.length === 0 || cap.length > PushLimits.capChars) fail('cap has the wrong length')
+      const data = b64u(o, 'data')
+      if (data.length > PushLimits.dataChars) fail('data is too long')
+      return { t: 'push', id: int(o, 'id'), cap, data }
+    }
     case 'ping':
       return { t: 'ping' }
     case 'pong':
@@ -204,6 +220,11 @@ function parseServerObject(o: Obj): ServerMessage | null {
       const msg: PeerMessage = { t: 'peer', id: peerId, state: oneOf<PeerState>(o, 'state', PEER_STATES) }
       if (o.lastSeen !== undefined) msg.lastSeen = int(o, 'lastSeen')
       return msg
+    }
+    case 'pushed': {
+      const result = str(o, 'result')
+      if (result === '') fail('result must not be empty')
+      return { t: 'pushed', id: int(o, 'id'), result }
     }
     case 'error': {
       const code = str(o, 'code')
@@ -247,6 +268,7 @@ export function parseRelayMessage(text: string): RelayMessage | null {
     case 'challenge':
     case 'ready':
     case 'peer':
+    case 'pushed':
     case 'error':
       return parseServerObject(o)
     case 'frame':

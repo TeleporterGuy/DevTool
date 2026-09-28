@@ -51,6 +51,9 @@ export interface ChatManagerDeps {
  */
 export type ChatListener = (seq: number, event: ChatEvent, state: ChatState) => void
 
+/** Every chat's events, whether or not anything attached (the mobile push emitter). */
+export type ChatWatcher = (tabId: string, event: ChatEvent, state: ChatState) => void
+
 interface ChatRuntime {
   tabId: string
   config: ChatTabConfig
@@ -79,6 +82,7 @@ interface ChatRuntime {
  */
 export class ClaudeChatManager {
   private readonly runtimes = new Map<string, ChatRuntime>()
+  private readonly watchers = new Set<ChatWatcher>()
 
   constructor(private readonly deps: ChatManagerDeps) {}
 
@@ -109,6 +113,12 @@ export class ClaudeChatManager {
   }
 
   /** The folded state so far, or null when the tab has no runtime. */
+  /** See every chat's events from now on; call the returned function to stop. */
+  watch(watcher: ChatWatcher): () => void {
+    this.watchers.add(watcher)
+    return () => { this.watchers.delete(watcher) }
+  }
+
   snapshot(tabId: string): ChatSnapshot | null {
     const runtime = this.runtimes.get(tabId)
     return runtime ? { seq: runtime.seq, state: runtime.state } : null
@@ -365,6 +375,13 @@ export class ClaudeChatManager {
         listener(runtime.seq, event, runtime.state)
       } catch (err) {
         this.deps.log(`chatListener tab=${runtime.tabId} error=${err instanceof Error ? err.message : String(err)}`)
+      }
+    }
+    for (const watcher of this.watchers) {
+      try {
+        watcher(runtime.tabId, event, runtime.state)
+      } catch (err) {
+        this.deps.log(`chatWatcher tab=${runtime.tabId} error=${err instanceof Error ? err.message : String(err)}`)
       }
     }
   }

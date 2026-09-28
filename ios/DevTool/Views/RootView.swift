@@ -65,6 +65,11 @@ struct RootView: View {
             if let ref = taskSelection, !scopeIds.contains(ref.desktopId) { taskSelection = nil }
         }
         .task { await runDemoRoute() }
+        // A tapped notification: now, or (cold launch) as soon as the view is up.
+        .task { await openRequestedChat() }
+        .onChange(of: model.requestedChat) { _, route in
+            if route != nil { Task { await openRequestedChat() } }
+        }
     }
 
     private var splitView: some View {
@@ -133,6 +138,35 @@ struct RootView: View {
             }
         }
         return wanted == nil ? fallback : nil
+    }
+
+    /// Opens the chat a tapped notification points at. On a cold launch the
+    /// inbox may not be there yet, so it waits for the tab for a while; if it
+    /// never shows up, it still selects the desktop.
+    private func openRequestedChat() async {
+        guard let route = model.requestedChat else { return }
+        model.requestedChat = nil
+        guard model.desktop(route.desktopId) != nil else { return }
+        showSettings = false
+        if model.pairing != nil { model.dismissPairing() }
+        if detailPath.last == route { return }
+        for _ in 0..<100 {
+            if let found = model.tab(desktopId: route.desktopId, tabId: route.tabId) {
+                demoNavigating = true
+                sidebar = .desktop(route.desktopId)
+                let ref = TaskRef(desktopId: route.desktopId, taskId: found.task.id)
+                if taskSelection != ref {
+                    taskSelection = ref
+                    try? await Task.sleep(for: .milliseconds(350))
+                }
+                preferredColumn = .detail
+                detailPath = found.tab.type == .claudeChat ? [route] : []
+                demoNavigating = false
+                return
+            }
+            try? await Task.sleep(for: .milliseconds(100))
+        }
+        sidebar = .desktop(route.desktopId)
     }
 
     /// Debug-only shortcuts for screenshots (`-demoRoute`).
