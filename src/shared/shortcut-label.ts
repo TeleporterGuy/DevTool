@@ -65,6 +65,15 @@ function displayKey(key: string): string {
   return key
 }
 
+/**
+ * True when this keystroke is Zoom In (Ctrl/Cmd + `=` or `+` / Plus).
+ * Shift+= produces `+` on most layouts; some stacks still report `=`.
+ */
+export function isMenuZoomInKey(key: string): boolean {
+  const k = key.toLowerCase()
+  return k === '=' || k === '+' || k === 'plus'
+}
+
 function isDarwin(platform: ShortcutPlatform): boolean {
   return platform === 'darwin'
 }

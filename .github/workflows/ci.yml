@@ -1,3 +1,4 @@
+# Unit tests + typecheck. Does not launch Electron or talk to a real SSH host.
 name: CI
 
 on:
@@ -88,3 +89,44 @@ jobs:
       - name: Build
         if: runner.os == 'Linux'
         run: npm run build
+
+  # Native notebooks run their kernel through conda + jupyter_client. This job
+  # installs a real conda env and fails if the live kernel smoke cannot run.
+  notebook-live-windows:
+    runs-on: windows-latest
+    timeout-minutes: 35
+    env:
+      # Fail this job if conda / ipykernel / jupyter_client cannot be resolved.
+      NOTEBOOK_LIVE_REQUIRED: '1'
+      GIT_AUTHOR_NAME: ci
+      GIT_AUTHOR_EMAIL: ci@example.invalid
+      GIT_COMMITTER_NAME: ci
+      GIT_COMMITTER_EMAIL: ci@example.invalid
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - uses: conda-incubator/setup-miniconda@v3
+        with:
+          miniforge-variant: Miniforge3
+          miniforge-version: latest
+          python-version: '3.12'
+          activate-environment: notebook-smoke
+          auto-activate-base: false
+          conda-forge: true
+      - name: Install ipykernel and jupyter_client
+        shell: bash -el {0}
+        run: python -m pip install ipykernel jupyter_client
+      - name: Check jupyter in the conda env
+        shell: bash -el {0}
+        run: python -c "import jupyter_client, ipykernel; print('jupyter ok')"
+      # Skip Electron postinstall / node-pty rebuild; the matrix job covers that.
+      # Tests do not import electron or node-pty. esbuild still needs its binary.
+      - name: Install JS deps without native Electron rebuild
+        run: npm ci --ignore-scripts
+      - name: Download esbuild binary
+        run: node node_modules/esbuild/install.js
+      - name: Run unit tests and live kernel smoke
+        run: npm test

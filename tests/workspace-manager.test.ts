@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import { WorkspaceManager } from '../src/main/workspace-manager'
+import { WorkspaceManager, canonicalFilePath } from '../src/main/workspace-manager'
 import { execFileSync } from 'child_process'
 import fs from 'fs'
 import path from 'path'
@@ -7,6 +7,10 @@ import os from 'os'
 
 function initGitRepo(dir: string): void {
   execFileSync('git', ['init', '-b', 'master', dir])
+  // GitHub runners have no user.name/email; commits fail without a local identity.
+  execFileSync('git', ['-C', dir, 'config', 'user.email', 'test@example.com'])
+  execFileSync('git', ['-C', dir, 'config', 'user.name', 'Test'])
+  execFileSync('git', ['-C', dir, 'config', 'commit.gpgsign', 'false'])
   execFileSync('git', ['-C', dir, 'commit', '--allow-empty', '-m', 'init'])
 }
 
@@ -15,7 +19,7 @@ describe('WorkspaceManager', () => {
   let repoDir: string
 
   beforeEach(() => {
-    repoDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'ws-test-')))
+    repoDir = canonicalFilePath(fs.mkdtempSync(path.join(os.tmpdir(), 'ws-test-')))
     initGitRepo(repoDir)
     manager = new WorkspaceManager()
   })
@@ -59,6 +63,7 @@ describe('WorkspaceManager', () => {
       const result = await manager.create(repoDir, 'my-workspace', 'master')
       expect(result.branchName).toBe('my-workspace')
       expect(result.relativeProjectPath).toBe('')
+      expect(canonicalFilePath(result.worktreePath)).toBe(canonicalFilePath(path.join(repoDir, '.worktrees', 'my-workspace')))
       expect(fs.existsSync(result.worktreePath)).toBe(true)
       // Verify the branch was created
       const branches = await manager.listBranches(repoDir)
@@ -67,7 +72,9 @@ describe('WorkspaceManager', () => {
 
     it('places worktree under .worktrees/', async () => {
       const result = await manager.create(repoDir, 'test-ws', 'master')
-      expect(result.worktreePath).toBe(path.join(repoDir, '.worktrees', 'test-ws'))
+      expect(canonicalFilePath(result.worktreePath)).toBe(
+        canonicalFilePath(path.join(repoDir, '.worktrees', 'test-ws'))
+      )
     })
 
     it('computes relativeProjectPath for subdirectory projects', async () => {
@@ -75,7 +82,9 @@ describe('WorkspaceManager', () => {
       fs.mkdirSync(subDir, { recursive: true })
       const result = await manager.create(subDir, 'sub-ws', 'master')
       expect(result.relativeProjectPath).toBe('apps/web')
-      expect(result.worktreePath).toBe(path.join(repoDir, '.worktrees', 'sub-ws'))
+      expect(canonicalFilePath(result.worktreePath)).toBe(
+        canonicalFilePath(path.join(repoDir, '.worktrees', 'sub-ws'))
+      )
     })
 
     it('rejects invalid branch names', async () => {
@@ -223,7 +232,9 @@ describe('WorkspaceManager', () => {
       fs.rmSync(strayDir, { recursive: true, force: true })
     })
 
-    it('refuses to delete when a check times out', async () => {
+    // PATH-front POSIX `git` shim: execFile('git') on Windows only launches git.exe,
+    // so this timeout path is covered on Linux/macOS (and in CI), not here.
+    it.skipIf(process.platform === 'win32')('refuses to delete when a check times out', async () => {
       const result = await manager.create(repoDir, 'timeout-ws', 'master')
       // Shadow `git status` with a command that never answers; everything else passes through.
       const shimDir = fs.mkdtempSync(path.join(os.tmpdir(), 'git-shim-'))

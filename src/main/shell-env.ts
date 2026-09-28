@@ -1,6 +1,8 @@
 import { execFile as execFileCb, type ExecFileOptions } from 'child_process'
 import fs from 'fs'
 import path from 'path'
+import type { CondaEnvInfo } from '../shared/conda'
+import { condaSpawnPathDirs, isCondaEnvPrefix } from './conda-env'
 import { extraWindowsSearchDirs } from './resolve-agent-command'
 
 type PathApi = typeof path.win32 | typeof path.posix
@@ -18,6 +20,11 @@ export interface ShellEnvDeps {
   existsSync?: (filePath: string) => boolean
   path?: PathApi
   execFile?: ExecFileFn
+}
+
+export interface ShellEnvOptions {
+  /** Per-project conda env. Applied before the portable Node prepend so Node stays first. */
+  condaEnv?: CondaEnvInfo | null
 }
 
 let resolvedEnv: Record<string, string> | null = null
@@ -221,7 +228,44 @@ export function setPortableNodeDir(dir: string): void {
   portableNodeDir = dir
 }
 
-export function getShellEnv(deps: ShellEnvDeps = {}): Record<string, string> {
+/**
+ * Prepend a conda env the way `conda activate` does on PATH, plus CONDA_* vars.
+ * Used instead of `eval "$(conda shell.bash hook)"` so Pi/Claude/Codex (spawned
+ * as binaries, not through Git Bash) get the same python as a terminal tab.
+ */
+export function applyCondaEnv(
+  env: Record<string, string>,
+  condaEnv: CondaEnvInfo | null | undefined,
+  deps: ShellEnvDeps = {}
+): Record<string, string> {
+  const name = condaEnv?.name?.trim() ?? ''
+  const prefix = condaEnv?.prefix?.trim() ?? ''
+  if (!name || !prefix) return env
+  // Dead / missing prefix: do not pretend conda is active.
+  if (!isCondaEnvPrefix(prefix, deps)) return env
+
+  const existsSync = deps.existsSync ?? fs.existsSync
+  const dirs = condaSpawnPathDirs({ name, prefix }, deps).filter((dir) => existsSync(dir))
+  if (dirs.length === 0) return env
+
+  let next = env
+  // prependDirToPath puts one folder first, so walk last→first to keep conda's order.
+  for (let i = dirs.length - 1; i >= 0; i--) {
+    next = prependDirToPath(next, dirs[i], deps)
+  }
+  next = { ...next }
+  next.CONDA_PREFIX = prefix
+  next.CONDA_DEFAULT_ENV = name
+  next.CONDA_PROMPT_MODIFIER = `(${name}) `
+  next.CONDA_SHLVL = '1'
+  // Login rc evals `conda shell.*.hook`, which otherwise `conda activate base`.
+  next.CONDA_AUTO_ACTIVATE_BASE = 'false'
+  // conda activate drops PYTHONHOME so the env's python is used.
+  delete next.PYTHONHOME
+  return next
+}
+
+export function getShellEnv(deps: ShellEnvDeps = {}, options: ShellEnvOptions = {}): Record<string, string> {
   const platform = platformOf(deps)
   const live = envOf(deps) as Record<string, string>
 
@@ -242,11 +286,13 @@ export function getShellEnv(deps: ShellEnvDeps = {}): Record<string, string> {
       base.PATH = windowsLoginPath
       if ('Path' in base) base.Path = windowsLoginPath
     }
-    return prependDirToPath(base, portableNodeDir, deps)
+    const withConda = applyCondaEnv(base, options.condaEnv, deps)
+    return prependDirToPath(withConda, portableNodeDir, deps)
   }
 
   const base = resolvedEnv ?? live
-  return prependDirToPath(base, portableNodeDir, deps)
+  const withConda = applyCondaEnv({ ...base }, options.condaEnv, deps)
+  return prependDirToPath(withConda, portableNodeDir, deps)
 }
 
 /** Test helper: clear cached login env and the Node-dir override. */

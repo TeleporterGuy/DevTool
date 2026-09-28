@@ -72,7 +72,10 @@ describe('parseGitStatusZ against real repositories', () => {
     expect(status().staged).toEqual([{ relativePath: 'ünïcode.txt', status: 'A' }])
   })
 
-  it('keeps a path with a backslash and a double quote raw and stages it', () => {
+  // Windows rejects `"` in a file name, so this round-trip is POSIX-only.
+  it.skipIf(process.platform === 'win32')(
+    'keeps a path with a backslash and a double quote raw and stages it',
+    () => {
     const weird = 'q"back\\slash.txt'
     write(weird, 'z\n')
 
@@ -81,7 +84,8 @@ describe('parseGitStatusZ against real repositories', () => {
 
     stage(gitEntryPaths(untracked.untracked[0]))
     expect(status().staged).toEqual([{ relativePath: weird, status: 'A' }])
-  })
+    }
+  )
 
   it('reports both paths of a staged rename and round-trips stage/unstage', () => {
     write('old name.txt', 'renameable\n')

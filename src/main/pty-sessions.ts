@@ -7,6 +7,8 @@ import type { HookInjector } from './hook-injector'
 import type { TabActivityRegistry } from './tab-activity-registry'
 import { agentCommandOverride, conptySpawnArgv, isAiAgentCommand, resolveAgentCommand } from './resolve-agent-command'
 import { isLocalInteractiveTerminal, resolveLocalTerminalSpawn } from './resolve-local-terminal'
+import { wrapInteractiveShellWithCondaActivate } from './conda-env'
+import type { CondaEnvInfo } from '../shared/conda'
 import {
   buildRemotePiExtensionScript,
   piExtensionLocalPath,
@@ -61,6 +63,10 @@ export interface PtySessionsDeps {
   broadcastAgentActivity: (tabId: string) => void
   sendToWindow: (windowId: number, channel: string, ...args: unknown[]) => void
   log: (message: string) => void
+  /** The project's conda env, activated for local PTYs (remote ones use the host's). */
+  condaEnvForProject?: (projectId?: string) => CondaEnvInfo | undefined
+  /** A tab's process was killed (closing a notebook tab also stops its kernel). */
+  onKill?: (tabId: string) => void
 }
 
 /**
@@ -163,6 +169,7 @@ export class PtySessions {
     }
     this.deps.ptyManager.kill(id)
     this.runtimes.delete(id)
+    this.deps.onKill?.(id)
     // No process, no activity: a status left at 'working' here would protect the
     // task from cleanup for the rest of the session.
     this.deps.activityRegistry.remove(id)
@@ -296,6 +303,7 @@ export class PtySessions {
       deps.log(`ptySpawn ssh id=${id} file=${sshFile}`)
       deps.ptyManager.spawn(id, sshFile, os.tmpdir(), cols, rows, sshArgs, undefined, callbacks)
     } else {
+      const condaEnv = deps.condaEnvForProject?.(projectId)
       const isClaudeLocal = shell === 'claude' && extraEnv?.DEVTOOL_TAB_ID
       const isPiLocal = shell === AI_TAB_META.pi.command && extraEnv?.DEVTOOL_TAB_ID
       if (isClaudeLocal) {
@@ -330,11 +338,12 @@ export class PtySessions {
       } else if (isLocalInteractiveTerminal(shell, spawnArgs)) {
         // Git Bash / $SHELL from Settings — do not inherit process.env.SHELL on Windows.
         const resolved = resolveLocalTerminalSpawn(config)
-        spawnFile = resolved.file
-        spawnArgs = resolved.args
+        const wrapped = wrapInteractiveShellWithCondaActivate(resolved, condaEnv)
+        spawnFile = wrapped.file
+        spawnArgs = wrapped.args
         deps.log(`ptySpawn resolve id=${id} shell=${shell} file=${spawnFile} args=${spawnArgs.join(' ')}`)
       }
-      deps.ptyManager.spawn(id, spawnFile, cwd, cols, rows, spawnArgs, localEnv, callbacks)
+      deps.ptyManager.spawn(id, spawnFile, cwd, cols, rows, spawnArgs, localEnv, callbacks, condaEnv)
     }
   }
 

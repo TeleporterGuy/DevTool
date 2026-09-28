@@ -17,7 +17,7 @@ export const Field = React.forwardRef<HTMLInputElement, InputProps>(function Fie
 
 type SelectProps = React.SelectHTMLAttributes<HTMLSelectElement>
 
-/** Standard dropdown, same geometry as Field. */
+/** Standard dropdown, same geometry as Field. Native option lists on Windows ignore CSS — conda pickers use ThemedSelect. */
 export function Select({ className, children, ...rest }: SelectProps): React.ReactElement {
   return (
     <select className={`${fieldCls} cursor-pointer ${className ?? ''}`} {...rest}>

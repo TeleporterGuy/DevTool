@@ -25,6 +25,7 @@ describe('createTab', () => {
 
   it('names a file tab after the file, and marks a diff as one', () => {
     expect(createTab('editor', { filePath: '/a/b/index.ts' }).title).toBe('index.ts')
+    expect(createTab('notebook', { filePath: '/a/b/demo.ipynb' }).title).toBe('demo.ipynb')
     expect(createTab('diff', { filePath: '/a/b/index.ts' }).title).toBe('index.ts (diff)')
   })
 

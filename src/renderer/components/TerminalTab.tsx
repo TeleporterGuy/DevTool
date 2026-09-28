@@ -400,10 +400,18 @@ export default function TerminalTab({ tabId, visible, projectId, taskId, pane, p
           entry.pendingData = []
 
           const attachPromise = shellCommand
-            ? window.api.ptySpawn(tabId, '/bin/sh', '/', entry.term.cols, entry.term.rows, ['-c', shellCommand.command])
-            : sshConfig
-              ? window.api.ptySpawn(tabId, '$SHELL', projectDirRef.current, entry.term.cols, entry.term.rows, ['-l'], undefined, projectId, sshConfig)
-              : window.api.ptySpawn(tabId, '', projectDirRef.current, entry.term.cols, entry.term.rows)
+            ? window.api.ptySpawn(tabId, '/bin/sh', '/', entry.term.cols, entry.term.rows, ['-c', shellCommand.command], undefined, projectId)
+            : window.api.ptySpawn(
+                tabId,
+                sshConfig ? '$SHELL' : '',
+                projectDirRef.current,
+                entry.term.cols,
+                entry.term.rows,
+                sshConfig ? ['-l'] : undefined,
+                undefined,
+                projectId,
+                sshConfig
+              )
 
           void attachPromise.then(({ cols, rows, scrollback }) => {
             resizeTerminal(entry, cols, rows)

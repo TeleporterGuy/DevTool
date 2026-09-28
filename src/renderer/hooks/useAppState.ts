@@ -88,7 +88,7 @@ export function useAppState(): AppActions {
   })
   const layout = useWindowLayout(core)
   const { config, projectsData, windowViewState } = core
-  const zoom = useZoom(config?.fontSize)
+  const zoom = useZoom(config?.fontSize, config?.editorFontSize, core.updateConfig)
 
   const { projects } = projectsData
   const selectedProjectId = windowViewState.selectedProjectId

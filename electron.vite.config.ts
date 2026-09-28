@@ -7,7 +7,7 @@ import tailwindcss from '@tailwindcss/vite'
 
 // Copy static runtime assets (loaded by external processes, not bundled) into
 // out/main so the main process can resolve them via join(__dirname, ...) in both
-// `electron-vite dev` and packaged builds. Currently: the pi status extension.
+// `electron-vite dev` and packaged builds: Pi status extension + notebook kernel helper.
 function copyMainAssets(): Plugin {
   return {
     name: 'devtool-copy-main-assets',
@@ -17,6 +17,10 @@ function copyMainAssets(): Plugin {
       copyFileSync(
         resolve('resources/pi-status-extension.mjs'),
         resolve(outDir, 'pi-status-extension.mjs')
+      )
+      copyFileSync(
+        resolve('resources/notebook-kernel.py'),
+        resolve(outDir, 'notebook-kernel.py')
       )
     }
   }

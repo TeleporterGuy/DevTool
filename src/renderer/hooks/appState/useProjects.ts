@@ -26,7 +26,7 @@ import {
 } from './projectsData'
 import { removeProjectView } from './viewState'
 
-export type ProjectUpdate = Partial<Pick<Project, 'directory' | 'aiToolArgs' | 'tunnel' | 'emoji' | 'icon' | 'tagIds' | 'ephemeral'>>
+export type ProjectUpdate = Partial<Pick<Project, 'directory' | 'aiToolArgs' | 'condaEnvName' | 'condaEnvPrefix' | 'tunnel' | 'emoji' | 'icon' | 'tagIds' | 'ephemeral'>>
 
 export interface ProjectsActions {
   addProject: (name: string, directory: string, tagIds?: string[]) => Project

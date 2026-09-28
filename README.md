@@ -20,9 +20,15 @@ Windows support (Git Bash terminals, portable Node, `.cmd` agent shims) was cont
 
 **Editor Tabs** -- Monaco editor with syntax highlighting, configurable fonts, line numbers, minimap, word wrap, and auto-save.
 
+**Notebook Tabs** -- Native `.ipynb` editor. Only the focused cell mounts Monaco; idle code cells are syntax-highlighted read-only previews. Run cells against ipykernel in the project's conda env, or a per-notebook override (`jupyter_client`). Stream text, plain text, PNG and errors. Collapsible cells, run all / run all above, clear outputs. Local projects only.
+
+**Agent Links** -- Cursor-style "add to chat": in an editor or notebook, Ctrl+L / ⌘L inserts an `@path (lines a-b)` or `@notebook.ipynb (cell N, id …)` link into the task's agent tab (Pi, Claude, Codex or Claude chat) without sending it; Ctrl+Shift+L / ⌘⇧L links the whole file. Also from the editor and file-tree context menus, the palette, and an "Add to agent" hint on a selection.
+
 **Diff Viewer** -- Git diff visualization with side-by-side rendering and whitespace options.
 
 **AI Tool Integration** -- Dedicated tabs for Pi (primary), Claude Code, and Codex. Hook server enables bidirectional communication with AI tools running in terminals.
+
+**Conda Environments** -- Pick a conda or micromamba env per local project (Project Settings). New agent tabs prepend that env onto PATH; new interactive terminals run a login shell, then `conda activate` the project env (Windows Git Bash uses `--rcfile` so conda init in `.bash_profile` is kept). Notebook tabs start ipykernel with the same env. Already-open tabs keep their env. DevTool does not create or delete envs.
 
 **Remote SSH Projects** -- Connect to remote machines via SSH with port forwarding, SOCKS proxy tunneling, key authentication, health checks, and auto-reconnection.
 
@@ -142,7 +148,16 @@ npm run lint           # ESLint (eslint.config.mjs); warnings are allowed, error
 
 `npm install` sets `git config core.hooksPath .githooks`, so commits run `.githooks/pre-commit`: ESLint on the staged JS/TS files plus a full typecheck. Skip it once with `git commit --no-verify`.
 
-CI (`.github/workflows/ci.yml`) runs typecheck and tests on macOS, Linux and Windows with Node 24, plus lint and `npm run build` on Linux. The Windows job adds the MSVC Spectre-mitigated libs to the runner's Visual Studio if they are missing, since `postinstall` compiles `node-pty`.
+Live notebook kernel smoke (real `jupyter_client` / ipykernel, no Electron window). Needs a conda env with those packages:
+
+```bash
+NOTEBOOK_LIVE=1 npm test -- tests/notebook-kernel.live.test.ts
+```
+
+CI (`.github/workflows/ci.yml`):
+
+- **test (macOS / Linux / Windows)** — typecheck and tests with Node 24, plus lint and `npm run build` on Linux. The Windows job adds the MSVC Spectre-mitigated libs to the runner's Visual Studio if they are missing, since `postinstall` compiles `node-pty`. Live kernel and live SSH (`DEMO_SSH=1`) stay skipped.
+- **notebook-live-windows** — the unit suite plus the live kernel smoke (`NOTEBOOK_LIVE_REQUIRED=1`) after Miniforge + `ipykernel` / `jupyter_client`. Skips the native rebuild (`npm ci --ignore-scripts`).
 
 ## License
 
