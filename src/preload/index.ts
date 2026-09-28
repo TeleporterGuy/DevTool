@@ -363,7 +363,7 @@ const api = {
   workspaceDelete: (request: WorkspaceDeleteRequest): Promise<WorkspaceDeleteResult> =>
     ipcRenderer.invoke('workspace-delete', request),
 
-  // Native notebooks (Phase 4). One jupyter_client helper per tab, local conda env only.
+  // Native notebooks. One jupyter_client helper per tab, local conda env only.
   notebookKernelStart: (
     tabId: string,
     projectId: string,

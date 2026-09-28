@@ -102,8 +102,11 @@ export class AppRuntime {
   private readonly notesStorage = new NotesStorage(CONFIG_DIR)
   private readonly paletteFrecencyStorage = new PaletteFrecencyStorage(CONFIG_DIR)
   private readonly ptyManager = new PtyManager()
-  /** Fork: native notebook tabs' Jupyter kernels, one per tab. */
+  /** Native notebook tabs' Jupyter kernels, one per tab. */
   private readonly notebookKernels = new NotebookKernelManager()
+  /** tabId -> token of a kernel start still awaiting its conda lookup. */
+  private readonly pendingNotebookStarts = new Map<string, number>()
+  private notebookStartCounter = 0
   private readonly hookServer = new HookServer((message) => this.logDebug(message))
   private readonly codexSessionManager = new CodexSessionManager()
   private readonly workspaceManager = new WorkspaceManager()
@@ -162,7 +165,7 @@ export class AppRuntime {
       sendToWindow: (windowId, channel, ...args) => this.sendToWindow(windowId, channel, ...args),
       log: (message) => this.logDebug(message),
       condaEnvForProject: (projectId) => this.condaEnvForLocalProject(projectId),
-      onKill: (tabId) => this.notebookKernels.shutdown(tabId)
+      onKill: (tabId) => this.shutdownNotebookKernel(tabId)
     })
     this.startupWindowStates = this.storage.loadWindowSession(
       this.projectsStore.peek(),
@@ -653,7 +656,7 @@ export class AppRuntime {
       startKernel: (tabId, projectId, cwd, override) => this.startNotebookKernel(tabId, projectId, cwd, override),
       execute: (tabId, requestId, code, cellId) => this.notebookKernels.execute(tabId, requestId, code, cellId),
       interrupt: (tabId) => this.notebookKernels.interrupt(tabId),
-      shutdown: (tabId) => this.notebookKernels.shutdown(tabId),
+      shutdown: (tabId) => this.shutdownNotebookKernel(tabId),
       listCondaEnvs: () => listCondaEnvs({}, { force: true })
     })
   }
@@ -786,6 +789,12 @@ export class AppRuntime {
     return resolved
   }
 
+  /** Cancels a start still waiting on the conda lookup, then stops a running kernel. */
+  private shutdownNotebookKernel(tabId: string): void {
+    this.pendingNotebookStarts.delete(tabId)
+    this.notebookKernels.shutdown(tabId)
+  }
+
   private async startNotebookKernel(
     tabId: string,
     projectId: string,
@@ -806,8 +815,13 @@ export class AppRuntime {
       ? { condaEnvName: condaOverride.name, condaEnvPrefix: condaOverride.prefix }
       : null
     const hasOverride = !!(override?.condaEnvName?.trim() || override?.condaEnvPrefix?.trim())
+    const token = ++this.notebookStartCounter
+    this.pendingNotebookStarts.set(tabId, token)
     // Override: live conda list only. No override: existing project-default resolve.
     const listedEnvs = hasOverride ? await listCondaEnvsForNotebookKernel() : []
+    // The tab was closed (or a newer start began) while conda was listing envs.
+    if (this.pendingNotebookStarts.get(tabId) !== token) return {}
+    this.pendingNotebookStarts.delete(tabId)
     const projectResolved = hasOverride ? null : resolveProjectCondaEnv(project)
     const resolved = resolveNotebookKernelCondaEnv(override, project, listedEnvs, projectResolved, process.platform)
     if (!resolved.ok) return fail(resolved.code, resolved.error)

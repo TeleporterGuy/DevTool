@@ -6,34 +6,35 @@
  * Monaco / ResizeObserver fire a lot of that noise when notebook cells move.
  */
 
-function collectErrorText(error: unknown, message?: string): string {
+/** Name and message only: a stack that merely passes through Monaco is not noise. */
+function headlineText(error: unknown, message?: string): string {
   const chunks: string[] = []
   if (message) chunks.push(message)
-  if (error instanceof Error) {
-    chunks.push(error.name, error.message, error.stack ?? '')
-    return chunks.join(' ')
-  }
-  if (typeof error === 'string') {
-    chunks.push(error)
-    return chunks.join(' ')
-  }
-  if (error && typeof error === 'object') {
-    const rec = error as { name?: unknown; message?: unknown; stack?: unknown }
+  if (error instanceof Error || (error && typeof error === 'object')) {
+    const rec = error as { name?: unknown; message?: unknown }
     if (typeof rec.name === 'string') chunks.push(rec.name)
     if (typeof rec.message === 'string') chunks.push(rec.message)
-    if (typeof rec.stack === 'string') chunks.push(rec.stack)
+  } else if (typeof error === 'string') {
+    chunks.push(error)
   }
   return chunks.join(' ')
 }
 
+/** Monaco's CancellationError: name and message are both exactly "Canceled". */
+function isMonacoCancellation(error: unknown, message?: string): boolean {
+  if (message && /^(Uncaught )?(Error: )?Canceled(: Canceled)?$/.test(message.trim())) return true
+  if (!error || typeof error !== 'object') return false
+  const rec = error as { name?: unknown; message?: unknown }
+  return rec.message === 'Canceled' && (rec.name === 'Canceled' || rec.name === 'Error')
+}
+
 export function isIgnorableRendererError(error: unknown, message?: string): boolean {
-  const text = collectErrorText(error, message)
+  const text = headlineText(error, message)
   if (!text.trim()) return false
   if (/ResizeObserver loop/i.test(text)) return true
-  if (/\bCanceled\b/i.test(text)) return true
+  if (isMonacoCancellation(error, message)) return true
   if (/InstantiationService has been disposed/i.test(text)) return true
-  if (/disposed/i.test(text) && /(model|editor|textmodel|monaco|instantiation)/i.test(text)) return true
-  if (/monaco/i.test(text)) return true
+  if (/\b(model|editor|textmodel)\b.*\bdisposed\b|\bdisposed\b.*\b(model|editor|textmodel)\b/i.test(text)) return true
   return false
 }
 

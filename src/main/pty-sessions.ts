@@ -63,9 +63,9 @@ export interface PtySessionsDeps {
   broadcastAgentActivity: (tabId: string) => void
   sendToWindow: (windowId: number, channel: string, ...args: unknown[]) => void
   log: (message: string) => void
-  /** Fork: the project's conda env, activated for local PTYs (remote ones use the host's). */
+  /** The project's conda env, activated for local PTYs (remote ones use the host's). */
   condaEnvForProject?: (projectId?: string) => CondaEnvInfo | undefined
-  /** Fork: a tab's process was killed (closing a notebook tab also stops its kernel). */
+  /** A tab's process was killed (closing a notebook tab also stops its kernel). */
   onKill?: (tabId: string) => void
 }
 

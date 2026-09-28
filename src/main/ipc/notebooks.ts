@@ -25,7 +25,7 @@ const condaOverride = v.optional(v.object({
 }))
 
 /**
- * Native notebook tabs (fork, Phase 4): one Jupyter kernel per tab, run in the
+ * Native notebook tabs: one Jupyter kernel per tab, run in the
  * project's conda env. `cwd` is re-checked against the project's allowed roots in
  * `startKernel`, and execute payloads keep their own parser (`parseNotebookExecuteIpc`)
  * so its error messages stay the ones the tab shows.

@@ -1,4 +1,4 @@
-/** Conda / micromamba spawn-time env picker (Phase 3). */
+/** Conda / micromamba spawn-time env picker. */
 
 export type CondaKind = 'conda' | 'micromamba'
 

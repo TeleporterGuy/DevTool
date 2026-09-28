@@ -1,5 +1,5 @@
 /**
- * nbformat v4 notebooks used by the in-app editor (Phase 4).
+ * nbformat v4 notebooks used by the in-app editor.
  * Parse/serialize stay in shared so renderer, main, and tests use one shape.
  */
 
@@ -22,10 +22,17 @@ export type NotebookOutput =
   | {
       type: 'execute_result'
       data: Record<string, string>
+      /** JSON mime entries (`application/json`, `*+json`) kept as-is so a save writes them back. */
+      jsonData?: Record<string, unknown>
       executionCount: number | null
       metadata?: Record<string, unknown>
     }
-  | { type: 'display_data'; data: Record<string, string>; metadata?: Record<string, unknown> }
+  | {
+      type: 'display_data'
+      data: Record<string, string>
+      jsonData?: Record<string, unknown>
+      metadata?: Record<string, unknown>
+    }
   | { type: 'error'; ename: string; evalue: string; traceback: string[] }
   | { type: 'unknown'; raw: Record<string, unknown> }
 
@@ -36,6 +43,8 @@ export interface NotebookCell {
   outputs: NotebookOutput[]
   executionCount: number | null
   metadata: Record<string, unknown>
+  /** Cell fields DevTool does not edit (e.g. markdown `attachments`), written back on save. */
+  extra?: Record<string, unknown>
 }
 
 export interface NotebookDocument {
@@ -400,15 +409,33 @@ export function splitNotebookText(source: string): string[] {
   return parts.map((line, index) => (index === parts.length - 1 ? line : `${line}\n`))
 }
 
+export function isJsonMimeType(key: string): boolean {
+  return key === 'application/json' || key.endsWith('+json')
+}
+
 export function normalizeMimeBundle(data: unknown): Record<string, string> {
+  return splitMimeBundle(data).data
+}
+
+/**
+ * Text mime entries become strings; JSON mime entries (and any other non-text
+ * value) are kept untouched in `jsonData` so they survive a save.
+ */
+export function splitMimeBundle(data: unknown): {
+  data: Record<string, string>
+  jsonData?: Record<string, unknown>
+} {
   const record = asRecord(data)
-  if (!record) return {}
+  if (!record) return { data: {} }
   const out: Record<string, string> = {}
+  const json: Record<string, unknown> = {}
   for (const [key, value] of Object.entries(record)) {
-    if (typeof value === 'string') out[key] = value
-    else if (Array.isArray(value)) out[key] = value.map((line) => (typeof line === 'string' ? line : '')).join('')
+    if (isJsonMimeType(key)) json[key] = value
+    else if (typeof value === 'string') out[key] = value
+    else if (Array.isArray(value) && value.every((line) => typeof line === 'string')) out[key] = value.join('')
+    else if (value !== undefined) json[key] = value
   }
-  return out
+  return Object.keys(json).length > 0 ? { data: out, jsonData: json } : { data: out }
 }
 
 function parseOutput(raw: unknown): NotebookOutput {
@@ -423,7 +450,7 @@ function parseOutput(raw: unknown): NotebookOutput {
     const count = typeof record.execution_count === 'number' ? record.execution_count : null
     return {
       type: 'execute_result',
-      data: normalizeMimeBundle(record.data),
+      ...splitMimeBundle(record.data),
       executionCount: count,
       metadata: asRecord(record.metadata) ?? undefined
     }
@@ -431,7 +458,7 @@ function parseOutput(raw: unknown): NotebookOutput {
   if (outputType === 'display_data') {
     return {
       type: 'display_data',
-      data: normalizeMimeBundle(record.data),
+      ...splitMimeBundle(record.data),
       metadata: asRecord(record.metadata) ?? undefined
     }
   }
@@ -457,14 +484,14 @@ function serializeOutput(output: NotebookOutput): Record<string, unknown> {
     return {
       output_type: 'execute_result',
       execution_count: output.executionCount,
-      data: output.data,
+      data: { ...output.jsonData, ...output.data },
       metadata: output.metadata ?? {}
     }
   }
   if (output.type === 'display_data') {
     return {
       output_type: 'display_data',
-      data: output.data,
+      data: { ...output.jsonData, ...output.data },
       metadata: output.metadata ?? {}
     }
   }
@@ -484,6 +511,8 @@ function parseCellType(value: unknown): NotebookCellType {
   return 'code'
 }
 
+const CORE_CELL_KEYS = new Set(['id', 'cell_type', 'metadata', 'source', 'outputs', 'execution_count'])
+
 function parseCell(raw: unknown, index: number): NotebookCell {
   const record = asRecord(raw) ?? {}
   const cellType = parseCellType(record.cell_type)
@@ -492,7 +521,12 @@ function parseCell(raw: unknown, index: number): NotebookCell {
   // churn the document (and break agent links to the cell) on every read.
   const id = typeof record.id === 'string' && record.id.trim() ? record.id : `cell-${index}`
   const executionCount = typeof record.execution_count === 'number' ? record.execution_count : null
+  const extra: Record<string, unknown> = {}
+  for (const [key, value] of Object.entries(record)) {
+    if (!CORE_CELL_KEYS.has(key)) extra[key] = value
+  }
   return {
+    ...(Object.keys(extra).length > 0 ? { extra } : {}),
     id,
     cellType,
     source: joinNotebookText(record.source),
@@ -546,7 +580,11 @@ export function parseNotebook(text: string): NotebookDocument {
 
 export function serializeNotebook(doc: NotebookDocument): string {
   const cells = doc.cells.map((cell) => {
+    const extra = { ...cell.extra }
+    // nbformat allows attachments on markdown and raw cells only.
+    if (cell.cellType === 'code') delete extra.attachments
     const raw: Record<string, unknown> = {
+      ...extra,
       id: cell.id,
       cell_type: cell.cellType,
       metadata: stripOutputsHiddenMetadata(cell.metadata),
@@ -560,7 +598,8 @@ export function serializeNotebook(doc: NotebookDocument): string {
   })
   const payload = {
     nbformat: doc.nbformat || NOTEBOOK_NBFORMAT,
-    nbformat_minor: doc.nbformatMinor || NOTEBOOK_NBFORMAT_MINOR,
+    // Every cell is written with an `id`, which nbformat only allows from 4.5.
+    nbformat_minor: Math.max(doc.nbformatMinor || 0, NOTEBOOK_NBFORMAT_MINOR),
     metadata: doc.metadata,
     cells
   }
@@ -740,17 +779,16 @@ export function applyKernelEventToOutputs(
     return appendOutput(outputs, { type: 'stream', name: event.name, text: event.text })
   }
   if (event.event === 'execute_result') {
-    const data = normalizeMimeBundle(event.data)
     return appendOutput(outputs, {
       type: 'execute_result',
-      data,
+      ...splitMimeBundle(event.data),
       executionCount: typeof event.execution_count === 'number' ? event.execution_count : null
     })
   }
   if (event.event === 'display_data') {
     return appendOutput(outputs, {
       type: 'display_data',
-      data: normalizeMimeBundle(event.data)
+      ...splitMimeBundle(event.data)
     })
   }
   if (event.event === 'error') {

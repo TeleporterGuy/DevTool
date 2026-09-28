@@ -90,7 +90,7 @@ jobs:
         if: runner.os == 'Linux'
         run: npm run build
 
-  # Fork: native notebooks run their kernel through conda + jupyter_client. This job
+  # Native notebooks run their kernel through conda + jupyter_client. This job
   # installs a real conda env and fails if the live kernel smoke cannot run.
   notebook-live-windows:
     runs-on: windows-latest

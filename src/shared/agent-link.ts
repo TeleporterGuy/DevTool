@@ -2,7 +2,7 @@ import { isAgentTabType } from './types'
 import type { Tab } from './types'
 
 /**
- * Agent context links (Phase 4.5): a compact reference to a file, a line range or
+ * Agent context links: a compact reference to a file, a line range or
  * a notebook cell that is typed into an agent's input instead of the text itself.
  *
  * The `@path` token is kept clean — Claude Code and Pi treat `@path` as a file

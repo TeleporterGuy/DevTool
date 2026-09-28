@@ -464,14 +464,14 @@ Skip a step only if the previous phase already includes it by accident (e.g. PAT
 
 ## How to work on this fork
 
-Work happens **only** on this repository: [TeleporterGuy/DevTool](https://github.com/TeleporterGuy/DevTool). Do not open pull requests against [join3r/claude-project](https://github.com/join3r/claude-project). If a PR is created (local, GitHub, Cursor cloud, or any other agent), its base must be **this fork** (`origin`, usually `master` or a branch on TeleporterGuy/DevTool).
+Day-to-day work happens on the fork, [TeleporterGuy/DevTool](https://github.com/TeleporterGuy/DevTool). Pull requests created by agents or tools (local, GitHub, Cursor cloud, or any other agent) target **the fork** (`origin`, usually `master` or a branch on TeleporterGuy/DevTool), never [join3r/claude-project](https://github.com/join3r/claude-project) directly.
 
-Fetching upstream is for optionally merging their changes in, not for contributing back.
+Finished work goes upstream as a separate step, only when TeleporterGuy decides to offer it: merge `upstream/master` into the fork first, then cut a branch from `upstream/master` with the changes that fit upstream and open the PR against join3r/claude-project from there.
 
 ```text
 GitHub (origin):  https://github.com/TeleporterGuy/DevTool
 Local:            this tree
-Upstream (read):  https://github.com/join3r/claude-project
+Upstream:         https://github.com/join3r/claude-project
 ```
 
 ```bash

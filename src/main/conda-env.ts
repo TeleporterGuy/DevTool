@@ -679,6 +679,13 @@ export function condaActivateLoginScript(
   return [...setup, `exec ${execFile} --rcfile ${quotedRc} -i`].join('; ')
 }
 
+const POSIX_SHELLS = new Set(['bash', 'zsh', 'sh', 'dash', 'ksh', 'mksh'])
+
+export function isPosixShell(shellFile: string): boolean {
+  const base = shellFile.replace(/\\/g, '/').split('/').pop() ?? ''
+  return POSIX_SHELLS.has(base.toLowerCase().replace(/\.exe$/, ''))
+}
+
 /**
  * Interactive local tabs only. Agent binaries (Pi/Claude/Codex) keep PATH prepend
  * and must not go through this wrapper.
@@ -691,6 +698,9 @@ export function wrapInteractiveShellWithCondaActivate(
   const name = condaEnv?.name?.trim() ?? ''
   const prefix = condaEnv?.prefix?.trim() ?? ''
   if (!name || !prefix) return spawn
+  // The wrapper script is POSIX sh; fish, nushell etc. cannot parse it and would exit.
+  // They keep the plain spawn, and the PATH prepend still applies.
+  if (!isPosixShell(spawn.file)) return spawn
 
   let rcfilePath: string | undefined
   if (platformOf(deps) === 'win32') {

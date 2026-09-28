@@ -22,6 +22,8 @@ Built with Electron, React, and TypeScript.
 
 **Notebook Tabs** -- Native `.ipynb` editor. Only the focused cell mounts Monaco; idle code cells are syntax-highlighted read-only previews (not live editors). Run cells against ipykernel in the project's default conda env, or a per-notebook override (`jupyter_client`). Stream text, plain/text, PNG, and errors. Local projects only.
 
+**Agent Links** -- Cursor-style "add to chat": in an editor or notebook, Ctrl+L / ⌘L inserts an `@path (lines a-b)` or `@notebook.ipynb (cell N, id …)` link into the task's agent tab (Pi, Claude, Codex or Claude chat) without sending it; Ctrl+Shift+L / ⌘⇧L links the whole file. Also from the editor and file-tree context menus, the palette, and an "Add to agent" hint on a selection.
+
 **Diff Viewer** -- Git diff visualization with side-by-side rendering and whitespace options.
 
 **AI Tool Integration** -- Dedicated tabs for Pi (primary), Claude Code, and Codex. Hook server enables bidirectional communication with AI tools running in terminals.
