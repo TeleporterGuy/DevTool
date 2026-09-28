@@ -1,7 +1,8 @@
 import React from 'react'
+import DOMPurify from 'dompurify'
+import MarkdownPreview from './MarkdownPreview'
 import {
-  mimePlainText,
-  mimePng,
+  notebookOutputDisplay,
   NOTEBOOK_PNG_OMITTED,
   NOTEBOOK_TRUNCATED_MARKER,
   type NotebookOutput
@@ -55,20 +56,24 @@ function OutputBlock({ output }: { output: NotebookOutput }): React.ReactElement
   }
 
   if (output.type === 'execute_result' || output.type === 'display_data') {
-    const png = mimePng(output.data)
-    const text = mimePlainText(output.data)
-    const truncated = (text != null && looksTruncated(text)) || Object.values(output.data).some(looksTruncated)
+    const display = notebookOutputDisplay(output.data, output.jsonData)
+    if (!display) return null
+    const truncated = Object.values(output.data).some(looksTruncated)
+    const pre = 'm-0 text-[12px] leading-snug font-mono whitespace-pre-wrap break-words'
     return (
       <div className="px-3 py-1.5">
-        {png && (
-          <img
-            alt=""
-            src={`data:image/png;base64,${png.replace(/\s/g, '')}`}
-            className="max-w-full h-auto"
-          />
+        {display.kind === 'image' && <img alt="" src={display.src} className="max-w-full h-auto" />}
+        {display.kind === 'text' && <pre className={pre}>{display.text}</pre>}
+        {display.kind === 'json' && <pre className={pre}>{display.text}</pre>}
+        {display.kind === 'html' && (
+          // Kernel HTML is sanitized (no scripts, no event handlers) before it is shown.
+          <div className="note-preview text-sm overflow-x-auto" dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(display.html) }} />
         )}
-        {!png && text && (
-          <pre className="m-0 text-[12px] leading-snug font-mono whitespace-pre-wrap break-words">{text}</pre>
+        {display.kind === 'markdown' && (
+          <MarkdownPreview content={display.markdown} effectiveTheme="dark" variant="flow" />
+        )}
+        {display.kind === 'unsupported' && (
+          <div className="text-2xs text-text-muted italic">Output not shown here: {display.mimeTypes.join(', ')}</div>
         )}
         {truncated && <TruncationNote />}
       </div>
