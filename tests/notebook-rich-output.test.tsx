@@ -4,7 +4,7 @@ import React from 'react'
 import { cleanup, render } from '@testing-library/react'
 import NotebookOutputs from '../src/renderer/components/NotebookOutputs'
 import MarkdownPreview from '../src/renderer/components/MarkdownPreview'
-import { notebookOutputDisplay, resolveMarkdownAttachments, type NotebookOutput } from '../src/shared/notebook'
+import { applyKernelEventToOutputs, notebookOutputDisplay, parseKernelEventLine, resolveMarkdownAttachments, type NotebookOutput } from '../src/shared/notebook'
 
 void React
 
@@ -32,6 +32,22 @@ describe('notebookOutputDisplay', () => {
   it('names what it cannot show instead of showing nothing', () => {
     expect(notebookOutputDisplay({ 'application/vnd.custom': 'z' })).toEqual({ kind: 'unsupported', mimeTypes: ['application/vnd.custom'] })
     expect(notebookOutputDisplay({})).toBeNull()
+  })
+})
+
+describe('live kernel output path', () => {
+  it('keeps a JSON-only display_data object through parsing and into the cell outputs', () => {
+    const line = JSON.stringify({
+      event: 'display_data',
+      id: 'req-1',
+      data: { 'application/json': { a: 1, message: 'This rich output should survive save/reopen.' } }
+    })
+    const event = parseKernelEventLine(line)
+    expect(event).toMatchObject({ event: 'display_data', data: { 'application/json': { a: 1 } } })
+    const outputs = applyKernelEventToOutputs([], event!)!
+    const out = outputs[0] as Extract<NotebookOutput, { type: 'display_data' }>
+    expect(notebookOutputDisplay(out.data, out.jsonData)).toMatchObject({ kind: 'json' })
+    expect((notebookOutputDisplay(out.data, out.jsonData) as { text: string }).text).toContain('"message"')
   })
 })
 
