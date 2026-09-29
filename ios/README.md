@@ -40,7 +40,7 @@ xcodebuild -project DevTool.xcodeproj -scheme DevTool \
   build CODE_SIGNING_ALLOWED=NO
 ```
 
-Signing is automatic with no team set. That's enough for the simulator. To run on a device, pick your team in Xcode (Signing & Capabilities) and don't commit it. The bundle ID `sk.awantech.devtool` is a placeholder set in `project.yml`.
+Signing is automatic with team `AX23G9CAL9` (set in `project.yml` for both targets). The App IDs `sk.awantech.devtool` (Push Notifications, App Groups) and `sk.awantech.devtool.notifications` (App Groups), and the App Group `group.sk.awantech.devtool`, are registered in the developer portal. `CODE_SIGNING_ALLOWED=NO` still builds for the simulator without an Apple account.
 
 ## Run on the simulator
 
