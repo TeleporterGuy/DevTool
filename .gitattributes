@@ -1,0 +1,3 @@
+# Test vectors are compared byte for byte (protocol/ts/vectors.test.ts, the Swift
+# tests); keep them LF on Windows checkouts too.
+protocol/vectors/** text eol=lf
