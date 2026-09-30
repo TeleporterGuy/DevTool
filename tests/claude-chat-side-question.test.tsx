@@ -41,6 +41,8 @@ function renderComposer() {
     loadFiles: () => Promise.resolve([]),
     onSend: vi.fn(),
     onSideQuestion: vi.fn(),
+    onBash: vi.fn(),
+    onPermissions: vi.fn(),
     onStop: vi.fn(),
     onSetModel: vi.fn(),
     onSetMode: vi.fn(),
@@ -79,6 +81,31 @@ describe('Composer /btw', () => {
     submit('hello')
     expect(props.onSend).toHaveBeenCalledWith('hello', [])
     expect(props.onSideQuestion).not.toHaveBeenCalled()
+  })
+})
+
+describe('Composer ! and /permissions', () => {
+  it('runs a !command instead of sending it', () => {
+    const { props, textarea, submit } = renderComposer()
+    submit('!  git status ')
+    expect(props.onBash).toHaveBeenCalledWith('git status')
+    expect(props.onSend).not.toHaveBeenCalled()
+    expect((textarea as HTMLTextAreaElement).value).toBe('')
+  })
+
+  it('ignores a bare !', () => {
+    const { props, submit } = renderComposer()
+    submit('!')
+    expect(props.onBash).not.toHaveBeenCalled()
+    expect(props.onSend).not.toHaveBeenCalled()
+  })
+
+  it('opens the rules editor for /permissions rather than a terminal', () => {
+    const { props, submit } = renderComposer()
+    submit('/permissions')
+    expect(props.onPermissions).toHaveBeenCalled()
+    expect(props.onOpenInTerminal).not.toHaveBeenCalled()
+    expect(props.onSend).not.toHaveBeenCalled()
   })
 })
 

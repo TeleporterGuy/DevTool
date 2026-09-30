@@ -8,7 +8,10 @@
   "compilerOptions": {
     "composite": false,
     "noEmit": true,
-    "rootDir": "."
+    "rootDir": ".",
+    // protocol/ts uses explicit `.ts` import specifiers so relay/ and the protocol tools
+    // can run under plain Node type stripping. Allowed here because this config never emits.
+    "allowImportingTsExtensions": true
   },
-  "include": ["src/**/*", "tests/**/*", "electron.vite.config.ts", "vitest.config.ts"]
+  "include": ["src/**/*", "tests/**/*", "protocol/**/*", "electron.vite.config.ts", "vitest.config.ts"]
 }

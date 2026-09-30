@@ -1,0 +1,107 @@
+# Mobile client: the relay (tests, typecheck, Docker image) and the iOS app
+# (DevToolKit tests, an unsigned simulator build). protocol/ts is tested by ci.yml.
+# Pushes to master also publish the relay image to ghcr.io/join3r/devtool-relay.
+name: Mobile
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'relay/**'
+      - 'protocol/**'
+      - 'ios/**'
+      - '.dockerignore'
+      - '.github/workflows/mobile.yml'
+  pull_request:
+    branches: [master]
+    paths:
+      - 'relay/**'
+      - 'protocol/**'
+      - 'ios/**'
+      - '.dockerignore'
+      - '.github/workflows/mobile.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: mobile-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  relay:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      # The relay has no runtime dependencies; vitest, tsc and @types/node resolve
+      # from the root node_modules (relay/README.md). No Electron download needed.
+      - name: Install dev dependencies
+        run: npm ci --ignore-scripts
+      - name: Download esbuild binary
+        run: node node_modules/esbuild/install.js
+      - name: Typecheck
+        working-directory: relay
+        run: npm run typecheck
+      - name: Test
+        working-directory: relay
+        run: npm test
+
+  relay-image:
+    needs: relay
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - name: Log in to GHCR
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/devtool-relay
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=sha
+      # Built from the repo root: the image copies relay/ and protocol/ts.
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: relay/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: ${{ github.ref == 'refs/heads/master' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  ios:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Xcode version
+        run: xcodebuild -version
+      - name: DevToolKit tests
+        working-directory: ios/DevToolKit
+        run: swift test
+      - name: Install xcodegen
+        run: brew install xcodegen
+      - name: Build the app for the simulator (unsigned)
+        working-directory: ios
+        run: |
+          xcodegen generate
+          xcodebuild -project DevTool.xcodeproj -scheme DevTool \
+            -destination 'generic/platform=iOS Simulator' -configuration Debug \
+            -derivedDataPath build/ci build CODE_SIGNING_ALLOWED=NO

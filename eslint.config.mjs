@@ -8,7 +8,9 @@ export default tseslint.config(
   {
     ignores: ['out/**', 'dist/**', 'node_modules/**', '.claude/**', 'coverage/**',
       // Committed esbuild bundle at the repo root, not source.
-      'index.js']
+      'index.js',
+      // The relay and the iOS app have their own tooling and lint configs.
+      'relay/**', 'ios/**']
   },
   js.configs.recommended,
   ...tseslint.configs.recommended,

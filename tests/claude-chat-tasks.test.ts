@@ -41,6 +41,25 @@ describe('chat tasks', () => {
     expect(state.items.some((item) => item.kind === 'notice' && item.text === 'Found it')).toBe(true)
   })
 
+  it("keeps a subagent's own shells and foreground tasks out of the timeline and the task list", () => {
+    // What the CLI sends when a background subagent runs a slow command without a description.
+    const heredoc = "python3 - <<'EOF'\nprint(1)\nEOF"
+    const state = fold([
+      agentCall('tu1', { description: 'Integrate', prompt: 'go', subagent_type: 'general-purpose', run_in_background: true }),
+      system('task_started', { task_id: 'a1', tool_use_id: 'tu1', description: 'Integrate', task_type: 'local_agent', is_backgrounded: true }, 1000),
+      system('task_started', { task_id: 'b1', owned_by_subagent: true, tool_use_id: 'sub-tu', description: heredoc, is_backgrounded: false, task_type: 'local_bash' }, 1100),
+      system('task_notification', { task_id: 'b1', tool_use_id: 'sub-tu', status: 'completed', output_file: '', summary: heredoc }, 1200),
+      bashCall('tu2', 'npm test'),
+      system('task_started', { task_id: 'b2', tool_use_id: 'tu2', description: 'npm test', is_backgrounded: false, task_type: 'local_bash' }, 1300),
+      system('task_notification', { task_id: 'b2', tool_use_id: 'tu2', status: 'completed', output_file: '', summary: 'npm test' }, 1400),
+      system('task_notification', { task_id: 'a1', tool_use_id: 'tu1', status: 'completed', output_file: '', summary: 'Integrated' }, 1500)
+    ])
+    const notices = state.items.filter((item) => item.kind === 'notice').map((item) => item.kind === 'notice' ? item.text : '')
+    expect(notices).toEqual(['Integrated'])
+    expect(state.tasks.b1).toMatchObject({ nested: true, status: 'completed' })
+    expect(state.tasks.b2.nested).toBeUndefined()
+  })
+
   it('runs a finished subagent again when it registers anew (resumed)', () => {
     const state = fold([
       system('task_started', { task_id: 't1', description: 'Agent', task_type: 'local_agent', is_backgrounded: true }, 1000),

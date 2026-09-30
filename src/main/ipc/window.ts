@@ -1,6 +1,7 @@
 import { app, BrowserWindow, clipboard, dialog, nativeTheme, shell } from 'electron'
 import type { AppConfig, WindowViewState } from '../../shared/types'
 import { detectExternalEditors, openFolderInEditor } from '../external-ide'
+import { resolveSafeProjectPath } from '../project-fs-path'
 import type { IpcRegistrar } from './registrar'
 import { str, windowViewState } from './schemas'
 import { v } from './validate'
@@ -84,6 +85,18 @@ export function registerWindowHandlers(ipc: IpcRegistrar, deps: WindowDeps): voi
     BrowserWindow.fromWebContents(event.sender)?.webContents.openDevTools()
   })
   ipc.handle('app:quit', [], () => app.quit())
+
+  // "Reveal in Finder": a project/workspace directory opens; a file or folder under one is selected in its parent.
+  ipc.handle('reveal-in-folder', [v.string({ nonEmpty: true }), v.optional(v.string())], async (_event, folder, relativePath) => {
+    const root = await deps.assertAllowedDirectory(folder)
+    if (relativePath) {
+      shell.showItemInFolder(resolveSafeProjectPath(root, relativePath))
+      return undefined
+    }
+    const error = await shell.openPath(root)
+    if (error) throw new Error(error)
+    return undefined
+  })
 
   ipc.handle('external-ide-detect', [], () => detectExternalEditors())
   ipc.handle('open-in-ide', [v.string({ nonEmpty: true }), v.string({ nonEmpty: true })], async (_event, editorId, folder) => {

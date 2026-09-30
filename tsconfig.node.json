@@ -4,12 +4,14 @@
     "moduleResolution": "bundler",
     "target": "ESNext",
     "outDir": "out",
-    "rootDir": "src",
+    "rootDir": ".",
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
     "composite": true,
+    "rewriteRelativeImportExtensions": true,
     "types": ["node"]
   },
-  "include": ["src/main/**/*", "src/preload/**/*", "src/shared/**/*"]
+  "include": ["src/main/**/*", "src/preload/**/*", "src/shared/**/*", "protocol/ts/**/*"],
+  "exclude": ["protocol/ts/**/*.test.ts"]
 }

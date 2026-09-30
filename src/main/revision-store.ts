@@ -30,6 +30,7 @@ function structuralClone<T>(value: T): T {
 export class RevisionStore<T> {
   private revision = 0
   private data: T
+  private readonly listeners = new Set<(data: T) => void>()
 
   constructor(private readonly options: RevisionStoreOptions<T>) {
     this.data = options.normalize ? options.normalize(options.initial) : options.initial
@@ -50,6 +51,15 @@ export class RevisionStore<T> {
   }
 
   /**
+   * Called with the new canonical value after every commit, for main-side
+   * consumers (the mobile inbox). Treat the value as read-only, like `peek`.
+   */
+  subscribe(listener: (data: T) => void): () => void {
+    this.listeners.add(listener)
+    return () => { this.listeners.delete(listener) }
+  }
+
+  /**
    * Unconditional write from main itself. Nothing in main holds a stale snapshot
    * long enough for a CAS to be meaningful, but the revision bump and broadcast
    * are what keep the renderers honest, so every main-side mutation goes here.
@@ -60,6 +70,13 @@ export class RevisionStore<T> {
     this.options.persist(this.data)
     const envelope = this.get()
     this.options.broadcast(envelope)
+    for (const listener of this.listeners) {
+      try {
+        listener(this.data)
+      } catch {
+        // A consumer's failure must not fail the save that triggered it.
+      }
+    }
     return envelope
   }
 

@@ -6,6 +6,7 @@ import { DEFAULT_CONFIG, createHomeTask, type Project, type ProjectsData } from 
 import { AppProvider } from '../src/renderer/context/AppContext'
 import { TabStatusProvider } from '../src/renderer/context/TabStatusContext'
 import Sidebar from '../src/renderer/components/Sidebar'
+import { projectDeletePrompt, revealFolder } from '../src/renderer/components/sidebar/SidebarContextMenu'
 
 // React import is required by the JSX runtime under vitest's default transform.
 void React
@@ -119,5 +120,57 @@ describe('Sidebar context menu', () => {
     await waitFor(() => {
       expect(saved[saved.length - 1]?.pinnedItems).toEqual([{ type: 'project', projectId: 'p1' }])
     })
+  })
+
+  it('asks before deleting a task, and keeps it when you cancel', async () => {
+    const confirm = vi.fn(() => false)
+    vi.stubGlobal('confirm', confirm)
+    renderSidebar()
+    fireEvent.contextMenu(await screen.findByText('Fix the thing'))
+    fireEvent.click(await screen.findByRole('button', { name: 'Delete…' }))
+    expect(confirm).toHaveBeenCalledWith('Delete task "Fix the thing"? Its tabs close.')
+    expect(screen.getByText('Fix the thing')).toBeTruthy()
+
+    confirm.mockReturnValue(true)
+    fireEvent.contextMenu(screen.getByText('Fix the thing'))
+    fireEvent.click(await screen.findByRole('button', { name: 'Delete…' }))
+    await waitFor(() => {
+      expect(saved[saved.length - 1]?.projects[0].tasks.some(t => t.id === 't1')).toBe(false)
+    })
+  })
+
+  it('asks before deleting a project, and reveals its folder', async () => {
+    const confirm = vi.fn((_message: string) => false)
+    vi.stubGlobal('confirm', confirm)
+    renderSidebar()
+    await screen.findByText('Alpha Project')
+    const row = document.querySelector('[data-drag-type="project"][data-drag-id="p1"]')!
+    fireEvent.contextMenu(row)
+    fireEvent.click(await screen.findByRole('button', { name: 'Delete…' }))
+    expect(confirm.mock.calls[0][0]).toMatch(/^Delete project "Alpha Project"\?[\s\S]*Its 2 tasks close[\s\S]*not touched/)
+    expect(screen.getByText('Alpha Project')).toBeTruthy()
+
+    fireEvent.contextMenu(row)
+    fireEvent.click(await screen.findByRole('button', { name: /Reveal in Finder|Show in/ }))
+    expect(window.api.revealInFolder).toHaveBeenCalledWith('/tmp/alpha')
+  })
+})
+
+describe('revealFolder / projectDeletePrompt', () => {
+  const project: Project = {
+    id: 'p1',
+    name: 'Alpha',
+    directory: '/repo',
+    tasks: [
+      { ...buildProjects()[0].tasks[1], id: 'w1', workspace: { worktreePath: '/wt/feat', branchName: 'feat', baseBranch: 'main', relativeProjectPath: 'pkg' } as never }
+    ]
+  }
+  it('uses the workspace for a workspace task and the project dir otherwise', () => {
+    expect(revealFolder([project], 'p1')).toBe('/repo')
+    expect(revealFolder([project], 'p1', 'w1')).toBe('/wt/feat/pkg')
+    expect(revealFolder([{ ...project, ssh: { host: 'h', port: 22, username: 'u', remoteDir: '/x' } as never }], 'p1')).toBeNull()
+  })
+  it('names the worktrees a project delete removes', () => {
+    expect(projectDeletePrompt(project)).toMatch(/Its task closes[\s\S]*workspace worktree is removed from disk/)
   })
 })

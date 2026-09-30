@@ -2,7 +2,8 @@ import React, { useState, useCallback, useRef, useEffect } from 'react'
 import { ChevronRight } from 'lucide-react'
 import type { GitStatusResult, GitStatusEntry } from '../../shared/types'
 import { gitEntryPaths } from '../../shared/types'
-import { LinkBtn } from './ui'
+import { ContextMenu, LinkBtn, type ContextMenuItem } from './ui'
+import { revealInFolderLabel } from '../utils/revealLabel'
 
 interface Props {
   gitStatus: GitStatusResult | null
@@ -29,6 +30,8 @@ export default function GitStatus({ gitStatus, projectDir, onFileClick }: Props)
   const [busy, setBusy] = useState(false)
   const [commitMsg, setCommitMsg] = useState('')
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
+  const [menu, setMenu] = useState<{ x: number; y: number; sectionKey: SectionKey; entry: GitStatusEntry } | null>(null)
+  const closeMenu = useCallback(() => setMenu(null), [])
   const feedbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => {
@@ -260,14 +263,49 @@ export default function GitStatus({ gitStatus, projectDir, onFileClick }: Props)
                     onFileClick={onFileClick}
                     onAction={handleFileAction}
                     onDiscard={key === 'unstaged' ? handleDiscard : undefined}
+                    onContextMenu={(e) => {
+                      e.preventDefault()
+                      setMenu({ x: e.clientX, y: e.clientY, sectionKey: key, entry })
+                    }}
                   />
                 ))}
             </div>
           )
         })
       )}
+      <ContextMenu menu={menu} onClose={closeMenu} items={menu ? fileMenuItems(menu.sectionKey, menu.entry) : []} />
     </div>
   )
+
+  function fileMenuItems(sectionKey: SectionKey, entry: GitStatusEntry): ContextMenuItem[] {
+    const name = entry.relativePath.split('/').pop() ?? entry.relativePath
+    const items: ContextMenuItem[] = [
+      { label: 'Open', onSelect: () => onFileClick(entry.relativePath) },
+      { label: sectionKey === 'staged' ? 'Unstage' : 'Stage', disabled: busy, onSelect: () => { void handleFileAction(sectionKey, entry) } }
+    ]
+    // A deleted file has nothing on disk to show.
+    if (entry.status !== 'D') {
+      items.push({
+        label: revealInFolderLabel(),
+        onSelect: () => {
+          window.api.revealInFolder(projectDir, entry.relativePath).catch((err: unknown) => {
+            showFeedback('error', err instanceof Error ? err.message : String(err))
+          })
+        }
+      })
+    }
+    if (sectionKey === 'unstaged') {
+      items.push({
+        label: 'Discard changes…',
+        danger: true,
+        disabled: busy,
+        onSelect: () => {
+          if (window.confirm(`Discard your changes to "${name}"? This can't be undone.`)) void handleDiscard(gitEntryPaths(entry))
+        }
+      })
+    }
+    return items
+  }
 }
 
 interface FileRowProps {
@@ -277,9 +315,10 @@ interface FileRowProps {
   onFileClick: (filePath: string) => void
   onAction: (sectionKey: SectionKey, entry: GitStatusEntry) => void
   onDiscard?: (files: string[]) => void
+  onContextMenu: (e: React.MouseEvent) => void
 }
 
-function FileRow({ entry, sectionKey, busy, onFileClick, onAction, onDiscard }: FileRowProps) {
+function FileRow({ entry, sectionKey, busy, onFileClick, onAction, onDiscard, onContextMenu }: FileRowProps) {
   const badgeCls = BADGE_CLASSES[sectionKey]
   const [confirmDiscard, setConfirmDiscard] = useState(false)
   const confirmTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -308,6 +347,7 @@ function FileRow({ entry, sectionKey, busy, onFileClick, onAction, onDiscard }: 
     <div
       className="group flex items-center px-2 pl-6 py-0.5 cursor-pointer gap-2 select-none hover:bg-surface-3 transition-colors duration-(--motion-fast)"
       onClick={() => onFileClick(entry.relativePath)}
+      onContextMenu={onContextMenu}
     >
       <span
         className={`inline-flex items-center justify-center w-[18px] h-[18px] rounded-sm text-xs font-semibold shrink-0 ${badgeCls}`}

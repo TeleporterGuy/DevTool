@@ -1,10 +1,23 @@
 import type { AppConfig } from '../../shared/types'
+import { isValidRelayUrl, normalizeRelayUrl, type MobileConfig } from '../../shared/mobile'
 import { IpcValidationError, isPlainRecord, v, type Validator } from './validate'
 
 const str = v.string()
 const bool = v.boolean()
 const num = v.number()
 const nullableStr = v.nullable(v.string())
+
+export const relayUrl: Validator<string> = (value, path) => {
+  const url = normalizeRelayUrl(v.string({ max: 2048 })(value, path))
+  if (!isValidRelayUrl(url)) throw new IpcValidationError(`Invalid IPC argument ${path}: not a ws:// or wss:// URL`)
+  return url
+}
+
+const mobileConfig: Validator<MobileConfig> = v.object({
+  enabled: bool,
+  relayUrl,
+  desktopName: v.optional(v.string({ max: 100 }))
+})
 
 /**
  * One validator per AppConfig key. Typed as a total map so adding a field to
@@ -49,6 +62,7 @@ const CONFIG_FIELDS: { [K in keyof AppConfig]-?: Validator<AppConfig[K]> } = {
   codexCommand: str,
   piCommand: str,
   lazyLoadClaude: bool,
+  keepAwakeWhileWorking: bool,
   claudeDefaultView: v.literal('terminal', 'chat'),
   lastProjectId: nullableStr,
   lastTaskId: nullableStr,
@@ -71,8 +85,15 @@ const CONFIG_FIELDS: { [K in keyof AppConfig]-?: Validator<AppConfig[K]> } = {
     combine: v.literal('and', 'or'),
     settledOnly: bool,
     includeCleanWorkspaces: bool
-  })
+  }),
+  mobile: v.optional(mobileConfig)
 }
+
+/**
+ * Keys main owns through dedicated IPC (`mobile-*`). A window sends its whole
+ * config on every save, and a copy from before a mobile-* call would undo it.
+ */
+export const MAIN_OWNED_CONFIG_KEYS: readonly (keyof AppConfig)[] = ['mobile']
 
 export interface SanitizedConfig {
   config: Partial<AppConfig>

@@ -2,11 +2,37 @@ import React from 'react'
 import { ChevronRight } from 'lucide-react'
 import { useApp } from '../../context/AppContext'
 import { isEphemeralProject, isRemoteProject, isShellCommandProject } from '../../../shared/types'
-import type { PinnedItem, Task } from '../../../shared/types'
+import type { PinnedItem, Project, Task } from '../../../shared/types'
 import { useMenuPosition } from '../../hooks/useMenuPosition'
 import { isSettled, isSnoozed, isUnread, snoozePresets } from '../inbox'
 import { menuCls, menuItemCls } from '../ui'
+import { revealInFolderLabel } from '../../utils/revealLabel'
+import { joinWorkspaceDir } from '../../../shared/workspace-path'
 import type { SidebarContextMenuState } from './SidebarParts'
+
+/**
+ * The local folder a project or task works in, for "Reveal in Finder": the task's
+ * workspace worktree when it has one, else the project directory. Remote and
+ * shell-command projects have none on this machine.
+ */
+export function revealFolder(projects: readonly Project[], projectId: string, taskId?: string): string | null {
+  const project = projects.find(p => p.id === projectId)
+  if (!project || isRemoteProject(project) || isShellCommandProject(project)) return null
+  const workspace = taskId ? project.tasks.find(t => t.id === taskId)?.workspace : undefined
+  if (workspace?.worktreePath) return joinWorkspaceDir(workspace.worktreePath, workspace.relativeProjectPath)
+  return project.directory || null
+}
+
+/** The confirmation for deleting a project, naming what goes with it. */
+export function projectDeletePrompt(project: Project): string {
+  const tasks = project.tasks.length
+  const workspaces = project.tasks.filter(t => t.workspace).length
+  const lines = [`Delete project "${project.name}"?`]
+  if (tasks > 0) lines.push(`${tasks === 1 ? 'Its task closes' : `Its ${tasks} tasks close`}, with their tabs.`)
+  if (workspaces > 0) lines.push(`${workspaces === 1 ? 'Its workspace worktree is' : `Its ${workspaces} workspace worktrees are`} removed from disk, even with uncommitted changes.`)
+  if (!isRemoteProject(project) && !isShellCommandProject(project)) lines.push('The project folder itself is not touched.')
+  return lines.join('\n\n')
+}
 
 /**
  * The right-click menu for a project or task row, and the snooze presets that
@@ -171,11 +197,29 @@ export default function SidebarContextMenu({
                   }}>Reconnect SSH</button>
                 )
               })()}
+              {(() => {
+                const folder = revealFolder(projects, contextMenu.projectId, contextMenu.type === 'task' ? contextMenu.taskId : undefined)
+                if (!folder) return null
+                return (
+                  <button className={menuItemCls} onClick={() => {
+                    setContextMenu(null)
+                    window.api.revealInFolder(folder).catch((err: unknown) => {
+                      window.alert(`Couldn't open ${folder}: ${err instanceof Error ? err.message : String(err)}`)
+                    })
+                  }}>{revealInFolderLabel()}</button>
+                )
+              })()}
               <button className={`${menuItemCls} text-danger`} onClick={() => {
-                if (contextMenu.type === 'project') removeProject(contextMenu.projectId)
-                else handleDeleteTask(contextMenu.projectId, contextMenu.taskId!)
                 setContextMenu(null)
-              }}>Delete</button>
+                if (contextMenu.type === 'task') {
+                  void handleDeleteTask(contextMenu.projectId, contextMenu.taskId!)
+                  return
+                }
+                const project = projects.find(p => p.id === contextMenu.projectId)
+                if (!project) return
+                if (!window.confirm(projectDeletePrompt(project))) return
+                void removeProject(project.id)
+              }}>Delete…</button>
               {contextMenu.type === 'project' && (() => {
                 const project = projects.find(p => p.id === contextMenu.projectId)
                 if (!project) return null

@@ -5,6 +5,7 @@ import Sidebar from './components/Sidebar'
 import ContentArea from './components/ContentArea'
 import FileBrowserPanel from './components/FileBrowserPanel'
 import { Palette } from './palette/Palette'
+import MobilePairingPrompt from './components/MobilePairingPrompt'
 import { paletteEvents } from './palette/paletteEvents'
 
 function AppInner(): React.ReactElement {
@@ -73,6 +74,7 @@ function AppInner(): React.ReactElement {
       <ContentArea />
       <FileBrowserPanel />
       <Palette />
+      <MobilePairingPrompt />
     </div>
   )
 }
