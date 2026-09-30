@@ -124,11 +124,13 @@ public final class FallbackKeychainStore: ListableSecretStore, @unchecked Sendab
         self.fallback = fallback
     }
 
-    private func run<T>(_ body: (KeychainStore) throws(KeychainError) -> T) throws -> T {
+    // Untyped `throws` on purpose: a typed-throws closure here crashes Swift 6.3's
+    // SIL optimizer (MandatoryAllocBoxToStack, Xcode 26.6 on CI).
+    private func run<T>(_ body: (KeychainStore) throws -> T) throws -> T {
         if !lock.withLock({ useFallback }) {
             do {
                 return try body(primary)
-            } catch where error.isMissingEntitlement {
+            } catch let error as KeychainError where error.isMissingEntitlement {
                 log.notice("Keychain access group \(self.primary.accessGroup ?? "", privacy: .public) unavailable; using the default group")
                 lock.withLock { useFallback = true }
             }
@@ -136,8 +138,8 @@ public final class FallbackKeychainStore: ListableSecretStore, @unchecked Sendab
         return try body(fallback)
     }
 
-    public func data(for label: String) throws -> Data? { try run { store throws(KeychainError) in try store.data(for: label) } }
-    public func set(_ data: Data, for label: String) throws { try run { store throws(KeychainError) in try store.set(data, for: label) } }
-    public func delete(_ label: String) throws { try run { store throws(KeychainError) in try store.delete(label) } }
-    public func allItems() throws -> [String: Data] { try run { store throws(KeychainError) in try store.allItems() } }
+    public func data(for label: String) throws -> Data? { try run { try $0.data(for: label) } }
+    public func set(_ data: Data, for label: String) throws { try run { try $0.set(data, for: label) } }
+    public func delete(_ label: String) throws { try run { try $0.delete(label) } }
+    public func allItems() throws -> [String: Data] { try run { try $0.allItems() } }
 }

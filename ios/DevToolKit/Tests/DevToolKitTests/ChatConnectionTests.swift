@@ -5,6 +5,8 @@ import Testing
 /// Collects `chatEvents()` so tests can wait for one.
 actor ChatRecorder {
     private(set) var events: [ChatStreamEvent] = []
+    /// The stream has ended (and every event it carried is in `events`).
+    private(set) var finished = false
 
     init(_ stream: AsyncStream<ChatStreamEvent>) {
         Task { await self.consume(stream) }
@@ -12,6 +14,15 @@ actor ChatRecorder {
 
     private func consume(_ stream: AsyncStream<ChatStreamEvent>) async {
         for await event in stream { events.append(event) }
+        finished = true
+    }
+
+    func waitForFinish(timeout: Duration = .seconds(5)) async throws {
+        let deadline = ContinuousClock.now + timeout
+        while !finished {
+            guard ContinuousClock.now < deadline else { throw EventRecorder.TimeoutError(events: []) }
+            try await Task.sleep(for: .milliseconds(5))
+        }
     }
 
     var chats: [ChatEvent] {
@@ -191,7 +202,9 @@ actor ChatRecorder {
         try await first.waitFor(Self.isChat(seq: opened.seq + 1))
         try await second.waitFor(Self.isChat(seq: opened.seq + 1))
         await o.connection.stop()
-        // `stop()` ends the streams.
+        // `stop()` ends the streams. Sample the count once the recorder has drained
+        // whatever was already queued, or a late event makes this flaky.
+        try await first.waitForFinish()
         let after = await first.events.count
         await o.rig.relay.pushChat(o.desktop) { chat in [chat.event()] }
         try await Task.sleep(for: .milliseconds(50))
