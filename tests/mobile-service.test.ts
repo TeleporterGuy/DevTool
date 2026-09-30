@@ -140,7 +140,7 @@ function hello(
   }
 }
 
-function setup(options: { enabled?: boolean; projects?: ProjectsData } = {}) {
+function setup(options: { enabled?: boolean; projects?: ProjectsData; newChat?: MobileServiceDeps['newChat'] } = {}) {
   const timers = new FakeTimers()
   let config: MobileConfig = { ...DEFAULT_MOBILE_CONFIG, enabled: options.enabled ?? false }
   let projects: ProjectsData = options.projects ?? {
@@ -187,7 +187,8 @@ function setup(options: { enabled?: boolean; projects?: ProjectsData } = {}) {
     },
     broadcastState: (s) => states.push(s),
     log: () => {},
-    timers
+    timers,
+    newChat: options.newChat
   }
   const service = new MobileService(deps)
   const transport = () => transports[transports.length - 1]
@@ -205,8 +206,8 @@ function setup(options: { enabled?: boolean; projects?: ProjectsData } = {}) {
   }
 }
 
-function pairedSetup() {
-  const env = setup({ enabled: true })
+function pairedSetup(options: { newChat?: MobileServiceDeps['newChat'] } = {}) {
+  const env = setup({ enabled: true, ...options })
   const keys = phoneKeys(1)
   env.pairings.add({ id: keys.id, name: 'Phone', x25519Pub: keys.x, ed25519Pub: keys.ed, pairedAt: 1, lastSeen: null })
   env.service.start()
@@ -531,6 +532,31 @@ describe('MobileService app messages', () => {
     const count = env.channel.sent.length
     env.channel.hooks.onAppMessage({ t: 'evt', e: 'pairing', status: 'accepted' }) // not a request
     expect(env.channel.sent.length).toBe(count)
+  })
+})
+
+describe('MobileService chat.new (SPEC.md §8.2)', () => {
+  it('answers with the new tab, passes errors through, and rejects a missing taskId', () => {
+    const calls: string[] = []
+    const env = pairedSetup({
+      newChat: (taskId) => {
+        calls.push(taskId)
+        return taskId === 't1' ? { ok: true, tabId: 'tab-new' } : { ok: false, code: 'not-found', message: 'No such task' }
+      }
+    })
+    env.channel.hooks.onAppMessage({ t: 'req', id: 1, op: 'chat.new', params: { taskId: 't1' } })
+    expect(env.channel.sent.at(-1)).toEqual({ t: 'res', id: 1, ok: true, result: { tabId: 'tab-new' } })
+    env.channel.hooks.onAppMessage({ t: 'req', id: 2, op: 'chat.new', params: { taskId: 'nope' } })
+    expect(env.channel.sent.at(-1)).toEqual({ t: 'res', id: 2, ok: false, error: { code: 'not-found', message: 'No such task' } })
+    env.channel.hooks.onAppMessage({ t: 'req', id: 3, op: 'chat.new', params: {} })
+    expect(env.channel.sent.at(-1)).toMatchObject({ t: 'res', id: 3, ok: false, error: { code: 'bad-request' } })
+    expect(calls).toEqual(['t1', 'nope'])
+  })
+
+  it('is unsupported without the dependency', () => {
+    const env = pairedSetup()
+    env.channel.hooks.onAppMessage({ t: 'req', id: 1, op: 'chat.new', params: { taskId: 't1' } })
+    expect(env.channel.sent.at(-1)).toMatchObject({ t: 'res', id: 1, ok: false, error: { code: 'unsupported' } })
   })
 })
 

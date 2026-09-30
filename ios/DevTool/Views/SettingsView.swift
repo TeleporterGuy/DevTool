@@ -31,6 +31,8 @@ struct SettingsView: View {
 
                 NotificationsSection()
 
+                SecuritySection()
+
                 Section("About") {
                     LabeledContent("Version", value: Self.version)
                 }
@@ -60,6 +62,45 @@ struct SettingsView: View {
         let short = info?["CFBundleShortVersionString"] as? String ?? "?"
         let build = info?["CFBundleVersion"] as? String ?? "?"
         return "\(short) (\(build))"
+    }
+}
+
+/// "Require Face ID for approvals" (SPEC.md §8.3), named after what the
+/// device would use. Hidden when the device has no passcode (unless it is on).
+private struct SecuritySection: View {
+    @Environment(SecuritySettings.self) private var security
+    @State private var changing = false
+
+    var body: some View {
+        if security.canOffer {
+            Section {
+                Toggle(isOn: Binding(get: { security.requireAuthForApprovals }, set: { on in
+                    changing = true
+                    Task {
+                        await security.setRequireAuth(on)
+                        changing = false
+                    }
+                })) {
+                    Label("Require \(methodName) for approvals", systemImage: security.method?.symbol ?? "lock")
+                }
+                .disabled(changing)
+            } header: {
+                Text("Security")
+            } footer: {
+                Text(footer)
+            }
+        }
+    }
+
+    private var methodName: String {
+        security.method?.name ?? "authentication"
+    }
+
+    private var footer: String {
+        if security.method == nil {
+            return "Set a passcode in iOS Settings to use this, or turn it off."
+        }
+        return "Ask for \(methodName) before answering a permission request, question or plan. Allow and Deny on a notification then open the app first."
     }
 }
 

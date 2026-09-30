@@ -9,7 +9,7 @@ enum DemoChatScript {
     static func run(model: ChatModel, openDetail: (ChatItem) -> Void) async {
         let options = LaunchOptions.current
         guard options.demoToolDetail != nil || options.demoChatScript else { return }
-        while model.state == nil {
+        while model.state == nil || model.showingCache {
             guard (try? await Task.sleep(for: .milliseconds(100))) != nil else { return }
         }
         if let itemId = options.demoToolDetail {

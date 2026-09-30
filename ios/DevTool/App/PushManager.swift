@@ -30,6 +30,8 @@ final class PushManager {
     private(set) var lastError: String?
 
     @ObservationIgnored weak var model: AppModel?
+    /// Whether Allow / Deny must open the app to authenticate (§8.3).
+    @ObservationIgnored weak var security: SecuritySettings?
 
     @ObservationIgnored private let live: Bool
     @ObservationIgnored private let identity: DeviceIdentity
@@ -109,11 +111,18 @@ final class PushManager {
 
     /// Called once at launch.
     func start() {
-        UNUserNotificationCenter.current().setNotificationCategories(NotificationCategories.all)
+        updateCategories()
         Task {
             await refreshAuthorization()
             if isActive { requestToken() }
         }
+    }
+
+    /// Registers the categories for the current "Require Face ID for
+    /// approvals" value. Delivered notifications pick up the new actions too.
+    func updateCategories() {
+        let requireAuth = security?.requireAuthForApprovals ?? false
+        UNUserNotificationCenter.current().setNotificationCategories(NotificationCategories.all(requireAuth: requireAuth))
     }
 
     /// Re-reads the system permission (the user may have changed it in Settings).
@@ -281,13 +290,18 @@ final class PushManager {
 
 /// Notification categories (§7.7). The Service Extension sets the category to
 /// the payload's `kind`; an unknown kind has no category, so no actions.
+///
+/// With "Require Face ID for approvals" on (§8.3), Allow and Deny also carry
+/// `.foreground`: they open the app, which authenticates and then answers.
 enum NotificationCategories {
     static let allowAction = "allow"
     static let denyAction = "deny"
 
-    static var all: Set<UNNotificationCategory> {
-        let allow = UNNotificationAction(identifier: allowAction, title: "Allow", options: [.authenticationRequired])
-        let deny = UNNotificationAction(identifier: denyAction, title: "Deny", options: [.destructive, .authenticationRequired])
+    static func all(requireAuth: Bool) -> Set<UNNotificationCategory> {
+        var options: UNNotificationActionOptions = [.authenticationRequired]
+        if requireAuth { options.insert(.foreground) }
+        let allow = UNNotificationAction(identifier: allowAction, title: "Allow", options: options)
+        let deny = UNNotificationAction(identifier: denyAction, title: "Deny", options: options.union(.destructive))
         return [
             UNNotificationCategory(identifier: PushPayloadKind.permission, actions: [allow, deny], intentIdentifiers: []),
             UNNotificationCategory(identifier: PushPayloadKind.question, actions: [], intentIdentifiers: []),

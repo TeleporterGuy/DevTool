@@ -346,3 +346,25 @@ Only Claude chat tabs (`claude-chat`) in projects visible on mobile (§4.4) push
 - A Notification Service Extension decrypts `d` with the key named by `keyId`, and replaces the alert with `title` and `body`. It sets the category to `kind` and keeps `desktop`, `tab` and `prompt` in the notification's `userInfo`.
 - The `permission` category has two actions, **Allow** and **Deny** (destructive), and both require the device to be unlocked. Either one wakes the app in the background, which connects to that desktop and sends `chat.answer` (`{behavior:"allow"}` or `{behavior:"deny"}`). `gone` counts as done. Tapping any notification opens that chat.
 - Settings has one toggle per kind (`permission`, `question`, `done`) and a master switch.
+
+## 8. The rest (M4)
+
+### 8.1 Features in the handshake
+
+The `features` array of both hellos (§4.3) names optional ops a side supports, so a newer phone can hide what an older desktop can't do. A desktop that implements §8.2 sends `"features": ["chat.new"]`. A phone shows "New chat" only for a desktop that lists `chat.new`; an older desktop answers the op `unsupported` anyway. Unknown feature strings are ignored.
+
+### 8.2 `chat.new` (phone → desktop `req`)
+
+| op | params | result |
+|---|---|---|
+| `chat.new` | `{ taskId }` | `{ tabId }` |
+
+- The desktop adds a new `claude-chat` tab (title `Claude`, a fresh tab ID and session ID) at the end of the task's left pane and saves it as a main-side projects commit, so every open window picks it up the same way as any other change. It needs no open window, and it doesn't select the task or switch any window's visible tab.
+- The chat's process isn't started. The phone opens the tab with `chat.open` (§6.3), which starts it, and the tab appears in the next `inbox` event.
+- Errors: unknown `taskId`, a home task, or a task in a project hidden from mobile (§4.4) → `not-found`. Claude turned off in the desktop's settings → `unsupported`. Missing or malformed `taskId` → `bad-request`.
+
+### 8.3 Phone behaviour (no wire rules)
+
+- **New chat:** a "New chat" row in a task's tab list (for desktops that list `chat.new`), disabled while the desktop is offline. It opens the new chat as soon as the op answers.
+- **Require Face ID for approvals:** an app setting, off by default. When it is on, every answer to a permission, question or plan in the app asks for device-owner authentication first (Face ID, with the passcode as fallback), and the notification's Allow and Deny open the app, authenticate and then answer instead of answering in the background.
+- **Offline:** the phone keeps the last transcript of each chat it has opened (the view items it holds, at most the §6.4 window) next to the cached inbox, and shows it read-only under the offline banner when the desktop is offline. Returning to the foreground reconnects at once rather than waiting out the relay backoff. Nothing is queued, as before.

@@ -4,6 +4,7 @@ import SwiftUI
 /// A claude-chat tab: live transcript, prompt cards and composer (SPEC.md §6).
 struct ChatScreen: View {
     @Environment(AppModel.self) private var app
+    @Environment(\.scenePhase) private var scenePhase
     @State private var model: ChatModel
     @State private var draft = ""
     @State private var atBottom = true
@@ -15,13 +16,18 @@ struct ChatScreen: View {
     private static let bottomID = "chat-bottom"
 
     init(route: ChatRoute, app: AppModel) {
-        _model = State(initialValue: ChatModel(route: route) { [weak app] in
-            app?.connection(for: route.desktopId)
-        })
+        _model = State(initialValue: ChatModel(route: route, dependencies: .init(
+            connection: { [weak app] in app?.connection(for: route.desktopId) },
+            loadCache: { [weak app] in app?.cachedChat(route) },
+            saveCache: { [weak app] view in app?.cacheChat(view, desktopId: route.desktopId) },
+            authorizeAnswer: { [weak app] in await app?.security?.authorizeAnswer() ?? .success }
+        )))
     }
 
     private var route: ChatRoute { model.route }
     private var offline: Bool { app.isOffline(route.desktopId) }
+    /// Offline, or showing the cached transcript (§8.3): nothing can be sent or answered.
+    private var readOnly: Bool { offline || model.showingCache }
     private var found: (task: InboxTask, tab: InboxTab)? { app.tab(desktopId: route.desktopId, tabId: route.tabId) }
 
     var body: some View {
@@ -36,6 +42,9 @@ struct ChatScreen: View {
                     .presentationDragIndicator(.visible)
             }
             .task { await model.run() }
+            .onChange(of: scenePhase) { _, phase in
+                if phase != .active { model.saveNow() }
+            }
             // Pushes for the chat on screen aren't shown as banners.
             .onAppear { app.visibleChat = route }
             .onDisappear { if app.visibleChat == route { app.visibleChat = nil } }
@@ -52,7 +61,7 @@ struct ChatScreen: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         case .waiting where model.state == nil:
             VStack(spacing: 16) {
-                OfflineBanner(title: "Desktop", lastSeen: app.desktop(route.desktopId)?.lastSeen)
+                OfflineBanner(title: "Desktop", lastSeen: lastSeen)
                 ContentUnavailableView("Waiting for the desktop", systemImage: "desktopcomputer",
                                        description: Text("The chat opens when \(app.desktop(route.desktopId)?.name ?? "the desktop") is back online."))
             }
@@ -110,7 +119,8 @@ struct ChatScreen: View {
                         ChatItemRow(item: item) { detailItem = $0 }
                             .id(item.id)
                     }
-                    if let view = model.view {
+                    // A saved transcript's status is stale: don't show it as running.
+                    if let view = model.view, !model.showingCache {
                         processStatus(view.status)
                     }
                     Color.clear
@@ -172,7 +182,7 @@ struct ChatScreen: View {
             .padding(.vertical, 6)
         }
         .buttonStyle(.borderless)
-        .disabled(model.loadingEarlier || offline)
+        .disabled(model.loadingEarlier || readOnly)
     }
 
     @ViewBuilder
@@ -206,7 +216,7 @@ struct ChatScreen: View {
                     moreCount: prompts.count - 1,
                     answering: model.answering.contains(prompt.id),
                     error: model.answerErrors[prompt.id],
-                    enabled: !offline,
+                    enabled: !readOnly,
                     maxHeight: viewportHeight > 0 ? max(200, viewportHeight * 0.55) : .infinity
                 ) { answer in
                     Task { await model.answer(prompt, answer) }
@@ -216,6 +226,9 @@ struct ChatScreen: View {
             }
             if offline {
                 OfflineBanner(title: "Desktop", lastSeen: lastSeen)
+            }
+            if model.showingCache {
+                cachedNote
             }
             composer
         }
@@ -248,26 +261,42 @@ struct ChatScreen: View {
         }
     }
 
+    private var cachedNote: some View {
+        HStack(spacing: 4) {
+            Image(systemName: "clock.arrow.circlepath")
+            Text("Saved transcript, read-only")
+            if let saved = model.cachedAt {
+                Text("·")
+                RelativeTime(date: saved)
+            }
+        }
+        .font(.caption)
+        .foregroundStyle(.secondary)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 4)
+        .accessibilityElement(children: .combine)
+    }
+
     private var lastSeen: Date? {
         if case .offline(let seen?) = app.state(of: route.desktopId) { return seen }
         return app.desktop(route.desktopId)?.lastSeen
     }
 
     private var canSend: Bool {
-        !offline && !model.sending && !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        !readOnly && !model.sending && !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             && draft.count <= ChatOp.maxSendLength
     }
 
     private var composer: some View {
         HStack(alignment: .bottom, spacing: 8) {
-            TextField(offline ? "Desktop offline" : (model.busy ? "Queue a message" : "Message Claude"),
+            TextField(offline ? "Desktop offline" : model.showingCache ? "Connecting…" : (model.busy ? "Queue a message" : "Message Claude"),
                       text: $draft, axis: .vertical)
                 .lineLimit(1...6)
                 .focused($composerFocused)
                 .padding(.horizontal, 14)
                 .padding(.vertical, 9)
                 .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-                .disabled(offline)
+                .disabled(readOnly)
             if model.busy && draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 Button {
                     Task { await model.interrupt() }
@@ -275,9 +304,9 @@ struct ChatScreen: View {
                     Image(systemName: "stop.circle.fill")
                         .font(.system(size: 32))
                         .symbolRenderingMode(.hierarchical)
-                        .foregroundStyle(offline ? Color.secondary : Color.red)
+                        .foregroundStyle(readOnly ? Color.secondary : Color.red)
                 }
-                .disabled(offline || model.interrupting)
+                .disabled(readOnly || model.interrupting)
                 .accessibilityLabel("Stop")
             } else {
                 Button(action: send) {

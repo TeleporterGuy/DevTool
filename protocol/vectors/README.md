@@ -95,6 +95,8 @@ Each sample is `{ json, expected }` (plus `op` where the parser needs it). Parse
 | `events[]` | transport message: `evt chat` |
 | `invalid.params[]`, `invalid.results[]` | `{ op, json }` that must fail to parse |
 | `invalid.events[]` | JSON strings that must fail to parse |
+| `new.params[]`, `new.results[]` | `{ json, expected }` for `chat.new` (§8.2): its params `{ taskId }` and result `{ tabId }`. Extra fields are dropped. |
+| `new.invalid.params[]`, `new.invalid.results[]` | JSON strings that must fail to parse |
 
 Tolerance rules the samples exercise (a newer desktop must not break an older phone):
 - An item or prompt with an unknown `kind` parses to `{ kind: "unknown", id, unknownKind: <the kind> }` and keeps its place. Its other fields are dropped.

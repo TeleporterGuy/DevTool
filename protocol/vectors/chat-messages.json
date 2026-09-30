@@ -652,5 +652,48 @@
       "{\"t\":\"evt\",\"e\":\"chat\",\"tabId\":\"tab-chat\",\"seq\":12,\"upserts\":[{\"kind\":\"text\",\"id\":\"i10-0\",\"markdown\":\"All 42 tests pass.\"},{\"kind\":\"tool\",\"id\":\"toolu_03\",\"name\":\"Read\",\"summary\":\"Read · package.json\",\"status\":\"pending\",\"hasDetail\":true}],\"removes\":[],\"prompts\":[{\"kind\":\"plan\",\"id\":\"p\"}],\"busy\":true,\"turnStartedAt\":1790000000000,\"process\":\"running\",\"permissionMode\":\"default\",\"model\":\"claude-opus-4-5\"}",
       "{\"t\":\"evt\",\"e\":\"chat\",\"tabId\":\"tab-chat\",\"seq\":12,\"upserts\":[{\"kind\":\"text\",\"markdown\":\"no id\"}],\"removes\":[],\"prompts\":[{\"kind\":\"permission\",\"id\":\"req-1\",\"toolName\":\"Bash\",\"title\":\"Claude wants to run a command\",\"summary\":\"Bash · rm -rf dist\",\"detail\":\"rm -rf dist\\n\\nClean the build output\",\"canAlwaysAllow\":true}],\"busy\":true,\"turnStartedAt\":1790000000000,\"process\":\"running\",\"permissionMode\":\"default\",\"model\":\"claude-opus-4-5\"}"
     ]
+  },
+  "new": {
+    "params": [
+      {
+        "json": "{\"taskId\":\"t1\"}",
+        "expected": {
+          "taskId": "t1"
+        }
+      },
+      {
+        "json": "{\"taskId\":\"t1\",\"pane\":\"right\"}",
+        "expected": {
+          "taskId": "t1"
+        }
+      }
+    ],
+    "results": [
+      {
+        "json": "{\"tabId\":\"tab-new\"}",
+        "expected": {
+          "tabId": "tab-new"
+        }
+      },
+      {
+        "json": "{\"tabId\":\"tab-new\",\"seq\":0}",
+        "expected": {
+          "tabId": "tab-new"
+        }
+      }
+    ],
+    "invalid": {
+      "params": [
+        "{}",
+        "{\"taskId\":7}",
+        "{\"tabId\":\"tab-chat\"}",
+        "null"
+      ],
+      "results": [
+        "{}",
+        "{\"tabId\":null}",
+        "[]"
+      ]
+    }
   }
 }

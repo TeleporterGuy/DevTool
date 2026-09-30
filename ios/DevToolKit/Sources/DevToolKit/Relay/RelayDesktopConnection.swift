@@ -66,6 +66,8 @@ public actor RelayDesktopConnection: DesktopConnection {
     private var nextRequestId: Int64 = 1
     private var inboxRequests: Set<Int64> = []
     private var lastSeen: Date?
+    /// `features` of the last desktop hello (§8.1).
+    private var features: Set<String> = []
 
     /// In-flight `request(_:params:timeout:)` calls by `req` id.
     private var pending: [Int64: PendingRequest] = [:]
@@ -217,6 +219,16 @@ public actor RelayDesktopConnection: DesktopConnection {
         try await requestInbox()
     }
 
+    public func reconnectNow() async {
+        guard !stopped, !terminal, let client else { return }
+        await client.reconnectNow()
+        // A handshake waiting out its retry backoff goes again now.
+        if relayReady, transport == nil, handshake == nil {
+            handshakeRetry = timing.initialBackoff
+            await beginHandshake()
+        }
+    }
+
     // MARK: Relay events
 
     private func handle(_ event: RelayEvent) async {
@@ -359,6 +371,7 @@ public actor RelayDesktopConnection: DesktopConnection {
             return
         }
         desktopName = hello.desktopName.isEmpty ? desktopName : hello.desktopName
+        features = Set(hello.features)
         let negotiation = VersionNegotiation.negotiate(local: AppProtocol.local, remote: hello.version)
 
         switch hello.result {
@@ -408,6 +421,7 @@ public actor RelayDesktopConnection: DesktopConnection {
             continuation.yield(.pairing(.accepted(desktopName: desktopName)))
         }
         lastSeen = Date()
+        continuation.yield(.features(features))
         set(.online)
         publishChat(.sessionStarted)
         try? await requestInbox()

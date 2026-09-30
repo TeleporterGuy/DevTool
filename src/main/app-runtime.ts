@@ -58,6 +58,8 @@ import { RelayClient } from './mobile/relay-client'
 import { createNoiseChannelFactory } from './mobile/channel'
 import { ChatBridge } from './mobile/chat-bridge'
 import { PushEmitter } from './mobile/push-emitter'
+import { addChatTab } from './mobile/new-chat'
+import { AppErrorCode, CHAT_NEW_FEATURE } from '../../protocol/ts/index.ts'
 import { normalizeMobileConfig } from '../shared/mobile'
 import type {
   AppConfig,
@@ -276,12 +278,22 @@ export class AppRuntime {
         staticKey: () => identity.get().x25519,
         app: `devtool/${app.getVersion()}`,
         desktopName,
+        features: () => [CHAT_NEW_FEATURE],
         log
       }),
       createInvite: (options) => createInvite(identity.get(), options),
       broadcastState: (state) => this.broadcastToAllWindows('mobile-state-changed', state),
       log,
-      chat: bridge
+      chat: bridge,
+      newChat: (taskId) => {
+        if (!this.config.enableClaude) {
+          return { ok: false, code: AppErrorCode.Unsupported, message: 'Claude is turned off on this desktop' }
+        }
+        const added = addChatTab(this.projectsStore.peek(), taskId)
+        if (!added.ok) return added
+        this.commitProjects(added.data)
+        return { ok: true, tabId: added.tabId }
+      }
     })
     return service
   }

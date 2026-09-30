@@ -25,6 +25,8 @@ export interface NoiseChannelOptions {
   /** e.g. `devtool/0.3.2`. */
   app: string
   desktopName: () => string
+  /** Optional ops this desktop answers (SPEC.md §8.1), sent in its hello. */
+  features?: () => string[]
   log: (message: string) => void
 }
 
@@ -123,7 +125,7 @@ class NoisePhoneChannel implements PhoneChannel {
       v: PROTOCOL_VERSION,
       min: MIN_PROTOCOL_VERSION,
       app: this.options.app,
-      features: [],
+      features: this.options.features?.() ?? [],
       desktopName: this.options.desktopName(),
       result
     }

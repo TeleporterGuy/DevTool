@@ -16,6 +16,8 @@ import {
 import {
   ChatLimits,
   capText,
+  parseChatNewParams,
+  parseChatNewResult,
   parseChatParams,
   parseChatResult,
   parseChatViewItem,
@@ -145,6 +147,14 @@ describe('chat parsers', () => {
     expect(() => parseChatParams('chat.send', { tabId: 't', text: 'x'.repeat(ChatLimits.send + 1) })).toThrow(ProtocolError)
     expect(parseChatParams('chat.send', { tabId: 't', text: 'x'.repeat(ChatLimits.send) })).toMatchObject({ tabId: 't' })
     expect(parseChatResult('chat.send', { anything: 1 })).toEqual({})
+  })
+
+  it('parses chat.new (§8.2), which names a task and not a tab', () => {
+    expect(parseChatParams('chat.new', { taskId: 't1' })).toBeNull()
+    expect(parseChatNewParams({ taskId: 't1', extra: true })).toEqual({ taskId: 't1' })
+    expect(() => parseChatNewParams({ tabId: 't1' })).toThrow(ProtocolError)
+    expect(parseChatNewResult({ tabId: 'tab-2' })).toEqual({ tabId: 'tab-2' })
+    expect(() => parseChatNewResult({})).toThrow(ProtocolError)
   })
 
   it('capText cuts to the limit with an ellipsis and never splits a surrogate pair', () => {

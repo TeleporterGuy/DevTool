@@ -11,7 +11,7 @@ import {
 import type { AppMessage, HandshakeResult } from '../protocol/ts/index.ts'
 import { FakePhone } from './helpers/fake-phone'
 
-function setup(decide: (hello: VerifiedHello) => HandshakeResult = () => 'ok') {
+function setup(decide: (hello: VerifiedHello) => HandshakeResult = () => 'ok', features?: () => string[]) {
   const desktop = generateX25519()
   const toPhone: Uint8Array[] = []
   const hellos: VerifiedHello[] = []
@@ -29,6 +29,7 @@ function setup(decide: (hello: VerifiedHello) => HandshakeResult = () => 'ok') {
     staticKey: () => desktop,
     app: 'devtool/test',
     desktopName: () => 'test-mbp',
+    features,
     log: () => {}
   }).create('phone', hooks)
   const phone = new FakePhone(desktop.pub)
@@ -41,6 +42,13 @@ function setup(decide: (hello: VerifiedHello) => HandshakeResult = () => 'ok') {
 }
 
 describe('Noise channel (desktop responder)', () => {
+  it('lists its features in the hello (SPEC.md §8.1)', () => {
+    const env = setup(() => 'ok', () => ['chat.new'])
+    env.phone.startHandshake(env.phone.hello('resume'))
+    env.pump()
+    expect(env.phone.desktopHello).toMatchObject({ features: ['chat.new'], result: 'ok' })
+  })
+
   it('completes a handshake and carries app messages both ways', () => {
     const env = setup()
     env.phone.startHandshake(env.phone.hello('resume'))

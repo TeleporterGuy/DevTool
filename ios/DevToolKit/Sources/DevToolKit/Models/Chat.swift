@@ -320,6 +320,24 @@ public struct ChatEarlierResult: Sendable, Equatable {
     }
 }
 
+/// `chat.new` params (§8.2).
+public struct ChatNewParams: Sendable, Equatable {
+    public var taskId: String
+
+    public init(taskId: String) {
+        self.taskId = taskId
+    }
+}
+
+/// `chat.new` result: the new claude-chat tab, which `chat.open` then starts.
+public struct ChatNewResult: Sendable, Equatable {
+    public var tabId: String
+
+    public init(tabId: String) {
+        self.tabId = tabId
+    }
+}
+
 /// `chat.detail` result.
 public enum ChatDetail: Sendable, Equatable {
     /// Pretty JSON input and the result text, each at most 200000 chars.
@@ -355,6 +373,8 @@ public enum ChatOp {
     public static let answer = "chat.answer"
     public static let interrupt = "chat.interrupt"
     public static let detail = "chat.detail"
+    /// `chat.new` (§8.2) names a task, not a tab, so it isn't one of `ChatParams.ops`.
+    public static let new = "chat.new"
 
     /// §6.3 limits.
     public static let maxSendLength = 32_000
@@ -613,6 +633,23 @@ extension ChatEarlierResult {
     }
 
     public var json: JSONValue { .object(["items": .array(items.map(\.json)), "hasEarlier": .bool(hasEarlier)]) }
+}
+
+extension ChatNewParams {
+    /// The desktop's side; a missing or non-string `taskId` throws (`bad-request`).
+    public static func parse(_ value: JSONValue?) throws(ProtocolError) -> ChatNewParams {
+        ChatNewParams(taskId: try Fields(value, "params").str("taskId"))
+    }
+
+    public var json: JSONValue { .object(["taskId": .string(taskId)]) }
+}
+
+extension ChatNewResult {
+    public static func parse(_ value: JSONValue) throws(ProtocolError) -> ChatNewResult {
+        ChatNewResult(tabId: try Fields(value, "result").str("tabId"))
+    }
+
+    public var json: JSONValue { .object(["tabId": .string(tabId)]) }
 }
 
 extension ChatDetail {

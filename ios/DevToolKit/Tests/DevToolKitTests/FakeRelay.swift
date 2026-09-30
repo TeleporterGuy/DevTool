@@ -80,6 +80,10 @@ actor FakeRelay: WebSocketConnector {
         var requests: [(op: String, params: JSONValue?)] = []
         /// The last `push.register` (nil after `push.unregister`).
         var pushRegistration: PushRegisterParams?
+        /// The hello's `features` (§8.1).
+        var features: [String] = [DesktopFeature.chatNew]
+        /// Tabs added with `chat.new`, at the end of task `t`.
+        var newTabs: [String] = []
 
         var id: String { identity.deviceId }
 
@@ -104,7 +108,7 @@ actor FakeRelay: WebSocketConnector {
                 InboxProject(id: "p", name: "api-server", tasks: [
                     InboxTask(id: "t", name: "fix-auth", tabs: [
                         InboxTab(id: "tab", type: .claudeChat, title: "Claude", status: tick % 2 == 0 ? .working : .attention),
-                    ]),
+                    ] + newTabs.map { InboxTab(id: $0, type: .claudeChat, title: "Claude", status: .idle) }),
                 ]),
             ])
         }
@@ -144,6 +148,21 @@ actor FakeRelay: WebSocketConnector {
                         pushRegistration = nil
                     }
                     return app(.resOk(id: id, result: .object([:])), to: from)
+                }
+                if op == ChatOp.new {
+                    guard features.contains(DesktopFeature.chatNew) else {
+                        return app(.resError(id: id, code: AppErrorCode.unsupported, message: "Unknown op \(op)"), to: from)
+                    }
+                    let taskId: String
+                    do {
+                        taskId = try ChatNewParams.parse(params).taskId
+                    } catch {
+                        return app(.resError(id: id, code: AppErrorCode.badRequest, message: error.message), to: from)
+                    }
+                    guard taskId == "t" else { return app(.resError(id: id, code: AppErrorCode.notFound, message: "No such task"), to: from) }
+                    let tabId = "tab-new-\(newTabs.count + 1)"
+                    newTabs.append(tabId)
+                    return app(.resOk(id: id, result: ChatNewResult(tabId: tabId).json), to: from)
                 }
                 if let replies = chat.handle(id: id, op: op, params: params) {
                     return replies.flatMap { app($0, to: from) }
@@ -185,7 +204,7 @@ actor FakeRelay: WebSocketConnector {
             } else {
                 result = .rejected
             }
-            let reply = DesktopHello(v: reply.v, min: reply.min, app: "fake/1", desktopName: name, result: result)
+            let reply = DesktopHello(v: reply.v, min: reply.min, app: "fake/1", features: features, desktopName: name, result: result)
             guard let msg2 = try? responder.writeMessage(reply.json.jsonData) else { return [] }
             var out = [frame(.handshake2, msg2)]
             guard result == .ok || result == .pending, let transport = try? responder.split() else { return out }

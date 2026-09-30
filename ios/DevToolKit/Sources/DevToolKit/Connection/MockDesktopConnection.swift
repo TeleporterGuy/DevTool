@@ -24,6 +24,7 @@ public actor MockDesktopConnection: DesktopConnection {
     private var state: ConnectionState = .idle
     private var runner: Task<Void, Never>?
     private var flipIndex = 0
+    private var newChatCount = 0
     private var chats: [String: MockChatTranscript]
     /// The phone's one open chat (§6.3).
     private var openTab: String?
@@ -73,6 +74,9 @@ public actor MockDesktopConnection: DesktopConnection {
         inbox.generatedAt = Date().unixMilliseconds
         continuation.yield(.inbox(inbox))
     }
+
+    /// Nothing to reconnect: the mock is either online or offline for good.
+    public func reconnectNow() async {}
 
     private func set(_ newState: ConnectionState) {
         state = newState
@@ -165,6 +169,14 @@ public actor MockDesktopConnection: DesktopConnection {
             }
             resolve(prompt, answer: answer, tabId: tabId)
             return .object([:])
+        case ChatOp.new:
+            let taskId: String
+            do {
+                taskId = try ChatNewParams.parse(params).taskId
+            } catch {
+                throw DesktopConnectionError.remote(code: AppErrorCode.badRequest, message: error.message)
+            }
+            return ChatNewResult(tabId: try addChat(taskId: taskId)).json
         case ChatOp.interrupt:
             let tabId = try string("tabId")
             guard chats[tabId] != nil else { throw notFound() }
@@ -183,6 +195,24 @@ public actor MockDesktopConnection: DesktopConnection {
         default:
             throw DesktopConnectionError.remote(code: AppErrorCode.unsupported, message: "Unknown op \(op)")
         }
+    }
+
+    /// `chat.new`: a fresh claude-chat tab at the end of the task, with an
+    /// empty transcript. The inbox with it goes out right away (the desktop
+    /// sends it with its next throttled `inbox` event).
+    private func addChat(taskId: String) throws -> String {
+        for p in inbox.projects.indices {
+            guard let t = inbox.projects[p].tasks.firstIndex(where: { $0.id == taskId }) else { continue }
+            newChatCount += 1
+            let tabId = "tab-new-\(newChatCount)"
+            let now = Date().unixMilliseconds
+            inbox.projects[p].tasks[t].tabs.append(InboxTab(id: tabId, type: .claudeChat, title: "Claude", status: .idle, since: now))
+            inbox.generatedAt = now
+            chats[tabId] = MockChatTranscript(title: "Claude", status: ChatStatus(), items: [], prompts: [], details: [:])
+            continuation.yield(.inbox(inbox))
+            return tabId
+        }
+        throw DesktopConnectionError.remote(code: AppErrorCode.notFound, message: "No such task")
     }
 
     /// Applies a change to a chat and, when the phone has it open, sends the event.
@@ -350,6 +380,7 @@ public actor MockDesktopConnection: DesktopConnection {
             guard (try? await Task.sleep(for: .milliseconds(200))) != nil else { return }
         }
 
+        continuation.yield(.features([DesktopFeature.chatNew]))
         set(.online)
         continuation.yield(.lastSeen(Date()))
         inbox.generatedAt = Date().unixMilliseconds

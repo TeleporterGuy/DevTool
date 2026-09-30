@@ -13,7 +13,7 @@ import type { PairingPayload } from './pairing-uri.ts'
 import { encodeJson, negotiateVersion, parseAppMessage, parseDesktopHello, parsePhoneHello } from './app-messages.ts'
 import type { DesktopHello, PhoneHello } from './app-messages.ts'
 import { FRAGMENT_CHUNK, Reassembler, fragmentMessage } from './fragments.ts'
-import { parseChatParams, parseChatResult } from './chat-messages.ts'
+import { parseChatNewParams, parseChatNewResult, parseChatParams, parseChatResult } from './chat-messages.ts'
 import { openPushCap, openPushPayload, parsePushParams, pushRegisterMessage, sealPushCap, sealPushPayload, signPushRegister } from './push.ts'
 import type { PushPayload } from './push.ts'
 
@@ -558,6 +558,15 @@ function chatMessages(): unknown {
         text({ ...event, prompts: [{ kind: 'plan', id: 'p' }] }),
         text({ ...event, upserts: [{ kind: 'text', markdown: 'no id' }] })
       ]
+    },
+    // §8.2: `chat.new` names a task, so it has parsers of its own.
+    new: {
+      params: [text({ taskId: 't1' }), text({ taskId: 't1', pane: 'right' })].map((json) => ({ json, expected: parseChatNewParams(JSON.parse(json)) })),
+      results: [text({ tabId: 'tab-new' }), text({ tabId: 'tab-new', seq: 0 })].map((json) => ({ json, expected: parseChatNewResult(JSON.parse(json)) })),
+      invalid: {
+        params: [text({}), text({ taskId: 7 }), text({ tabId: 'tab-chat' }), 'null'],
+        results: [text({}), text({ tabId: null }), '[]']
+      }
     }
   }
 }

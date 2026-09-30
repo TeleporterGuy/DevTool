@@ -1,6 +1,6 @@
 # DevTool for iOS
 
-The SwiftUI iPhone and iPad client for DevTool (milestone 1: pairing and a read-only inbox). The wire protocol is specified in [`protocol/SPEC.md`](../protocol/SPEC.md).
+The SwiftUI iPhone and iPad client for DevTool (pairing, inbox, chat, push notifications, and from M4 new chats, Face ID for approvals and offline transcripts). The wire protocol is specified in [`protocol/SPEC.md`](../protocol/SPEC.md).
 
 ```
 ios/
@@ -18,6 +18,7 @@ ios/
 - `Relay/`: `RelayClient` (one `URLSessionWebSocketTask` per relay: challenge → hello, watch, ping every 25 s, reconnect with 1 s → 30 s backoff), `RelayHub` (one client per relay URL), `RelayDesktopConnection` (Noise handshake as initiator, `inbox.get`, inbox and pairing events) and `RelayDesktopConnectionFactory`
 - `Connection/`: the `DesktopConnection` / `DesktopConnectionFactory` protocols the app depends on, plus `MockDesktopConnection`
 - `Push/`: push crypto (§7.5 payloads, §7.1 registration signing), `PushGatewayClient` (`POST /v1/push/register`), `PushKeyStore` (per-desktop push keys, shared with the extension) and the `push.register` / `push.unregister` ops (§7.4)
+- `Storage/ChatCache`: `CachedChat` (a chat's last transcript, at most 60 items) and the file / in-memory `ChatCacheStore`s (§8.3)
 - `Storage/KeychainStore`: raw key bytes by label (`kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly`), optionally in a shared access group
 
 ### One socket per relay
@@ -63,8 +64,10 @@ The simulator has no camera. Pair by pasting a link into **Paste pairing link**,
 
 `-mockDesktop` (launch argument) or `DEVTOOL_MOCK_DESKTOP=1` (environment; with `simctl launch`, use `SIMCTL_CHILD_DEVTOOL_MOCK_DESKTOP=1`) preloads two paired desktops and keeps all state in memory:
 
-- **join3r-mbp** is online. It serves a canned inbox and flips one agent tab's status every 4 seconds.
-- **studio-mini** is offline. It shows a cached inbox, dimmed, under the "offline · last seen" banner.
+- **join3r-mbp** is online. It serves a canned inbox and flips one agent tab's status every 4 seconds. It lists `chat.new`, so tasks show **New chat**, which adds an empty Claude chat to the task.
+- **studio-mini** is offline. It shows a cached inbox, dimmed, under the "offline · last seen" banner. Its *benchmark-suite* task has a Claude chat with a cached transcript, which opens read-only.
+
+"Require Face ID for approvals" in mock mode uses a stand-in that always offers Face ID and passes after 0.4 s without a prompt. `-mockAuth cancel` or `-mockAuth fail` makes it refuse, and `-mockAuth real` uses `LAContext` (enrol under Features → Face ID in the Simulator). Mock mode keeps the switch in the `sk.awantech.devtool.mock` defaults suite.
 
 The Xcode scheme passes `-mockDesktop` by default. Untick it under Product → Scheme → Edit Scheme → Arguments to use real, persisted pairings through the relay in the pairing link. In mock mode pairing runs against the mock and auto-accepts after 2 seconds.
 
@@ -79,6 +82,16 @@ xcrun simctl openurl "$SIM" 'devtool://pair?d=…'
 
 Debug builds also accept `-pairLink '<devtool://pair?d=…>' [-autoConfirmPairing]` to open (and confirm) a pairing link at launch, which skips the system "Open in DevTool?" prompt in scripted runs, and `-demoRoute <route>` for screenshots: `task` (task detail), `pair` (pairing sheet), `pairConfirm`, `pairWait`, `settings`, `sidebar`.
 
+## New chat, Face ID and offline (M4)
+
+SPEC.md §8 is the contract.
+
+- **Features:** the desktop's hello lists optional ops in `features` (§8.1). Each `.online` is preceded by a `.features` connection event, and the app keeps the list on the `DesktopRecord` (`desktops.json`), so an offline desktop keeps showing what it could do.
+- **New chat:** for a desktop that lists `chat.new`, a task's Tabs section ends with **New chat**. It is disabled while the desktop is offline and shows a spinner while `chat.new { taskId }` runs. The result's `tabId` goes to `AppModel.requestedChat`, and `RootView` pushes the chat once the tab shows up in the inbox, as it does for a tapped notification. A failure shows an alert.
+- **Require Face ID for approvals:** Settings → Security, off by default, `UserDefaults` key `security.requireAuthForApprovals`. It shows only when the device can do device-owner authentication, and is named after the biometry (Face ID, Touch ID, Optic ID, or passcode). Turning it off asks for authentication too. When it is on, `ChatModel.answer`, which every in-app answer goes through, runs `.deviceOwnerAuthentication` first. Cancelling leaves the card as it was, and a failure shows on the card. The `permission` notification category is registered again with `.foreground` added to Allow and Deny, so they open the app, which authenticates, opens the chat and then answers. If one of those actions still arrives in the background (a category registered before the switch changed), the app posts "Couldn't send your answer" instead of answering.
+- **Offline transcripts:** each opened chat's last transcript (at most 60 items, with title, status and prompts) is saved to `Application Support/DevTool/chats/<desktopId>/<tabId>.json`. It is written when the open succeeds, at most every 5 s while events arrive, when the session drops, when the chat closes and when the app leaves the foreground. When the first `chat.open` can't reach the desktop and a saved transcript exists, it shows read-only under the offline banner, marked "Saved transcript, read-only", with prompt cards, composer and Load earlier disabled, until the live open replaces it. Forgetting a desktop deletes its chats, and chats whose tab is gone from the latest inbox are removed.
+- **Foreground:** returning to the foreground calls `reconnectNow()` on every connection. It ends the relay's reconnect backoff (`RelayClient.reconnectNow`), or pings the relay when the socket is up so a dead one fails at once. It also retries a handshake that is backing off, and refreshes the inbox of desktops that are online. Nothing is queued while offline.
+
 ## Push notifications (M3)
 
 SPEC.md §7 is the contract. On the phone:
@@ -88,7 +101,7 @@ SPEC.md §7 is the contract. On the phone:
 - After every session that ends its handshake with `ok`, and whenever the switches or the `cap` change, the app sends `push.register { cap, key, keyId, kinds }` to that desktop. With push off it sends `push.unregister` to the desktops it had registered with (`push.registeredDesktops`). A desktop from before M3 answers `unsupported`, which is only logged.
 - **Keys:** each pairing gets its own 32-byte `key` and 8-byte `keyId` (random), created on first use and deleted when the pairing is forgotten. `PushKeyStore` keeps them as Keychain items under service `sk.awantech.devtool.push`, one per desktop ID, holding `{desktopId, key, keyId, desktopName}`, in access group `group.sk.awantech.devtool`. That is the App Group, which iOS also accepts as a keychain access group, so the extension can read the keys and nothing else of the app's. When the process isn't entitled to that group (an unsigned `CODE_SIGNING_ALLOWED=NO` build), the store falls back to the default group. The app keeps working, but the extension can't see the keys, so notifications keep their fallback text.
 - **Extension:** `DevToolNotifications` reads `d`, looks up the key by the key ID in front of it, decrypts and replaces the alert with the payload's `title` and `body`. With more than one paired desktop, the desktop's name goes in the subtitle. It sets the category to `kind`, the thread to the tab, and `desktop` / `tab` / `prompt` in `userInfo`, taking `desktop` from the key rather than the payload. On any failure, or when time runs out, it delivers the original "An agent needs you".
-- **Categories:** `permission` has *Allow* and *Deny* (destructive). Both require an unlocked device, and neither brings the app to the foreground. `question`, `plan` and `done` have no actions.
+- **Categories:** `permission` has *Allow* and *Deny* (destructive). Both require an unlocked device, and neither brings the app to the foreground unless "Require Face ID for approvals" is on (see M4). `question`, `plan` and `done` have no actions.
 - **Tapping** a notification opens that chat, waiting briefly for the inbox on a cold launch. **Allow / Deny** wake the app in the background. It holds a background task, connects to the desktop through the same `AppModel` connection machinery, waits for a session and sends `chat.answer` with `{behavior:"allow"}` or `{behavior:"deny"}`. `gone` (already answered) counts as success. After 25 s it gives up and posts a local "Couldn't send your answer" notification that opens the chat.
 - **In the foreground**, a push shows as a banner with sound unless that exact chat is on screen.
 
@@ -151,6 +164,6 @@ DEVTOOL_RELAY_URL=ws://localhost:8787 DEVTOOL_PAIRING_URI='devtool://pair?d=…'
 
 ## Storage
 
-- Paired desktops go in `Application Support/DevTool/desktops.json`, and each desktop's last inbox goes in `Application Support/DevTool/inbox/<desktopId>.json`. Both use file protection until first unlock.
+- Paired desktops go in `Application Support/DevTool/desktops.json`, each desktop's last inbox goes in `Application Support/DevTool/inbox/<desktopId>.json`, and opened chats' last transcripts go in `Application Support/DevTool/chats/<desktopId>/<tabId>.json`. All use file protection until first unlock.
 - Private keys go in the Keychain under service `sk.awantech.devtool.keys` through `KeychainStore`, as `device.x25519` and `device.ed25519` (raw 32 bytes each).
-- Push keys go in the Keychain under service `sk.awantech.devtool.push`, access group `group.sk.awantech.devtool` (see Push notifications). The push switches and the current `cap` go in `UserDefaults`.
+- Push keys go in the Keychain under service `sk.awantech.devtool.push`, access group `group.sk.awantech.devtool` (see Push notifications). The push switches, the current `cap` and `security.requireAuthForApprovals` go in `UserDefaults`.

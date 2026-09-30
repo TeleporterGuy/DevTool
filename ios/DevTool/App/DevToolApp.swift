@@ -14,6 +14,7 @@ struct DevToolApp: App {
             RootView(demoRoute: options.demoRoute)
                 .environment(delegate.model)
                 .environment(delegate.push)
+                .environment(delegate.security)
                 .onOpenURL { url in
                     if url.scheme == PairingInvite.scheme, url.host == PairingInvite.host {
                         delegate.model.handlePairingLink(url.absoluteString)
@@ -33,6 +34,9 @@ struct DevToolApp: App {
         .onChange(of: scenePhase) { _, phase in
             if phase == .active {
                 Task { await delegate.push.refreshAuthorization() }
+                delegate.security.refreshAvailability()
+                // Back in the foreground: reconnect now rather than after the relay backoff (§8.3).
+                Task { await delegate.model.reconnectNow() }
             }
         }
     }

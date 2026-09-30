@@ -23,6 +23,10 @@ import Foundation
 ///   APNs and register this device token (32–100 bytes of lowercase hex). The
 ///   simulator can't get a token APNs accepts for our topic, but a gateway in
 ///   simctl mode ignores it, so the whole chain can run on a simulator.
+/// - `-mockAuth succeed|cancel|fail|real` (with `-mockDesktop`): what "Require
+///   Face ID for approvals" does in mock mode. The default `succeed` passes
+///   after a short pause without a prompt; `cancel` and `fail` refuse; `real`
+///   uses `LAContext` (enrol Face ID under Features → Face ID in the Simulator).
 struct LaunchOptions: Sendable {
     enum DemoRoute: String, Sendable {
         case sidebar
@@ -48,6 +52,7 @@ struct LaunchOptions: Sendable {
     var demoAnswerDelay: Double?
     var pushGateway: URL?
     var fakePushToken: String?
+    var mockAuth: String?
 
     static let current = LaunchOptions(processInfo: .processInfo)
 
@@ -55,6 +60,9 @@ struct LaunchOptions: Sendable {
         let args = processInfo.arguments
         let env = processInfo.environment
         mockDesktop = args.contains("-mockDesktop") || env["DEVTOOL_MOCK_DESKTOP"] == "1"
+        if let index = args.firstIndex(of: "-mockAuth"), index + 1 < args.count {
+            mockAuth = args[index + 1]
+        }
 
         #if DEBUG
         if let index = args.firstIndex(of: "-demoRoute"), index + 1 < args.count {

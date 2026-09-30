@@ -5,6 +5,9 @@ struct TaskDetailView: View {
     @Environment(AppModel.self) private var model
     let ref: TaskRef
 
+    @State private var creatingChat = false
+    @State private var newChatError: String?
+
     var body: some View {
         if let found = model.task(ref) {
             let project = found.project
@@ -48,6 +51,9 @@ struct TaskDetailView: View {
                     if task.tabs.isEmpty {
                         Text("No agent or terminal tabs").foregroundStyle(.secondary)
                     }
+                    if model.supports(DesktopFeature.chatNew, on: ref.desktopId) {
+                        newChatRow(offline: offline)
+                    }
                 } header: {
                     Text("Tabs")
                 } footer: {
@@ -61,8 +67,42 @@ struct TaskDetailView: View {
             .navigationTitle(task.name)
             .navigationBarTitleDisplayMode(.inline)
             .refreshable { await model.refresh([ref.desktopId]) }
+            .alert("Couldn't start a chat", isPresented: Binding(get: { newChatError != nil }, set: { if !$0 { newChatError = nil } })) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text(newChatError ?? "")
+            }
         } else {
             ContentUnavailableView("Task not found", systemImage: "questionmark.folder", description: Text("It may have been closed on the desktop."))
+        }
+    }
+
+    /// "New chat" (§8.2, §8.3): adds a Claude chat to the task on the desktop
+    /// and opens it once it shows up in the inbox.
+    private func newChatRow(offline: Bool) -> some View {
+        Button {
+            Task { await createChat() }
+        } label: {
+            HStack(spacing: 12) {
+                Image(systemName: "plus.bubble")
+                    .frame(width: 28)
+                Text("New chat")
+                Spacer()
+                if creatingChat { ProgressView() }
+            }
+        }
+        .disabled(offline || creatingChat)
+    }
+
+    private func createChat() async {
+        guard !creatingChat else { return }
+        creatingChat = true
+        defer { creatingChat = false }
+        do {
+            // RootView waits for the tab to appear in the inbox, then pushes the chat.
+            model.requestedChat = try await model.newChat(in: ref)
+        } catch {
+            newChatError = error.localizedDescription
         }
     }
 

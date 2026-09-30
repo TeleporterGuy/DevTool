@@ -19,6 +19,7 @@ import {
   b64uEncode,
   constantTimeEqual,
   deviceId,
+  parseChatNewParams,
   parseChatParams,
   parsePushParams,
   PushOp,
@@ -175,6 +176,8 @@ export interface MobileServiceDeps {
   timers?: MobileTimers
   /** Claude chat tabs (`chat.*`, SPEC.md §6). Without it those ops answer `unsupported`. */
   chat?: Pick<ChatBridge, 'request' | 'dropPhone' | 'dropAll' | 'projectsChanged'>
+  /** `chat.new` (SPEC.md §8.2): adds a chat tab to a task. Without it the op answers `unsupported`. */
+  newChat?(taskId: string): { ok: true; tabId: string } | { ok: false; code: string; message: string }
 }
 
 // ---- The service -----------------------------------------------------------------
@@ -742,6 +745,22 @@ export class MobileService {
       return
     }
     if (this.handlePushOp(session, id, message.op, message.params)) return
+    if (message.op === AppOp.ChatNew && this.deps.newChat) {
+      let taskId: string
+      try {
+        taskId = parseChatNewParams(message.params).taskId
+      } catch (err) {
+        if (!(err instanceof ProtocolError)) throw err
+        session.channel.send({ t: 'res', id, ok: false, error: { code: AppErrorCode.BadRequest, message: err.message } })
+        return
+      }
+      const outcome = this.deps.newChat(taskId)
+      this.log(`chat.new task=${taskId} phone=${session.phoneId} ${outcome.ok ? `tab=${outcome.tabId}` : `error=${outcome.code}`}`)
+      session.channel.send(outcome.ok
+        ? { t: 'res', id, ok: true, result: { tabId: outcome.tabId } }
+        : { t: 'res', id, ok: false, error: { code: outcome.code, message: outcome.message } })
+      return
+    }
     if (this.deps.chat) {
       let chatParams: ReturnType<typeof parseChatParams>
       try {

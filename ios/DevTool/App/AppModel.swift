@@ -21,17 +21,24 @@ final class AppModel {
 
     /// Push registration (SPEC.md §7.4); told about every established session.
     @ObservationIgnored weak var push: PushManager?
+    /// "Require Face ID for approvals" (§8.3), which chat answers go through.
+    @ObservationIgnored weak var security: SecuritySettings?
 
     @ObservationIgnored private let factory: any DesktopConnectionFactory
     @ObservationIgnored private let store: any AppPersistence
+    /// Last transcripts of opened chats, shown while offline (§8.3).
+    @ObservationIgnored let chatCache: any ChatCacheStore
+    /// The tab IDs each desktop's cached chats were last pruned against.
+    @ObservationIgnored private var prunedTabs: [String: Set<String>] = [:]
     @ObservationIgnored private var connections: [String: any DesktopConnection] = [:]
     @ObservationIgnored private var listeners: [String: Task<Void, Never>] = [:]
     @ObservationIgnored private var pairingConnection: (any DesktopConnection)?
     @ObservationIgnored private var pairingListener: Task<Void, Never>?
 
-    init(factory: any DesktopConnectionFactory, store: any AppPersistence) {
+    init(factory: any DesktopConnectionFactory, store: any AppPersistence, chatCache: any ChatCacheStore) {
         self.factory = factory
         self.store = store
+        self.chatCache = chatCache
         desktops = store.loadDesktops()
         for desktop in desktops {
             inboxes[desktop.id] = store.loadInbox(for: desktop.id)
@@ -103,6 +110,41 @@ final class AppModel {
         }
     }
 
+    /// The app came to the foreground (§8.3): skip any relay backoff and
+    /// refresh the inboxes of desktops that are still connected. The others
+    /// ask for an inbox as soon as their session is back.
+    func reconnectNow() async {
+        for (id, connection) in connections {
+            await connection.reconnectNow()
+            if state(of: id) == .online { try? await connection.refresh() }
+        }
+    }
+
+    /// Whether the desktop's last hello listed `feature` (§8.1).
+    func supports(_ feature: String, on desktopId: String) -> Bool {
+        desktop(desktopId)?.supports(feature) ?? false
+    }
+
+    /// `chat.new` (§8.2): adds a Claude chat to the task and returns the
+    /// route to it. The tab shows up with the next inbox.
+    func newChat(in ref: TaskRef) async throws -> ChatRoute {
+        guard let connection = connections[ref.desktopId] else { throw DesktopConnectionError.notConnected }
+        let tabId = try await connection.newChat(taskId: ref.taskId)
+        return ChatRoute(desktopId: ref.desktopId, tabId: tabId)
+    }
+
+    // MARK: - Chat cache
+
+    func cachedChat(_ route: ChatRoute) -> CachedChat? {
+        chatCache.load(desktopId: route.desktopId, tabId: route.tabId)
+    }
+
+    /// Keeps `view` as the chat's offline transcript, unless the desktop was forgotten meanwhile.
+    func cacheChat(_ view: ChatView, desktopId: String) {
+        guard desktop(desktopId) != nil else { return }
+        chatCache.save(CachedChat(desktopId: desktopId, view: view))
+    }
+
     func forget(_ desktopId: String) {
         push?.forget(desktopId)
         if let connection = connections.removeValue(forKey: desktopId) {
@@ -114,6 +156,8 @@ final class AppModel {
         states.removeValue(forKey: desktopId)
         store.saveDesktops(desktops)
         store.deleteInbox(for: desktopId)
+        chatCache.deleteAll(desktopId: desktopId)
+        prunedTabs[desktopId] = nil
     }
 
     private func attach(_ connection: any DesktopConnection, desktopId: String) {
@@ -141,6 +185,12 @@ final class AppModel {
         case .inbox(let inbox):
             inboxes[desktopId] = inbox
             store.saveInbox(inbox, for: desktopId)
+            // Cached chats go with their tabs.
+            let tabs = Set(inbox.projects.flatMap(\.tasks).flatMap(\.tabs).map(\.id))
+            if prunedTabs[desktopId] != tabs {
+                prunedTabs[desktopId] = tabs
+                chatCache.prune(desktopId: desktopId, keeping: tabs)
+            }
             if let index = desktops.firstIndex(where: { $0.id == desktopId }),
                desktops[index].name != inbox.desktop.name, !inbox.desktop.name.isEmpty {
                 desktops[index].name = inbox.desktop.name
@@ -148,6 +198,12 @@ final class AppModel {
             }
         case .lastSeen(let date):
             updateLastSeen(date, for: desktopId)
+        case .features(let features):
+            let sorted = features.sorted()
+            if let index = desktops.firstIndex(where: { $0.id == desktopId }), desktops[index].features != sorted {
+                desktops[index].features = sorted
+                store.saveDesktops(desktops)
+            }
         case .pairing(.revoked):
             states[desktopId] = .revoked
         case .pairing:
@@ -359,11 +415,27 @@ extension AppModel {
                 InboxTask(id: "t-bench", name: "benchmark-suite", lastInteractedAt: lastSeen.unixMilliseconds - 300_000, tabs: [
                     InboxTab(id: "o-1", type: .claude, title: "Claude Code", status: .working, since: lastSeen.unixMilliseconds - 600_000, activity: "Running pytest"),
                     InboxTab(id: "o-2", type: .terminal, title: "zsh", status: .idle, since: lastSeen.unixMilliseconds - 900_000),
+                    InboxTab(id: "o-3", type: .claudeChat, title: "Claude", status: .attention, since: lastSeen.unixMilliseconds - 120_000,
+                             activity: "Wants to run pytest"),
                 ]),
             ]),
         ]
         let store = InMemoryAppStore(desktops: [online, offline], inboxes: [mockOfflineId: cached])
         let factory = MockDesktopConnectionFactory(acceptAfter: .seconds(2), offline: [mockOfflineId: lastSeen])
-        return AppModel(factory: factory, store: store)
+        // The offline desktop's chat was opened before: its transcript shows read-only.
+        let transcript = ChatView(
+            tabId: "o-3", title: "Claude",
+            status: ChatStatus(busy: true, turnStartedAt: lastSeen.unixMilliseconds - 180_000, process: .running),
+            items: [
+                ChatItem(id: "o3-u1", .user(text: "Run the benchmark suite against the new tokenizer and compare with last week.", images: nil, queued: false, failed: false)),
+                ChatItem(id: "o3-a1", .text(markdown: "I'll run `pytest benchmarks/ -k tokenizer` and diff the results against `results/2026-09-23.json`.", streaming: false)),
+                ChatItem(id: "o3-t1", .tool(ChatTool(name: "Bash", summary: "pytest benchmarks/ -k tokenizer", status: .waiting, hasDetail: true))),
+            ],
+            prompts: [ChatPrompt(id: "o3-p1", .permission(ChatPermission(
+                toolName: "Bash", title: "Run a shell command", summary: "pytest benchmarks/ -k tokenizer",
+                detail: "pytest benchmarks/ -k tokenizer\n\ncwd: ~/code/model-eval", canAlwaysAllow: true)))]
+        )
+        let chatCache = InMemoryChatCacheStore([CachedChat(desktopId: mockOfflineId, view: transcript, savedAt: lastSeen)])
+        return AppModel(factory: factory, store: store, chatCache: chatCache)
     }
 }

@@ -169,6 +169,13 @@ public enum AppOp {
     public static let inboxGet = "inbox.get"
 }
 
+/// Optional ops a side names in its hello's `features` (§8.1). Unknown
+/// strings are ignored.
+public enum DesktopFeature {
+    /// The desktop answers `chat.new` (§8.2).
+    public static let chatNew = "chat.new"
+}
+
 /// `res.error.code` values. Receivers treat the code as an open string.
 public enum AppErrorCode {
     public static let unsupported = "unsupported"

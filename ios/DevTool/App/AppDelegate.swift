@@ -10,6 +10,7 @@ import UserNotifications
 final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate {
     let model: AppModel
     let push: PushManager
+    let security: SecuritySettings
     private let log = Logger(subsystem: "sk.awantech.devtool", category: "notifications")
 
     override init() {
@@ -20,14 +21,29 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
             let defaults = UserDefaults(suiteName: "sk.awantech.devtool.mock") ?? .standard
             push = PushManager(live: false, identity: DeviceIdentity.generate(), options: options, defaults: defaults,
                                keys: PushKeyStore(store: InMemorySecretStore()))
+            security = SecuritySettings(authenticator: Self.mockAuthenticator(options.mockAuth), defaults: defaults)
         } else {
             let identity = Self.loadIdentity()
-            model = AppModel(factory: Self.relayFactory(identity: identity), store: FileAppStore())
+            let store = FileAppStore()
+            model = AppModel(factory: Self.relayFactory(identity: identity), store: store, chatCache: store.chatCache)
             push = PushManager(live: true, identity: identity, options: options)
+            security = SecuritySettings(authenticator: LocalAuthenticator())
         }
         super.init()
         model.push = push
+        model.security = security
         push.model = model
+        push.security = security
+        security.onChange = { [weak push] in push?.updateCategories() }
+    }
+
+    private static func mockAuthenticator(_ mode: String?) -> any DeviceOwnerAuthenticator {
+        switch mode {
+        case "real": LocalAuthenticator()
+        case "cancel": MockAuthenticator(outcome: .cancelled)
+        case "fail": MockAuthenticator(outcome: .failed("Face ID didn't recognise you (mock)."))
+        default: MockAuthenticator()
+        }
     }
 
     private static func loadIdentity() -> DeviceIdentity {
@@ -121,7 +137,12 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         switch action {
         case NotificationCategories.allowAction, NotificationCategories.denyAction:
             guard let prompt = target.prompt else { return }
-            await answer(target: target, prompt: prompt, allow: action == NotificationCategories.allowAction)
+            let allow = action == NotificationCategories.allowAction
+            if security.requireAuthForApprovals {
+                await answerAfterAuthenticating(target: target, prompt: prompt, allow: allow)
+            } else {
+                await answer(target: target, prompt: prompt, allow: allow)
+            }
         case UNNotificationDefaultActionIdentifier:
             model.requestedChat = target.route
         default:
@@ -147,6 +168,31 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         } else {
             log.error("Couldn't answer \(prompt, privacy: .public) from a notification")
             await notifyAnswerFailed(target: target)
+        }
+    }
+
+    /// "Require Face ID for approvals" is on (§8.3): the actions carry
+    /// `.foreground`, so the app is coming up. Authenticate once it is active,
+    /// then answer, and show the chat either way. An action that still
+    /// arrives in the background (categories registered before the switch)
+    /// can't authenticate, so it only posts "open the chat to answer".
+    private func answerAfterAuthenticating(target: Target, prompt: String, allow: Bool) async {
+        for _ in 0..<30 where UIApplication.shared.applicationState != .active {
+            try? await Task.sleep(for: .milliseconds(100))
+        }
+        guard UIApplication.shared.applicationState == .active else {
+            log.notice("Can't authenticate a notification answer in the background")
+            await notifyAnswerFailed(target: target)
+            return
+        }
+        model.requestedChat = target.route
+        switch await security.authorizeAnswer() {
+        case .success:
+            await answer(target: target, prompt: prompt, allow: allow)
+        case .cancelled:
+            log.notice("Authentication for a notification answer was cancelled")
+        case .failed(let message):
+            log.error("Authentication for a notification answer failed: \(message, privacy: .public)")
         }
     }
 

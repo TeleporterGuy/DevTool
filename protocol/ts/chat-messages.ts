@@ -20,6 +20,17 @@ export const ChatOp = {
 export type ChatOpName = (typeof ChatOp)[keyof typeof ChatOp]
 export const CHAT_OPS: readonly string[] = Object.values(ChatOp)
 
+/**
+ * `chat.new` (SPEC.md §8.2). Kept out of {@link ChatOp}: it names a task, not a
+ * chat tab, so it doesn't go through {@link parseChatParams}.
+ */
+export const CHAT_NEW_OP = 'chat.new'
+/** The handshake feature (§8.1) a desktop lists when it answers `chat.new`. */
+export const CHAT_NEW_FEATURE = 'chat.new'
+
+export interface ChatNewParams { taskId: string }
+export interface ChatNewResult { tabId: string }
+
 /** Caps from §6.2–§6.4. */
 export const ChatLimits = {
   /** `text.markdown` / `user.text` in the view; longer ones end in "…" and come through `chat.detail`. */
@@ -417,6 +428,16 @@ export function parseChatParams(op: string, params: unknown): ChatParams | null 
     case ChatOp.Detail:
       return { tabId, itemId: str(o, 'itemId') }
   }
+}
+
+/** `chat.new` params (the desktop's side). Throws ProtocolError on a missing `taskId`. */
+export function parseChatNewParams(params: unknown): ChatNewParams {
+  return { taskId: str(obj(params, 'params'), 'taskId') }
+}
+
+/** `chat.new` result (the phone's side). */
+export function parseChatNewResult(value: unknown): ChatNewResult {
+  return { tabId: str(obj(value, 'result'), 'tabId') }
 }
 
 export function parseChatOpenResult(value: unknown): ChatOpenResult {

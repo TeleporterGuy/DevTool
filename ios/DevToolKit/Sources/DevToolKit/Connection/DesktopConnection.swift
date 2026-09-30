@@ -17,6 +17,9 @@ public struct DesktopRecord: Codable, Sendable, Equatable, Identifiable {
     public var keysReference: String
     public var pairedAt: Date
     public var lastSeen: Date?
+    /// The `features` of the desktop's last hello (§8.1), kept so an offline
+    /// desktop still shows what it can do. nil until the first session.
+    public var features: [String]?
 
     public init(
         id: String,
@@ -26,7 +29,8 @@ public struct DesktopRecord: Codable, Sendable, Equatable, Identifiable {
         desktopEd25519PublicKey: String,
         keysReference: String,
         pairedAt: Date = Date(),
-        lastSeen: Date? = nil
+        lastSeen: Date? = nil,
+        features: [String]? = nil
     ) {
         self.id = id
         self.name = name
@@ -36,6 +40,12 @@ public struct DesktopRecord: Codable, Sendable, Equatable, Identifiable {
         self.keysReference = keysReference
         self.pairedAt = pairedAt
         self.lastSeen = lastSeen
+        self.features = features
+    }
+
+    /// Whether the desktop's last hello listed `feature` (`DesktopFeature`).
+    public func supports(_ feature: String) -> Bool {
+        features?.contains(feature) ?? false
     }
 
     public init(invite: PairingInvite, keysReference: String, name: String? = nil) {
@@ -91,6 +101,9 @@ public enum DesktopConnectionEvent: Sendable, Equatable {
     case pairing(PairingStatus)
     /// Relay presence update for the desktop (`peer` with `lastSeen`).
     case lastSeen(Date)
+    /// The `features` of the desktop's hello (§8.1), sent just before each
+    /// `.online`.
+    case features(Set<String>)
 }
 
 /// A live link to one desktop through the relay.
@@ -114,6 +127,9 @@ public protocol DesktopConnection: AnyObject, Sendable {
     /// Asks the desktop for a fresh inbox (`inbox.get`). The result also
     /// arrives on `events`. Throws when the desktop is not reachable.
     func refresh() async throws
+    /// The app came to the foreground: reconnect now instead of waiting out
+    /// the relay backoff (§8.3), and retry a handshake that is backing off.
+    func reconnectNow() async
 
     /// Sends `{ t:"req", id, op, params }` and waits for the matching `res`.
     /// Returns `result` on `ok:true`; throws `DesktopConnectionError.remote`
@@ -193,6 +209,13 @@ extension DesktopConnection {
 
     public func interruptChat(tabId: String) async throws {
         _ = try await request(ChatOp.interrupt, params: .object(["tabId": .string(tabId)]))
+    }
+
+    /// `chat.new` (§8.2): adds a claude-chat tab to the task and returns its
+    /// ID. The tab shows up in the next inbox; `chat.open` starts it.
+    public func newChat(taskId: String) async throws -> String {
+        let result = try await request(ChatOp.new, params: ChatNewParams(taskId: taskId).json)
+        return try decode(result, ChatNewResult.parse).tabId
     }
 
     /// `chat.detail`: a tool's full input/result, or a truncated item's full text.

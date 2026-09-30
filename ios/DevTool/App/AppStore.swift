@@ -12,13 +12,18 @@ protocol AppPersistence: Sendable {
 }
 
 /// JSON files under Application Support/DevTool:
-/// `desktops.json` and `inbox/<desktopId>.json`.
+/// `desktops.json` and `inbox/<desktopId>.json` (and `chats/`, see `chatCache`).
 struct FileAppStore: AppPersistence {
     let directory: URL
     private let log = Logger(subsystem: "sk.awantech.devtool", category: "store")
 
     init(directory: URL? = nil) {
         self.directory = directory ?? URL.applicationSupportDirectory.appending(path: "DevTool", directoryHint: .isDirectory)
+    }
+
+    /// Opened chats' last transcripts: `chats/<desktopId>/<tabId>.json` (§8.3).
+    var chatCache: FileChatCacheStore {
+        FileChatCacheStore(directory: directory.appending(path: "chats", directoryHint: .isDirectory))
     }
 
     private var desktopsURL: URL { directory.appending(path: "desktops.json") }

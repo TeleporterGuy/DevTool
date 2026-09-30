@@ -84,7 +84,11 @@ public actor RelayClient {
     /// The `pair` sent in the current connection's hello.
     private var helloPair: RelayPair?
     /// Set when a reconnect should skip the backoff (new pairing token).
-    private var reconnectNow = false
+    private var skipBackoff = false
+    /// The backoff sleep between sockets, while one is running.
+    private var backoffSleep: Task<Void, Never>?
+    /// `reconnectNow()` cut the backoff short.
+    private var woken = false
 
     public init(relayURL: URL, identity: DeviceIdentity, connector: any WebSocketConnector = URLSessionWebSocketConnector(), timing: RelayTiming = .standard) {
         self.relayURL = relayURL
@@ -121,7 +125,7 @@ public actor RelayClient {
                 // Our hello didn't carry this token: authenticate again with it.
                 // Everyone gets `disconnected` and then `ready` again.
                 continuation.yield(.connecting)
-                reconnectNow = true
+                skipBackoff = true
                 socket?.close(code: 1000)
             } else {
                 continuation.yield(.ready)
@@ -150,6 +154,20 @@ public actor RelayClient {
         subscribers[id]?.pairToken = nil
     }
 
+    /// Ends a running reconnect backoff now (the app came to the foreground,
+    /// §8.3). With the socket up it pings the relay instead, so a socket that
+    /// died while the app was suspended fails now rather than at the next
+    /// scheduled ping.
+    public func reconnectNow() {
+        if let backoffSleep {
+            woken = true
+            backoffSleep.cancel()
+        } else if ready, let socket {
+            let ping = RelayClientMessage.ping.text
+            Task { try? await socket.send(ping) }
+        }
+    }
+
     /// Sends `frame.data` bytes to `desktopId`.
     public func send(_ data: Data, to desktopId: String) async throws {
         guard ready, let socket else { throw DesktopConnectionError.notConnected }
@@ -172,12 +190,27 @@ public actor RelayClient {
             if Task.isCancelled || subscribers.isEmpty { break }
             broadcast(.disconnected)
             if wasReady { backoff = timing.initialBackoff }
-            if reconnectNow {
-                reconnectNow = false
+            if skipBackoff {
+                skipBackoff = false
                 continue
             }
-            guard (try? await Task.sleep(for: backoff)) != nil else { break }
-            backoff = min(backoff * 2, timing.maxBackoff)
+            // A task of its own, so `reconnectNow()` can end it without
+            // cancelling the loop.
+            let sleep = Task { [backoff] in _ = try? await Task.sleep(for: backoff) }
+            backoffSleep = sleep
+            await withTaskCancellationHandler {
+                await sleep.value
+            } onCancel: {
+                sleep.cancel()
+            }
+            backoffSleep = nil
+            if Task.isCancelled { break }
+            if woken {
+                woken = false
+                backoff = timing.initialBackoff
+            } else {
+                backoff = min(backoff * 2, timing.maxBackoff)
+            }
         }
     }
 
