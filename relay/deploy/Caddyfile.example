@@ -12,8 +12,9 @@
 # Copy to /etc/caddy/Caddyfile and `systemctl reload caddy`.
 
 relay.devtool.awantech.sk {
-	# Only the WebSocket endpoint and the health check are public.
-	@relay path /v1 /healthz
+	# Only the WebSocket endpoint, the push gateway (SPEC.md §7) and the health
+	# check are public.
+	@relay path /v1 /v1/push/register /v1/push/send /healthz
 	handle @relay {
 		reverse_proxy 127.0.0.1:8787 {
 			# By default Caddy closes proxied WebSockets on every config reload.
