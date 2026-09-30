@@ -1,4 +1,4 @@
-import { summarizeTool } from '../../shared/agent-activity'
+import { firstLine, summarizeTool } from '../../shared/agent-activity'
 import { editPairs, diffLines } from '../../shared/chat-diff'
 import { canAlwaysAllow, planText, promptQuestions } from '../../shared/chat-prompts'
 import type { ChatItem, ChatPrompt, ChatState } from '../../shared/claude-chat'
@@ -58,6 +58,16 @@ export function mapItem(item: ChatItem): ChatViewItem {
     }
     case 'notice':
       return { kind: 'notice', id: item.id, text: item.text, tone: item.tone }
+    case 'bash':
+      // The phone has no bash rows; a `!command` reads as the Bash call it is.
+      return {
+        kind: 'tool',
+        id: item.id,
+        name: 'Bash',
+        summary: `! ${firstLine(item.command, 80) ?? ''}`,
+        status: item.running ? 'running' : item.exitCode === 0 || item.exitCode === undefined ? 'done' : 'error',
+        hasDetail: true
+      }
   }
 }
 
@@ -161,6 +171,10 @@ export function chatDetail(state: ChatState, itemId: string): ChatDetailResult |
     return item.result !== undefined
       ? { kind: 'tool', input, result: capText(item.result, ChatLimits.detail).text }
       : { kind: 'tool', input }
+  }
+  if (item.kind === 'bash') {
+    const output = [item.stdout, item.stderr].filter(Boolean).join('\n')
+    return { kind: 'tool', input: capText(item.command, ChatLimits.detail).text, result: capText(output, ChatLimits.detail).text }
   }
   return { kind: 'text', markdown: capText(item.text, ChatLimits.detail).text }
 }

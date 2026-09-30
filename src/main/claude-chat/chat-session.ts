@@ -14,6 +14,7 @@ import type {
 } from '@anthropic-ai/claude-agent-sdk'
 import { loadClaudeSdk } from './sdk'
 import {
+  isChatPermissionMode,
   promptKindFor,
   type ChatEvent,
   type ChatImage,
@@ -432,16 +433,24 @@ export class ChatSession {
     if (response.behavior === 'allow') {
       // "Always" on a plan means what the terminal's plan dialog offers: leave plan
       // mode straight into accepting edits. Otherwise it applies Claude's own rules.
-      const updatedPermissions: PermissionUpdate[] | undefined = !response.always
-        ? undefined
+      const updatedPermissions: PermissionUpdate[] = !response.always
+        ? []
         : prompt.kind === 'plan'
           ? [{ type: 'setMode', mode: 'acceptEdits', destination: 'session' }]
-          : held.suggestions?.length ? held.suggestions : undefined
+          : held.suggestions ?? []
+      const mode = isChatPermissionMode(response.mode) ? response.mode : undefined
+      if (mode) {
+        // One mode wins: a suggestion's own setMode would fight the one asked for.
+        const rules = updatedPermissions.filter((update) => update.type !== 'setMode')
+        updatedPermissions.length = 0
+        updatedPermissions.push(...rules, { type: 'setMode', mode, destination: 'session' })
+      }
       result = {
         behavior: 'allow',
         updatedInput: response.updatedInput ?? prompt.input,
-        ...(updatedPermissions ? { updatedPermissions } : {})
+        ...(updatedPermissions.length ? { updatedPermissions } : {})
       }
+      if (mode) this.options.onEvent({ t: 'meta', info: { permissionMode: mode } })
     } else {
       result = { behavior: 'deny', message: response.message?.trim() || 'The user declined this action.' }
     }
@@ -452,12 +461,16 @@ export class ChatSession {
     return true
   }
 
-  /** Queue a user message. Returns its uuid, which the replay echo carries back. */
-  send(text: string, images: ChatImage[] = []): string {
+  /**
+   * Queue a user message. Returns its uuid, which the replay echo carries back.
+   * `context`: text blocks that go ahead of it (the `!command`s run since the last one).
+   */
+  send(text: string, images: ChatImage[] = [], context: string[] = []): string {
     const uuid = randomUUID()
-    const content = images.length === 0
+    const content = images.length === 0 && context.length === 0
       ? text
       : [
+          ...context.map((block) => ({ type: 'text' as const, text: block })),
           ...images.map((image) => ({
             type: 'image' as const,
             source: { type: 'base64' as const, media_type: image.mediaType as 'image/png', data: image.data }

@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, nativeTheme, safeStorage } from 'electron'
+import { app, BrowserWindow, ipcMain, nativeTheme, powerSaveBlocker, safeStorage } from 'electron'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
@@ -19,12 +19,13 @@ import { WorkspaceManager } from './workspace-manager'
 import { NotesStorage } from './notes-storage'
 import { RevisionStore } from './revision-store'
 import { TabActivityRegistry } from './tab-activity-registry'
+import { SleepBlocker } from './sleep-blocker'
 import type { ActivityUpdate } from '../shared/agent-activity'
 import { runIdleCleanupSweep, type IdleCleanupEnvironment } from './idle-cleanup-sweep'
 import { tearDownTaskTabs } from './task-teardown'
 import { PaletteFrecencyStorage } from './palette-frecency-storage'
 import { agentCommandOverride, resolveAgentCommand } from './resolve-agent-command'
-import { getShellEnv, setPortableNodeDir } from './shell-env'
+import { findGitBashExe, getShellEnv, setPortableNodeDir } from './shell-env'
 import { createIpcRegistrar } from './ipc/registrar'
 import { createAppUrlMatcher } from './ipc/sender'
 import { allowedLocalRoots, resolveAllowedDirectory } from './ipc/path-allowlist'
@@ -129,6 +130,7 @@ export class AppRuntime {
   private readonly ptySessions: PtySessions
   /** Main's authoritative view of what every tab's agent is doing. */
   private readonly activityRegistry = new TabActivityRegistry()
+  private readonly sleepBlocker: SleepBlocker
   /** Tabs with an unsaved editor buffer, per window — a task holding one is not swept. */
   private readonly dirtyTabsByWindow = new Map<number, Set<string>>()
   /** Which window last reported each hook-less tab's status (`report-tab-status`). */
@@ -169,6 +171,13 @@ export class AppRuntime {
     })
     this.config = this.storage.loadConfig()
     setPortableNodeDir(this.config.portableNodeDir)
+    this.sleepBlocker = new SleepBlocker(
+      powerSaveBlocker,
+      () => this.activityRegistry.getSnapshot(),
+      () => this.config.keepAwakeWhileWorking !== false,
+      (message) => this.logDebug(message)
+    )
+    this.activityRegistry.subscribe(() => this.sleepBlocker.update())
     this.ptySessions = new PtySessions({
       ptyManager: this.ptyManager,
       scrollbackStorage: this.scrollbackStorage,
@@ -511,6 +520,7 @@ export class AppRuntime {
     this.ptySessions.killAll()
     this.notebookKernels.shutdownAll()
     this.chatManager.closeAll()
+    this.sleepBlocker.release()
     this.hookInjector.cleanupAll()
     await this.hookServer.stop()
     await this.sshManager.disconnectAll().catch(() => {})
@@ -613,6 +623,19 @@ export class AppRuntime {
         file: this.sshManager.getSshCommand(),
         args: this.sshManager.buildStdioSpawnArgs(projectId, sshConfig, 'claude', claudeArgs, env, cwd)
       }),
+      bashSpawn: (config, command) => {
+        if (config.sshConfig && config.projectId) {
+          return {
+            file: this.sshManager.getSshCommand(),
+            args: this.sshManager.buildStdioSpawnArgs(config.projectId, config.sshConfig, 'bash', ['-c', command], {}, config.cwd)
+          }
+        }
+        const env = getShellEnv()
+        const shell = process.platform === 'win32'
+          ? findGitBashExe() ?? 'bash.exe'
+          : env.SHELL || '/bin/sh'
+        return { file: shell, args: ['-c', command], cwd: config.cwd, env }
+      },
       remoteExec: async (projectId, sshConfig, script) => {
         const { stdout } = await execFileAsync(this.sshManager.getSshCommand(), [
           '-S', this.sshManager.getSocketPath(projectId),
@@ -791,6 +814,7 @@ export class AppRuntime {
     this.config = { ...this.config, ...patch }
     this.storage.saveConfig(this.config)
     setPortableNodeDir(this.config.portableNodeDir)
+    this.sleepBlocker.update()
     this.broadcastToAllWindows('config-updated', clone(this.config))
   }
 

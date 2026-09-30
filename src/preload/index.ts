@@ -30,6 +30,7 @@ import type { AgentActivity } from '../shared/agent-activity'
 import type { MobilePairingInvite, MobileState } from '../shared/mobile'
 import type { AiStatusEvent } from '../shared/ai-status'
 import type { ChatEvent, ChatImage, ChatPromptResponse, ChatSideAnswer, ChatSnapshot } from '../shared/claude-chat'
+import type { PermissionBehavior, PermissionSettingsSource, PermissionSourceKind } from '../shared/chat-permissions'
 
 const api = {
   // Projects
@@ -142,6 +143,8 @@ const api = {
   // Theme
   getNativeTheme: (): Promise<'dark' | 'light'> => ipcRenderer.invoke('get-native-theme'),
   clipboardWriteText: (text: string): Promise<void> => ipcRenderer.invoke('clipboard-write-text', text),
+  /** Open a project/workspace directory in the OS file manager, or select a path under it. */
+  revealInFolder: (folder: string, relativePath?: string): Promise<void> => ipcRenderer.invoke('reveal-in-folder', folder, relativePath),
   clipboardReadText: (): Promise<string> => ipcRenderer.invoke('clipboard-read-text'),
   openExternal: (url: string): Promise<void> => ipcRenderer.invoke('open-external', url),
   onThemeChanged: (callback: (theme: 'dark' | 'light') => void): void => {
@@ -203,6 +206,7 @@ const api = {
   chatDetach: (tabId: string): void => ipcRenderer.send('chat-detach', tabId),
   chatSend: (tabId: string, text: string, images?: ChatImage[]): Promise<void> =>
     ipcRenderer.invoke('chat-send', tabId, text, images),
+  chatBash: (tabId: string, command: string): Promise<void> => ipcRenderer.invoke('chat-bash', tabId, command),
   chatSideQuestion: (tabId: string, question: string): Promise<ChatSideAnswer> =>
     ipcRenderer.invoke('chat-side-question', tabId, question),
   chatInterrupt: (tabId: string): Promise<void> => ipcRenderer.invoke('chat-interrupt', tabId),
@@ -218,6 +222,14 @@ const api = {
   chatClose: (tabId: string): void => ipcRenderer.send('chat-close', tabId),
   chatListFiles: (cwd: string, projectId?: string, sshConfig?: SshConfig): Promise<string[]> =>
     ipcRenderer.invoke('chat-list-files', cwd, projectId, sshConfig),
+  chatPermissionsRead: (cwd: string): Promise<PermissionSettingsSource[]> => ipcRenderer.invoke('chat-permissions-read', cwd),
+  chatPermissionsUpdate: (
+    cwd: string,
+    kind: PermissionSourceKind,
+    behavior: PermissionBehavior,
+    rule: string,
+    action: 'add' | 'remove'
+  ): Promise<void> => ipcRenderer.invoke('chat-permissions-update', cwd, kind, behavior, rule, action),
   onChatEvent: (callback: (tabId: string, seq: number, event: ChatEvent) => void): (() => void) => {
     const handler = (_event: Electron.IpcRendererEvent, tabId: string, seq: number, event: ChatEvent) => callback(tabId, seq, event)
     ipcRenderer.on('chat-event', handler)

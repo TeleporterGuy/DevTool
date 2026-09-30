@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react'
-import type { ChatPrompt, ChatPromptResponse } from '../../../shared/claude-chat'
+import { CHAT_PERMISSION_MODES, type ChatPrompt, type ChatPromptResponse } from '../../../shared/claude-chat'
 import { summarizeTool } from '../../../shared/agent-activity'
 import {
   canAlwaysAllow,
@@ -19,6 +19,8 @@ import { diffLines, editPairs } from './diff'
 interface Props {
   prompt: ChatPrompt
   onRespond: (response: ChatPromptResponse) => void
+  /** The session's permission mode, so a card doesn't offer the one already on. */
+  permissionMode?: string
 }
 
 const btn = 'inline-flex items-center h-(--ctl-h-sm) px-2.5 rounded-md border-[0.5px] text-sm cursor-pointer transition-colors duration-(--motion-fast) disabled:opacity-50 disabled:cursor-not-allowed'
@@ -38,18 +40,23 @@ function Card({ title, children }: { title: React.ReactNode; children: React.Rea
   )
 }
 
-export default function PromptCard({ prompt, onRespond }: Props): React.ReactElement {
+export default function PromptCard({ prompt, onRespond, permissionMode }: Props): React.ReactElement {
   if (prompt.kind === 'question') return <QuestionCard prompt={prompt} onRespond={onRespond} />
   if (prompt.kind === 'plan') return <PlanCard prompt={prompt} onRespond={onRespond} />
-  return <PermissionCard prompt={prompt} onRespond={onRespond} />
+  return <PermissionCard prompt={prompt} onRespond={onRespond} permissionMode={permissionMode} />
 }
 
-function PermissionCard({ prompt, onRespond }: Props): React.ReactElement {
+/** Modes that already skip this prompt's kind of question: no point offering to switch to them. */
+const NO_AUTO_OFFER = new Set(['auto', 'bypassPermissions'])
+
+function PermissionCard({ prompt, onRespond, permissionMode }: Props): React.ReactElement {
   const [denying, setDenying] = useState(false)
   const [reason, setReason] = useState('')
   const input = prompt.input
   const pairs = editPairs(prompt.toolName, input)
   const canAlways = canAlwaysAllow(prompt)
+  const always = canAlways ? describeSuggestions(prompt.suggestions) : ''
+  const offerAuto = !NO_AUTO_OFFER.has(permissionMode ?? 'default')
   const label = summarizeTool(prompt.toolName, input)
   let detail: React.ReactNode = null
   if ((prompt.toolName === 'Bash' || prompt.toolName === 'PowerShell') && typeof input.command === 'string') {
@@ -90,18 +97,42 @@ function PermissionCard({ prompt, onRespond }: Props): React.ReactElement {
           <button type="submit" className={secondaryBtn}>Deny</button>
         </form>
       ) : (
-        <div className="flex flex-wrap gap-1.5">
-          <button type="button" className={primaryBtn} onClick={() => onRespond({ behavior: 'allow' })}>Allow</button>
-          {canAlways && (
-            <button type="button" className={secondaryBtn} onClick={() => onRespond({ behavior: 'allow', always: true })} title={describeSuggestions(prompt.suggestions)}>
-              Always allow
-            </button>
-          )}
-          <button type="button" className={quietBtn} onClick={() => setDenying(true)}>Deny…</button>
-        </div>
+        <>
+          <div className="flex flex-wrap gap-1.5">
+            <button type="button" className={primaryBtn} onClick={() => onRespond({ behavior: 'allow' })}>Allow</button>
+            {canAlways && (
+              <button type="button" className={secondaryBtn} onClick={() => onRespond({ behavior: 'allow', always: true })} title={always}>
+                Always allow
+              </button>
+            )}
+            {offerAuto && (
+              <button
+                type="button"
+                className={secondaryBtn}
+                title="Allow this, then let Claude's classifier approve safe actions for the rest of this session"
+                onClick={() => onRespond({ behavior: 'allow', mode: 'auto' })}
+              >
+                Allow, switch to Auto
+              </button>
+            )}
+            <button type="button" className={quietBtn} onClick={() => setDenying(true)}>Deny…</button>
+          </div>
+          {always && <div className="text-xs text-text-subtle whitespace-pre-line">Always allow: {always}</div>}
+        </>
       )}
     </Card>
   )
+}
+
+const DESTINATION_LABEL: Record<string, string> = {
+  session: 'for this session',
+  localSettings: 'in .claude/settings.local.json',
+  projectSettings: 'in .claude/settings.json',
+  userSettings: 'in ~/.claude/settings.json'
+}
+
+function modeLabel(mode: string): string {
+  return CHAT_PERMISSION_MODES.find((m) => m.value === mode)?.label ?? mode
 }
 
 /** What "Always allow" would change, from Claude's own suggestions. */
@@ -109,9 +140,12 @@ function describeSuggestions(suggestions: unknown[] | undefined): string {
   const parts: string[] = []
   for (const raw of suggestions ?? []) {
     const s = raw as { type?: string; mode?: string; rules?: { toolName?: string; ruleContent?: string }[]; destination?: string }
-    if (s.type === 'setMode' && s.mode) parts.push(`Switch to ${s.mode} for this session`)
+    if (s.type === 'setMode' && s.mode) parts.push(`switch to ${modeLabel(s.mode)} for this session`)
     if (s.type === 'addRules' && s.rules) {
-      for (const rule of s.rules) parts.push(`Allow ${rule.toolName}${rule.ruleContent ? `(${rule.ruleContent})` : ''}${s.destination ? ` in ${s.destination}` : ''}`)
+      for (const rule of s.rules) parts.push(`${rule.toolName}${rule.ruleContent ? `(${rule.ruleContent})` : ''}${s.destination ? ` ${DESTINATION_LABEL[s.destination] ?? `in ${s.destination}`}` : ''}`)
+    }
+    if (s.type === 'addDirectories' && Array.isArray((s as { directories?: unknown }).directories)) {
+      for (const dir of (s as { directories: string[] }).directories) parts.push(`access to ${dir}`)
     }
   }
   return parts.join('\n')

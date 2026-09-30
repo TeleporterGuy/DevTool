@@ -6,6 +6,8 @@ import { execFile } from 'child_process'
 import { promisify } from 'util'
 import type { SshConfig } from '../../shared/types'
 import type { ClaudeChatManager } from '../claude-chat/chat-manager'
+import { readPermissionSettings, updatePermissionRule } from '../claude-chat/permission-settings'
+import { PERMISSION_BEHAVIORS } from '../../shared/chat-permissions'
 import type { CodexSessionManager } from '../codex-session-manager'
 import type { HookInjector } from '../hook-injector'
 import { spawnCdCommand, type SshConnectionManager } from '../ssh-connection-manager'
@@ -162,6 +164,8 @@ export function registerAgentHandlers(ipc: IpcRegistrar, deps: AgentDeps): void 
   })
   ipc.handle('chat-send', [safeId, str, chatImages], (_event, tabId, text, images) =>
     deps.chatManager().send(tabId, text, images ?? []))
+  ipc.handle('chat-bash', [safeId, v.string({ nonEmpty: true, max: 20_000 })], (_event, tabId, command) =>
+    deps.chatManager().runBash(tabId, command))
   ipc.handle('chat-side-question', [safeId, v.string({ nonEmpty: true, max: 20_000 })], (_event, tabId, question) =>
     deps.chatManager().askSideQuestion(tabId, question))
   ipc.handle('chat-interrupt', [safeId], (_event, tabId) => deps.chatManager().interrupt(tabId))
@@ -181,4 +185,15 @@ export function registerAgentHandlers(ipc: IpcRegistrar, deps: AgentDeps): void 
   })
   ipc.handle('chat-list-files', [str, optSafeId, optSshConfig], (_event, cwd, projectId, config) =>
     listChatFiles(deps, cwd, projectId, config))
+  // `/permissions`: the project's settings files are only reachable for directories the user configured.
+  ipc.handle('chat-permissions-read', [v.string({ nonEmpty: true })], async (_event, cwd) =>
+    readPermissionSettings(await deps.assertAllowedDirectory(cwd)))
+  ipc.handle('chat-permissions-update', [
+    v.string({ nonEmpty: true }),
+    v.literal('localSettings', 'projectSettings', 'userSettings'),
+    v.literal(...PERMISSION_BEHAVIORS),
+    v.string({ nonEmpty: true, max: 2000 }),
+    v.literal('add', 'remove')
+  ], async (_event, cwd, kind, behavior, rule, action) =>
+    updatePermissionRule(await deps.assertAllowedDirectory(cwd), kind, behavior, rule, action))
 }

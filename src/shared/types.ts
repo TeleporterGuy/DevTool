@@ -424,6 +424,8 @@ export interface AppConfig {
   codexCommand: string
   piCommand: string
   lazyLoadClaude: boolean
+  /** Hold off system sleep while any agent tab is working (the display may still sleep). */
+  keepAwakeWhileWorking: boolean
   /** New Claude tabs (task auto-open, the tab bar's ✦) open as a terminal or a chat. */
   claudeDefaultView: ClaudeView
   lastProjectId: string | null
@@ -645,6 +647,7 @@ export const DEFAULT_CONFIG: AppConfig = {
   codexCommand: '',
   piCommand: '',
   lazyLoadClaude: true,
+  keepAwakeWhileWorking: true,
   claudeDefaultView: 'terminal',
   lastProjectId: null,
   lastTaskId: null,

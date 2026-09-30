@@ -1,6 +1,8 @@
 import type { SshConfig } from '../../shared/types'
 import {
+  bashContextBlocks,
   emptyChatState,
+  isChatPermissionMode,
   reduceChat,
   type ChatEvent,
   type ChatImage,
@@ -10,7 +12,9 @@ import {
   type ChatSnapshot,
   type ChatState
 } from '../../shared/claude-chat'
+import { randomUUID } from 'crypto'
 import { ChatSession } from './chat-session'
+import { runBash, type BashSpawn } from './bash-mode'
 import { createRemoteSpawner, type RemoteCommand } from './remote-spawn'
 import { readLocalTranscript, readRemoteTranscript, SESSION_ID_RE } from './transcript'
 
@@ -35,6 +39,8 @@ export interface ChatManagerDeps {
   ensureSsh: (projectId: string, sshConfig: SshConfig) => Promise<void>
   /** argv for a non-tty `claude` on the project's host, through the master socket. */
   remoteCommand: (projectId: string, sshConfig: SshConfig, cwd: string, claudeArgs: string[], env: Record<string, string>) => RemoteCommand
+  /** How to run a `!command` for this tab: its shell, locally or on the project's host. */
+  bashSpawn: (config: ChatTabConfig, command: string) => BashSpawn
   /** Run a script on the project's host and return stdout. */
   remoteExec: (projectId: string, sshConfig: SshConfig, script: string) => Promise<string>
   /** A hook payload from the session, for the status/activity pipeline. */
@@ -69,6 +75,8 @@ interface ChatRuntime {
   model?: string
   permissionMode?: string
   effort?: string
+  /** Finished `!command`s whose output goes to Claude with the next message. */
+  bashContext: { id: string; blocks: string[] }[]
 }
 
 /**
@@ -172,8 +180,39 @@ export class ClaudeChatManager {
     if (!runtime) throw new Error('chat tab not attached')
     await runtime.ready
     if (!runtime.session || runtime.session.isEnded()) await this.startSession(runtime)
-    runtime.session?.send(text, images)
+    if (!runtime.session) return
+    const context = runtime.bashContext
+    runtime.bashContext = []
+    runtime.session.send(text, images, context.flatMap((entry) => entry.blocks))
+    if (context.length > 0) this.emit(runtime, { t: 'bash-sent', ids: context.map((entry) => entry.id) })
     runtime.hasTranscript = true
+  }
+
+  /**
+   * `!command`: run it in the project's shell, show it in the timeline, and hand
+   * command and output to Claude with the next message — the CLI's bash mode, which
+   * doesn't start a turn of its own.
+   */
+  async runBash(tabId: string, command: string): Promise<void> {
+    const runtime = this.runtimes.get(tabId)
+    if (!runtime) throw new Error('chat tab not attached')
+    await runtime.ready
+    const id = `bash-${randomUUID()}`
+    this.emit(runtime, { t: 'bash', id, command, at: Date.now() })
+    const { config } = runtime
+    if (config.sshConfig && config.projectId) {
+      try {
+        await this.deps.ensureSsh(config.projectId, config.sshConfig)
+      } catch (err) {
+        this.emit(runtime, { t: 'bash-done', id, stdout: '', stderr: err instanceof Error ? err.message : String(err), exitCode: null })
+        return
+      }
+    }
+    const result = await runBash(this.deps.bashSpawn(config, command))
+    this.deps.log(`chatBash tab=${tabId} exit=${result.exitCode}`)
+    if (this.runtimes.get(tabId) !== runtime) return
+    runtime.bashContext.push({ id, blocks: bashContextBlocks(command, result.stdout, result.stderr, result.exitCode) })
+    this.emit(runtime, { t: 'bash-done', id, ...result })
   }
 
   async interrupt(tabId: string): Promise<void> {
@@ -213,7 +252,11 @@ export class ClaudeChatManager {
   }
 
   respond(tabId: string, promptId: string, response: ChatPromptResponse): boolean {
-    return this.runtimes.get(tabId)?.session?.respond(promptId, response) ?? false
+    const runtime = this.runtimes.get(tabId)
+    const answered = runtime?.session?.respond(promptId, response) ?? false
+    // A restarted process keeps the mode the answer switched to.
+    if (answered && runtime && response.behavior === 'allow' && isChatPermissionMode(response.mode)) runtime.permissionMode = response.mode
+    return answered
   }
 
   async setModel(tabId: string, model: string | undefined): Promise<void> {
@@ -267,7 +310,8 @@ export class ClaudeChatManager {
       listeners: new Set(),
       session: null,
       ready: Promise.resolve(),
-      hasTranscript: false
+      hasTranscript: false,
+      bashContext: []
     }
     runtime.ready = this.loadHistory(runtime)
     this.runtimes.set(tabId, runtime)

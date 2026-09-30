@@ -160,6 +160,7 @@ export const chatPromptResponse = v.union(
   v.object({
     behavior: v.literal('allow'),
     always: v.optional(v.boolean()),
+    mode: v.optional(v.string({ max: 40 })),
     updatedInput: v.optional(v.plainObject())
   }),
   v.object({

@@ -39,6 +39,24 @@ export type ChatItem =
   | { kind: 'thinking'; id: string; text: string; streaming?: boolean }
   | ChatToolItem
   | { kind: 'notice'; id: string; text: string; tone: 'muted' | 'warning' | 'error' }
+  | ChatBashItem
+
+/**
+ * A `!command` you ran yourself (the CLI's bash mode): run by DevTool, not by
+ * Claude, and handed to Claude with your next message.
+ */
+export interface ChatBashItem {
+  kind: 'bash'
+  id: string
+  command: string
+  running?: boolean
+  stdout?: string
+  stderr?: string
+  /** Null when it was killed or never ran. */
+  exitCode?: number | null
+  /** Waiting to go out with your next message; false once Claude has it. */
+  pendingContext?: boolean
+}
 
 export type ChatPromptKind = 'permission' | 'question' | 'plan'
 
@@ -84,6 +102,8 @@ export interface ChatTask {
   agentType?: string
   /** Running in the background rather than blocking its tool call. */
   background: boolean
+  /** Started by a subagent's own tool call: part of that agent's work, not listed on its own. */
+  nested?: boolean
   status: ChatTaskStatus
   startedAt?: number
   endedAt?: number
@@ -175,6 +195,10 @@ export type ChatEvent =
   | { t: 'meta'; models?: ChatModelOption[]; commands?: ChatCommand[]; info?: Partial<ChatSessionInfo>; usage?: ChatUsage }
   | { t: 'interrupting' }
   | { t: 'reset' }
+  | { t: 'bash'; id: string; command: string; at?: number }
+  | { t: 'bash-done'; id: string; stdout: string; stderr: string; exitCode: number | null }
+  /** The `!command` context went out with a message. */
+  | { t: 'bash-sent'; ids: string[] }
 
 /** What `chat-attach` returns: the state so far and the seq it corresponds to. */
 export interface ChatSnapshot {
@@ -184,7 +208,8 @@ export interface ChatSnapshot {
 
 /** How a window answers a {@link ChatPrompt}. */
 export type ChatPromptResponse =
-  | { behavior: 'allow'; always?: boolean; updatedInput?: Record<string, unknown> }
+  /** `mode`: also switch the session to that permission mode (e.g. "allow, and go auto"). */
+  | { behavior: 'allow'; always?: boolean; mode?: ChatPermissionMode; updatedInput?: Record<string, unknown> }
   | { behavior: 'deny'; message?: string }
 
 export interface ChatImage {
@@ -274,15 +299,63 @@ export function toolResultContent(content: unknown): { text: string; images: Cha
 }
 
 const INTERRUPT_RE = /^\[Request interrupted by user[^\]]*\]$/
+const BASH_INPUT_RE = /^<bash-input>([\s\S]*?)<\/bash-input>/
+const BASH_STDOUT_RE = /<bash-stdout>([\s\S]*?)<\/bash-stdout>/
+const BASH_STDERR_RE = /<bash-stderr>([\s\S]*?)<\/bash-stderr>/
+
+const SHELL_COMMAND_RE = /<user-shell-command>([\s\S]*?)<\/user-shell-command>/
+const SHELL_STDOUT_RE = /<user-shell-stdout>([\s\S]*?)<\/user-shell-stdout>/
+const SHELL_STDERR_RE = /<user-shell-stderr>([\s\S]*?)<\/user-shell-stderr>/
+const SHELL_EXIT_RE = /<user-shell-exit>(-?\d+|killed)<\/user-shell-exit>/
+const SHELL_PREAMBLE = 'I ran a shell command myself (not a tool call you made):'
+
+type UserTextEntry =
+  | { kind: 'user' | 'notice'; text: string }
+  | { kind: 'bash'; command: string; stdout?: string; stderr?: string; exitCode?: number | null }
+  | { kind: 'bash-output'; stdout: string; stderr: string }
+
+/**
+ * The text block a `!command` rides along with the next message as. Not the CLI's
+ * own `<bash-input>` / `<bash-stdout>` form: the CLI doesn't echo a message that
+ * carries those back (`--replay-user-messages`), so it would stay "Queued" forever.
+ * History still reads both.
+ */
+export function bashContextBlocks(command: string, stdout: string, stderr: string, exitCode: number | null): string[] {
+  return [[
+    SHELL_PREAMBLE,
+    `<user-shell-command>${command}</user-shell-command>`,
+    `<user-shell-stdout>${stdout}</user-shell-stdout>`,
+    `<user-shell-stderr>${stderr}</user-shell-stderr>`,
+    `<user-shell-exit>${exitCode === null ? 'killed' : exitCode}</user-shell-exit>`
+  ].join('\n')]
+}
 const META_TAG_RE = /^<(local-command-caveat|system-reminder|command-message|task-notification|bash-input|bash-stdout|bash-stderr)>/
 
 /**
  * How a user text block should show, or null to hide it. Claude records slash
  * commands and their output as tagged pseudo-messages in the transcript.
  */
-function classifyUserText(text: string): { kind: 'user' | 'notice'; text: string } | null {
+function classifyUserText(text: string): UserTextEntry | null {
   const trimmed = text.trim()
   if (!trimmed) return null
+  if (trimmed.startsWith(SHELL_PREAMBLE)) {
+    const command = SHELL_COMMAND_RE.exec(trimmed)
+    if (command) {
+      const exit = SHELL_EXIT_RE.exec(trimmed)?.[1]
+      return {
+        kind: 'bash',
+        command: command[1],
+        stdout: SHELL_STDOUT_RE.exec(trimmed)?.[1] ?? '',
+        stderr: SHELL_STDERR_RE.exec(trimmed)?.[1] ?? '',
+        ...(exit !== undefined ? { exitCode: exit === 'killed' ? null : Number(exit) } : {})
+      }
+    }
+  }
+  const bash = BASH_INPUT_RE.exec(trimmed)
+  if (bash) return { kind: 'bash', command: bash[1] }
+  if (trimmed.startsWith('<bash-stdout>') || trimmed.startsWith('<bash-stderr>')) {
+    return { kind: 'bash-output', stdout: BASH_STDOUT_RE.exec(trimmed)?.[1] ?? '', stderr: BASH_STDERR_RE.exec(trimmed)?.[1] ?? '' }
+  }
   if (INTERRUPT_RE.test(trimmed)) return { kind: 'notice', text: 'Interrupted' }
   const command = /<command-name>([^<]*)<\/command-name>/.exec(trimmed)
   if (command) {
@@ -532,8 +605,34 @@ function applyUserMessage(draft: Draft, m: Json, history: boolean): Partial<Chat
   }
   if (texts.length === 0 && images === 0) return {}
 
-  const shown = texts.map(classifyUserText).filter((entry): entry is { kind: 'user' | 'notice'; text: string } => entry !== null)
-  const userText = shown.filter((entry) => entry.kind === 'user').map((entry) => entry.text).join('\n')
+  const shown = texts.map(classifyUserText).filter((entry): entry is UserTextEntry => entry !== null)
+  // `!command`s ran before the message they rode along with.
+  for (const entry of shown) {
+    if (entry.kind === 'bash') {
+      const { kind: _kind, ...fields } = entry
+      draft.push({
+        kind: 'bash',
+        id: draft.nextId(),
+        ...fields,
+        ...(fields.stdout !== undefined ? { stdout: truncate(fields.stdout, RESULT_TEXT_LIMIT) } : {}),
+        ...(fields.stderr !== undefined ? { stderr: truncate(fields.stderr, RESULT_TEXT_LIMIT) } : {})
+      })
+    } else if (entry.kind === 'bash-output') {
+      let at = -1
+      for (let i = draft.items.length - 1; i >= 0; i--) {
+        const item = draft.items[i]
+        if (item.kind === 'bash') {
+          if (item.stdout === undefined && item.stderr === undefined) at = i
+          break
+        }
+        if (item.kind === 'user') break
+      }
+      const output = { stdout: truncate(entry.stdout, RESULT_TEXT_LIMIT), stderr: truncate(entry.stderr, RESULT_TEXT_LIMIT) }
+      if (at >= 0) draft.update(at, (item) => item.kind === 'bash' ? { ...item, ...output } : item)
+      else draft.push({ kind: 'bash', id: draft.nextId(), command: '', ...output })
+    }
+  }
+  const userText = shown.flatMap((entry) => entry.kind === 'user' ? [entry.text] : []).join('\n')
   if (userText || images > 0) {
     if (uuid && draft.items.some((item) => item.kind === 'user' && item.id === uuid)) return {}
     draft.push({ kind: 'user', id: uuid ?? draft.nextId(), text: userText, images })
@@ -628,6 +727,7 @@ function applyTaskMessage(draft: Draft, state: ChatState, m: Json, subtype: stri
         ...(command ? { command } : {}),
         ...(agentType ? { agentType } : {}),
         background: m.is_backgrounded === true || existing?.background === true,
+        ...(m.owned_by_subagent === true || existing?.nested ? { nested: true } : {}),
         // A resumed subagent registers again under its id: it runs anew.
         status: 'running',
         endedAt: undefined,
@@ -790,7 +890,13 @@ function applySystemMessage(draft: Draft, state: ChatState, m: Json, history: bo
     }
     case 'task_notification': {
       const summary = str(m.summary)?.trim()
-      if (summary && m.skip_transcript !== true) {
+      // A foreground or subagent-owned task's summary is just its command line or
+      // description, which its tool row already shows; only background work that
+      // finished on its own gets a line.
+      const taskId = str(m.task_id)
+      const task = taskId ? state.tasks[taskId] : undefined
+      const quiet = task !== undefined && (task.nested === true || !task.background)
+      if (summary && m.skip_transcript !== true && !quiet) {
         const tone = m.status === 'failed' ? 'warning' : 'muted'
         draft.push({ kind: 'notice', id: draft.nextId(str(m.uuid)), text: summary, tone })
       }
@@ -978,6 +1084,32 @@ export function reduceChat(state: ChatState, event: ChatEvent): ChatState {
       return state.busy ? { ...state, interrupting: true } : state
     case 'reset':
       return { ...emptyChatState(), models: state.models, commands: state.commands, usage: state.usage }
+    case 'bash': {
+      const draft = new Draft(state, 'b')
+      draft.push({ kind: 'bash', id: event.id, command: event.command, running: true })
+      return draft.result({})
+    }
+    case 'bash-done':
+    case 'bash-sent': {
+      const ids = event.t === 'bash-done' ? [event.id] : event.ids
+      const draft = new Draft(state, 'b')
+      draft.items.forEach((item, index) => {
+        if (item.kind !== 'bash' || !ids.includes(item.id)) return
+        draft.update(index, (current) => {
+          if (current.kind !== 'bash') return current
+          if (event.t === 'bash-sent') return { ...current, pendingContext: false }
+          return {
+            ...current,
+            running: false,
+            stdout: truncate(event.stdout, RESULT_TEXT_LIMIT),
+            stderr: truncate(event.stderr, RESULT_TEXT_LIMIT),
+            exitCode: event.exitCode,
+            pendingContext: true
+          }
+        })
+      })
+      return draft.result({})
+    }
   }
 }
 
@@ -1005,6 +1137,12 @@ export const CHAT_PERMISSION_MODES = [
   { value: 'bypassPermissions', label: 'Bypass' }
 ] as const
 
+export type ChatPermissionMode = typeof CHAT_PERMISSION_MODES[number]['value']
+
+export function isChatPermissionMode(value: unknown): value is ChatPermissionMode {
+  return CHAT_PERMISSION_MODES.some((mode) => mode.value === value)
+}
+
 /**
  * `/btw`: a quick question answered from the conversation so far, without joining
  * it. The CLI doesn't list it (it's a terminal-UI command); the chat tab runs it
@@ -1030,6 +1168,12 @@ export interface ChatSideAnswer {
 }
 
 /** Built-in commands that only make sense in the terminal UI. */
+/** `/permissions`: the CLI's dialog is terminal UI; the chat tab has its own rules editor. */
+export const PERMISSIONS_COMMAND: ChatCommand = {
+  name: 'permissions',
+  description: 'View and edit allow, ask and deny rules'
+}
+
 export const TERMINAL_ONLY_COMMANDS = new Set([
   'login', 'logout', 'config', 'settings', 'theme', 'terminal-setup', 'vim', 'doctor', 'ide',
   'install-github-app', 'permissions', 'hooks', 'agents', 'mcp', 'plugin', 'resume', 'status',

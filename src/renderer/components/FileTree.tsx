@@ -4,6 +4,7 @@ import { ChevronRight, Folder, FileText, BookText } from 'lucide-react'
 import { FILE_BROWSER_REFRESH_MS } from '../hooks/fileBrowserRefresh'
 import { posixRelativeJoin } from '../../shared/workspace-path'
 import { isNotebookFile } from '../../shared/notebook'
+import { revealInFolderLabel } from '../utils/revealLabel'
 
 interface Props {
   projectDir: string
@@ -838,6 +839,17 @@ const FileTree = React.forwardRef<FileTreeHandle, Props>(function FileTree({
                 </button>
               </>
             )}
+            <button
+              className={menuItemCls}
+              onClick={() => {
+                setMenu(null)
+                window.api.revealInFolder(projectDir, menu.relativePath || undefined)
+                  .then(() => setActionError(null))
+                  .catch((error: unknown) => setActionError(fileActionErrorMessage(error)))
+              }}
+            >
+              {revealInFolderLabel()}
+            </button>
             {onRevealInTerminal && (
               <button
                 className={menuItemCls}

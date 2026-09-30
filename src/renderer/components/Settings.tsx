@@ -421,6 +421,16 @@ export default function Settings({ onClose }: Props): React.ReactElement {
                   />
                 }
               />
+              <GroupRow
+                label="Keep the computer awake while agents work"
+                sub="While an agent tab is working, the system doesn't go to sleep. The display still can."
+                trailing={
+                  <Switch
+                    checked={config.keepAwakeWhileWorking}
+                    onChange={(keepAwakeWhileWorking) => updateConfig({ keepAwakeWhileWorking })}
+                  />
+                }
+              />
             </Group>
 
             <GrpHead>Claude Code</GrpHead>
