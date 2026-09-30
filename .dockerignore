@@ -12,6 +12,7 @@ docs
 src
 tests
 resources
+site
 build
 relay/data
 relay/test

@@ -35,6 +35,9 @@ targets:
         CFBundleDisplayName: DevTool
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        # Export compliance: all cryptography is Apple's own (CryptoKit, Security,
+        # URLSession TLS). The Noise protocol is built on CryptoKit primitives.
+        ITSAppUsesNonExemptEncryption: false
         LSRequiresIPhoneOS: true
         NSCameraUsageDescription: DevTool uses the camera to scan the pairing QR code shown on your desktop.
         NSFaceIDUsageDescription: DevTool can ask for Face ID before you answer an agent's permission request, question or plan.
@@ -58,6 +61,7 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: sk.awantech.devtool
         PRODUCT_NAME: DevTool
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         # aps-environment, the App Group and keychain groups (push, SPEC.md §7).
         CODE_SIGN_ENTITLEMENTS: DevTool/DevTool.entitlements
         TARGETED_DEVICE_FAMILY: "1,2"

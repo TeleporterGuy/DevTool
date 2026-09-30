@@ -145,6 +145,26 @@ xcrun simctl push "$SIM" sk.awantech.devtool /tmp/permission.apns
 
 Log output: `log stream --predicate 'subsystem == "sk.awantech.devtool"'` (categories `push`, `notifications`, `notification-service`).
 
+## Release and TestFlight
+
+A Release build talks to `wss://relay.devtool.awantech.sk` and registers for **production** APNs (`env: "production"`, SPEC.md §7.1); distribution signing switches `aps-environment` in the entitlements to `production`. `ITSAppUsesNonExemptEncryption` is `false` because all cryptography is Apple's (CryptoKit, Security, TLS), so uploads need no export compliance answer. The app icon is the single 1024 px `AppIcon` in `DevTool/Assets.xcassets`. The privacy policy is at https://devtool.awantech.sk/privacy/ (source in `site/`).
+
+The App Store Connect app record for `sk.awantech.devtool` must exist before the first upload. Bump `CURRENT_PROJECT_VERSION` in `project.yml` for every upload (App Store Connect refuses a build number twice), then:
+
+```bash
+cd ios
+xcodegen generate
+xcodebuild -project DevTool.xcodeproj -scheme DevTool -configuration Release \
+  -destination 'generic/platform=iOS' -archivePath build/DevTool.xcarchive \
+  -allowProvisioningUpdates archive
+# /usr/bin first: Xcode's IPA step breaks on Homebrew's rsync 3.x ("Copy failed").
+PATH=/usr/bin:/bin:/usr/sbin:/sbin xcodebuild -exportArchive \
+  -archivePath build/DevTool.xcarchive -exportPath build/upload \
+  -exportOptionsPlist ExportOptions.plist -allowProvisioningUpdates
+```
+
+`ExportOptions.plist` signs for App Store Connect (automatic, team `AX23G9CAL9`) and uploads with the Apple ID signed in to Xcode. Change `destination` to `export` to get a local `DevTool.ipa` instead. After processing, the build shows under TestFlight → Internal Testing.
+
 ## Tests
 
 ```bash

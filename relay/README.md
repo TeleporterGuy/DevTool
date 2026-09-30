@@ -112,6 +112,8 @@ docker build -f relay/Dockerfile -t devtool-relay .
 docker run --rm -p 8787:8787 -v devtool-relay-data:/data devtool-relay
 ```
 
+Prebuilt images for `linux/amd64` and `linux/arm64` are published to `ghcr.io/join3r/devtool-relay` by `.github/workflows/mobile.yml` on every push to master that touches the relay or protocol (`latest` and `sha-<commit>` tags). Pull requests build the image without pushing it.
+
 Or, for local development, `docker compose -f relay/docker-compose.yml up --build`. That serves port 8787 with a named volume `relay-data`.
 
 The image is `node:24-alpine` running as the unprivileged `node` user. It declares `VOLUME /data` with `RELAY_DATA=/data`, has a `HEALTHCHECK` on `/healthz`, and runs no `npm install`, because there is nothing to install. The root `.dockerignore` keeps the rest of the repo out of the build context.
