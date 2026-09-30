@@ -1,0 +1,146 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://devtool.awantech.sk/schema/mobile/v1/chat.schema.json",
+  "title": "Chat view",
+  "description": "The chat view model, SPEC.md §6.2, and the chat.* results, §6.3. Describes what a desktop sends; receivers keep unknown item and prompt kinds as 'Needs a newer app' and ignore unknown fields.",
+  "$ref": "#/$defs/view",
+  "$defs": {
+    "ms": { "type": "integer", "minimum": 0 },
+    "process": { "enum": ["idle", "starting", "running", "exited"] },
+    "view": {
+      "type": "object",
+      "required": ["tabId", "title", "busy", "process", "items", "hasEarlier", "prompts"],
+      "properties": {
+        "tabId": { "type": "string" },
+        "title": { "type": "string" },
+        "busy": { "type": "boolean" },
+        "turnStartedAt": { "$ref": "#/$defs/ms" },
+        "process": { "$ref": "#/$defs/process" },
+        "processError": { "type": "string" },
+        "permissionMode": { "type": "string" },
+        "model": { "type": "string" },
+        "items": { "type": "array", "items": { "$ref": "#/$defs/item" } },
+        "hasEarlier": { "type": "boolean" },
+        "prompts": { "type": "array", "items": { "$ref": "#/$defs/prompt" } }
+      }
+    },
+    "item": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["kind", "id", "text"],
+          "properties": {
+            "kind": { "const": "user" }, "id": { "type": "string" }, "text": { "type": "string", "description": "≤ 16000 chars" },
+            "images": { "type": "integer", "minimum": 1 }, "queued": { "const": true }, "failed": { "const": true }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["kind", "id", "markdown"],
+          "properties": { "kind": { "const": "text" }, "id": { "type": "string" }, "markdown": { "type": "string", "description": "≤ 16000 chars" }, "streaming": { "const": true } }
+        },
+        {
+          "type": "object",
+          "required": ["kind", "id", "preview"],
+          "properties": { "kind": { "const": "thinking" }, "id": { "type": "string" }, "preview": { "type": "string", "description": "≤ 300 chars" }, "streaming": { "const": true } }
+        },
+        {
+          "type": "object",
+          "required": ["kind", "id", "name", "summary", "status", "hasDetail"],
+          "properties": {
+            "kind": { "const": "tool" }, "id": { "type": "string" }, "name": { "type": "string" }, "summary": { "type": "string" },
+            "status": { "enum": ["pending", "running", "waiting", "done", "error", "denied"] },
+            "hasDetail": { "type": "boolean" }, "childCount": { "type": "integer", "minimum": 0 }, "lastChild": { "type": "string" }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["kind", "id", "text", "tone"],
+          "properties": { "kind": { "const": "notice" }, "id": { "type": "string" }, "text": { "type": "string" }, "tone": { "enum": ["muted", "warning", "error"] } }
+        }
+      ]
+    },
+    "prompt": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["kind", "id", "toolName", "title", "summary", "canAlwaysAllow"],
+          "properties": {
+            "kind": { "const": "permission" }, "id": { "type": "string" }, "toolName": { "type": "string" }, "title": { "type": "string" },
+            "summary": { "type": "string" }, "detail": { "type": "string", "description": "≤ 4000 chars" },
+            "canAlwaysAllow": { "type": "boolean" }, "agent": { "const": true }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["kind", "id", "questions"],
+          "properties": {
+            "kind": { "const": "question" }, "id": { "type": "string" },
+            "questions": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["question", "multiSelect", "options"],
+                "properties": {
+                  "question": { "type": "string" }, "header": { "type": "string" }, "multiSelect": { "type": "boolean" },
+                  "options": {
+                    "type": "array",
+                    "items": { "type": "object", "required": ["label"], "properties": { "label": { "type": "string" }, "description": { "type": "string" } } }
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["kind", "id", "markdown"],
+          "properties": { "kind": { "const": "plan" }, "id": { "type": "string" }, "markdown": { "type": "string" } }
+        }
+      ]
+    },
+    "openResult": {
+      "type": "object",
+      "required": ["seq", "view"],
+      "properties": { "seq": { "type": "integer", "minimum": 0 }, "view": { "$ref": "#/$defs/view" } }
+    },
+    "earlierResult": {
+      "type": "object",
+      "required": ["items", "hasEarlier"],
+      "properties": { "items": { "type": "array", "items": { "$ref": "#/$defs/item" } }, "hasEarlier": { "type": "boolean" } }
+    },
+    "detailResult": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["kind", "input"],
+          "properties": { "kind": { "const": "tool" }, "input": { "type": "string" }, "result": { "type": "string" } }
+        },
+        {
+          "type": "object",
+          "required": ["kind", "markdown"],
+          "properties": { "kind": { "const": "text" }, "markdown": { "type": "string" } }
+        }
+      ]
+    },
+    "chatEvt": {
+      "type": "object",
+      "required": ["t", "e", "tabId", "seq", "upserts", "removes", "prompts", "busy", "process"],
+      "properties": {
+        "t": { "const": "evt" },
+        "e": { "const": "chat" },
+        "tabId": { "type": "string" },
+        "seq": { "type": "integer", "minimum": 0 },
+        "upserts": { "type": "array", "items": { "$ref": "#/$defs/item" } },
+        "removes": { "type": "array", "items": { "type": "string" } },
+        "prompts": { "type": "array", "items": { "$ref": "#/$defs/prompt" } },
+        "busy": { "type": "boolean" },
+        "turnStartedAt": { "$ref": "#/$defs/ms" },
+        "process": { "$ref": "#/$defs/process" },
+        "processError": { "type": "string" },
+        "permissionMode": { "type": "string" },
+        "model": { "type": "string" }
+      }
+    }
+  }
+}

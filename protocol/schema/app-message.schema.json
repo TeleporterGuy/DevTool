@@ -1,0 +1,73 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://devtool.awantech.sk/schema/mobile/v1/app-message.schema.json",
+  "title": "App message",
+  "description": "One UTF-8 JSON message inside a Noise transport frame, SPEC.md §4.4. Receivers ignore unknown fields and ignore messages with an unknown t (or evt with an unknown e); a req with an unknown op is answered with ok:false, code unsupported.",
+  "oneOf": [
+    { "$ref": "#/$defs/req" },
+    { "$ref": "#/$defs/resOk" },
+    { "$ref": "#/$defs/resErr" },
+    { "$ref": "#/$defs/inboxEvt" },
+    { "$ref": "#/$defs/pairingEvt" },
+    { "$ref": "chat.schema.json#/$defs/chatEvt" }
+  ],
+  "$defs": {
+    "id": { "type": "integer", "minimum": 0 },
+    "req": {
+      "type": "object",
+      "required": ["t", "id", "op"],
+      "properties": {
+        "t": { "const": "req" },
+        "id": { "$ref": "#/$defs/id" },
+        "op": { "type": "string", "description": "inbox.get, or a chat.* op (SPEC.md §6.3)" },
+        "params": { "description": "Op-specific (SPEC.md §6.3); the chat ops take an object with tabId." }
+      }
+    },
+    "resOk": {
+      "type": "object",
+      "required": ["t", "id", "ok", "result"],
+      "properties": {
+        "t": { "const": "res" },
+        "id": { "$ref": "#/$defs/id" },
+        "ok": { "const": true },
+        "result": { "description": "Op-specific; an Inbox for inbox.get, chat.schema.json for the chat ops." }
+      }
+    },
+    "resErr": {
+      "type": "object",
+      "required": ["t", "id", "ok", "error"],
+      "properties": {
+        "t": { "const": "res" },
+        "id": { "$ref": "#/$defs/id" },
+        "ok": { "const": false },
+        "error": {
+          "type": "object",
+          "required": ["code", "message"],
+          "properties": {
+            "code": { "type": "string", "description": "unsupported, bad-request, not-authorized, internal, not-found, gone, or newer codes" },
+            "message": { "type": "string" }
+          }
+        }
+      }
+    },
+    "inboxEvt": {
+      "type": "object",
+      "required": ["t", "e", "seq", "inbox"],
+      "properties": {
+        "t": { "const": "evt" },
+        "e": { "const": "inbox" },
+        "seq": { "type": "integer", "minimum": 0 },
+        "inbox": { "$ref": "inbox.schema.json" }
+      }
+    },
+    "pairingEvt": {
+      "type": "object",
+      "required": ["t", "e", "status"],
+      "properties": {
+        "t": { "const": "evt" },
+        "e": { "const": "pairing" },
+        "status": { "enum": ["accepted", "rejected", "revoked"] }
+      }
+    }
+  }
+}

@@ -1,6 +1,17 @@
 import React, { useMemo, useState } from 'react'
 import type { ChatPrompt, ChatPromptResponse } from '../../../shared/claude-chat'
 import { summarizeTool } from '../../../shared/agent-activity'
+import {
+  canAlwaysAllow,
+  dismissQuestionResponse,
+  joinAnswerLabels,
+  planApprovalResponse,
+  planFeedbackResponse,
+  planText,
+  promptQuestions,
+  questionAnswerResponse,
+  type PromptQuestion
+} from '../../../shared/chat-prompts'
 import { renderChatMarkdown } from './markdown'
 import DiffView from './DiffView'
 import { diffLines, editPairs } from './diff'
@@ -38,7 +49,7 @@ function PermissionCard({ prompt, onRespond }: Props): React.ReactElement {
   const [reason, setReason] = useState('')
   const input = prompt.input
   const pairs = editPairs(prompt.toolName, input)
-  const canAlways = (prompt.suggestions?.length ?? 0) > 0
+  const canAlways = canAlwaysAllow(prompt)
   const label = summarizeTool(prompt.toolName, input)
   let detail: React.ReactNode = null
   if ((prompt.toolName === 'Bash' || prompt.toolName === 'PowerShell') && typeof input.command === 'string') {
@@ -106,30 +117,8 @@ function describeSuggestions(suggestions: unknown[] | undefined): string {
   return parts.join('\n')
 }
 
-interface Question {
-  question: string
-  header?: string
-  multiSelect?: boolean
-  options: { label: string; description?: string }[]
-}
-
 function QuestionCard({ prompt, onRespond }: Props): React.ReactElement {
-  const questions = useMemo<Question[]>(() => {
-    const raw = Array.isArray(prompt.input.questions) ? prompt.input.questions : []
-    return raw.map((q) => {
-      const question = (q && typeof q === 'object' ? q : {}) as Record<string, unknown>
-      const options = Array.isArray(question.options) ? question.options : []
-      return {
-        question: String(question.question ?? ''),
-        header: typeof question.header === 'string' ? question.header : undefined,
-        multiSelect: question.multiSelect === true,
-        options: options.map((o) => {
-          const option = (o && typeof o === 'object' ? o : {}) as Record<string, unknown>
-          return { label: String(option.label ?? ''), description: typeof option.description === 'string' ? option.description : undefined }
-        })
-      }
-    })
-  }, [prompt.input])
+  const questions = useMemo<PromptQuestion[]>(() => promptQuestions(prompt.input), [prompt.input])
   const [picked, setPicked] = useState<Record<number, string[]>>({})
   const [other, setOther] = useState<Record<number, string>>({})
 
@@ -137,7 +126,7 @@ function QuestionCard({ prompt, onRespond }: Props): React.ReactElement {
     const labels = [...(picked[index] ?? [])]
     const extra = other[index]?.trim()
     if (extra) labels.push(extra)
-    return labels.join(', ')
+    return joinAnswerLabels(labels)
   }
   const complete = questions.every((_, index) => answerFor(index).length > 0)
 
@@ -153,7 +142,7 @@ function QuestionCard({ prompt, onRespond }: Props): React.ReactElement {
   const submit = (): void => {
     const answers: Record<string, string> = {}
     questions.forEach((q, index) => { answers[q.question] = answerFor(index) })
-    onRespond({ behavior: 'allow', updatedInput: { ...prompt.input, answers } })
+    onRespond(questionAnswerResponse(prompt, answers))
   }
 
   return (
@@ -195,7 +184,7 @@ function QuestionCard({ prompt, onRespond }: Props): React.ReactElement {
       ))}
       <div className="flex gap-1.5">
         <button type="button" className={primaryBtn} disabled={!complete} onClick={submit}>Answer</button>
-        <button type="button" className={quietBtn} onClick={() => onRespond({ behavior: 'deny', message: 'The user dismissed the question.' })}>Skip</button>
+        <button type="button" className={quietBtn} onClick={() => onRespond(dismissQuestionResponse())}>Skip</button>
       </div>
     </Card>
   )
@@ -204,7 +193,7 @@ function QuestionCard({ prompt, onRespond }: Props): React.ReactElement {
 function PlanCard({ prompt, onRespond }: Props): React.ReactElement {
   const [feedback, setFeedback] = useState('')
   const [revising, setRevising] = useState(false)
-  const plan = typeof prompt.input.plan === 'string' ? prompt.input.plan : ''
+  const plan = planText(prompt.input)
   const html = useMemo(() => renderChatMarkdown(plan || '_No plan text._'), [plan])
   return (
     <Card title="Plan ready for review">
@@ -218,7 +207,7 @@ function PlanCard({ prompt, onRespond }: Props): React.ReactElement {
           className="flex gap-1.5"
           onSubmit={(e) => {
             e.preventDefault()
-            onRespond({ behavior: 'deny', message: feedback.trim() || 'Keep planning.' })
+            onRespond(planFeedbackResponse(feedback))
           }}
         >
           <input
@@ -236,7 +225,7 @@ function PlanCard({ prompt, onRespond }: Props): React.ReactElement {
           <button
             type="button"
             className={primaryBtn}
-            onClick={() => onRespond({ behavior: 'allow', always: false, updatedInput: prompt.input })}
+            onClick={() => onRespond(planApprovalResponse(prompt, false))}
           >
             Approve
           </button>
@@ -244,7 +233,7 @@ function PlanCard({ prompt, onRespond }: Props): React.ReactElement {
             type="button"
             className={secondaryBtn}
             title="Approve, and accept file edits without asking for the rest of this session"
-            onClick={() => onRespond({ behavior: 'allow', always: true, updatedInput: prompt.input })}
+            onClick={() => onRespond(planApprovalResponse(prompt, true))}
           >
             Approve, auto-accept edits
           </button>

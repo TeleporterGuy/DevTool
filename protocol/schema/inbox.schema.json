@@ -1,0 +1,61 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://devtool.awantech.sk/schema/mobile/v1/inbox.schema.json",
+  "title": "Inbox",
+  "description": "Full inbox snapshot, desktop → phone (SPEC.md §4.4). Describes what a sender must produce. Receivers also ignore unknown fields, treat null optional fields as absent, and show an unknown tab status as idle.",
+  "type": "object",
+  "required": ["desktop", "generatedAt", "projects"],
+  "properties": {
+    "desktop": {
+      "type": "object",
+      "required": ["id", "name"],
+      "properties": {
+        "id": { "$ref": "#/$defs/deviceId" },
+        "name": { "type": "string" }
+      }
+    },
+    "generatedAt": { "$ref": "#/$defs/unixMs" },
+    "projects": { "type": "array", "items": { "$ref": "#/$defs/project" } }
+  },
+  "$defs": {
+    "deviceId": { "type": "string", "pattern": "^[0-9a-f]{32}$" },
+    "unixMs": { "type": "integer", "minimum": 0 },
+    "project": {
+      "type": "object",
+      "required": ["id", "name", "remote", "tasks"],
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "emoji": { "type": "string" },
+        "remote": { "type": "boolean" },
+        "tasks": { "type": "array", "items": { "$ref": "#/$defs/task" } }
+      }
+    },
+    "task": {
+      "type": "object",
+      "required": ["id", "name", "tabs"],
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "lastInteractedAt": { "$ref": "#/$defs/unixMs" },
+        "attentionAt": { "$ref": "#/$defs/unixMs" },
+        "tabs": { "type": "array", "items": { "$ref": "#/$defs/tab" } }
+      }
+    },
+    "tab": {
+      "type": "object",
+      "required": ["id", "type", "title", "status"],
+      "properties": {
+        "id": { "type": "string" },
+        "type": {
+          "description": "M1 desktops send claude-chat, claude, codex, pi or terminal; receivers accept any string.",
+          "type": "string"
+        },
+        "title": { "type": "string" },
+        "status": { "enum": ["working", "attention", "exited", "idle"] },
+        "since": { "$ref": "#/$defs/unixMs" },
+        "activity": { "type": "string", "description": "Short label derived from AgentActivity, e.g. \"Running Bash\"." }
+      }
+    }
+  }
+}

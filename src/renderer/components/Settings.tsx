@@ -13,6 +13,7 @@ import {
 } from './monacoOptions'
 import { GrpHead, FormGroup, SetBlock, Group, GroupRow, SegCtl, Switch, Field, Select, HelperText, Disclosure, LinkBtn } from './ui'
 import ExternalIdesSettings from './ExternalIdesSettings'
+import MobileSettings from './settings/MobileSettings'
 import { formatShortcutForApp } from '../../shared/shortcut-label'
 
 interface Props {
@@ -83,7 +84,7 @@ function parseNumberInput(value: string, fallback: number, min: number, max: num
   return Math.min(max, Math.max(min, parsed))
 }
 
-type SettingsTab = 'appearance' | 'terminal' | 'editor' | 'ai' | 'sidebar' | 'tasks'
+type SettingsTab = 'appearance' | 'terminal' | 'editor' | 'ai' | 'sidebar' | 'tasks' | 'mobile'
 
 const tabs: Array<{ id: SettingsTab; label: string }> = [
   { id: 'appearance', label: 'Appearance' },
@@ -91,7 +92,8 @@ const tabs: Array<{ id: SettingsTab; label: string }> = [
   { id: 'editor', label: 'Editor & Diff' },
   { id: 'ai', label: 'AI Tools' },
   { id: 'sidebar', label: 'Sidebar' },
-  { id: 'tasks', label: 'Tasks' }
+  { id: 'tasks', label: 'Tasks' },
+  { id: 'mobile', label: 'Mobile' }
 ]
 
 export default function Settings({ onClose }: Props): React.ReactElement {
@@ -534,6 +536,9 @@ export default function Settings({ onClose }: Props): React.ReactElement {
             )}
           </>
         )
+
+      case 'mobile':
+        return <MobileSettings />
 
       case 'sidebar':
         return (

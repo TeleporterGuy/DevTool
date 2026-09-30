@@ -1,5 +1,6 @@
-import { BrowserWindow, ipcMain, nativeTheme } from 'electron'
+import { app, BrowserWindow, ipcMain, nativeTheme, safeStorage } from 'electron'
 import fs from 'fs'
+import os from 'os'
 import path from 'path'
 import { execFile } from 'child_process'
 import { promisify } from 'util'
@@ -48,6 +49,18 @@ import { listCondaEnvs, listCondaEnvsForNotebookKernel, resolveProjectCondaEnv }
 import { NotebookKernelManager } from './notebook-kernel'
 import { safeWebContentsSend } from './safe-ipc-send'
 import type { CondaEnvInfo } from '../shared/conda'
+import { registerMobileHandlers } from './ipc/mobile'
+import { MobileService } from './mobile/mobile-service'
+import { PairingsStore } from './mobile/pairings-store'
+import { IdentityStore } from './mobile/identity'
+import { createInvite } from './mobile/invite'
+import { RelayClient } from './mobile/relay-client'
+import { createNoiseChannelFactory } from './mobile/channel'
+import { ChatBridge } from './mobile/chat-bridge'
+import { PushEmitter } from './mobile/push-emitter'
+import { addChatTab } from './mobile/new-chat'
+import { AppErrorCode, CHAT_NEW_FEATURE } from '../../protocol/ts/index.ts'
+import { normalizeMobileConfig } from '../shared/mobile'
 import type {
   AppConfig,
   CleanupActivity,
@@ -118,10 +131,14 @@ export class AppRuntime {
   private readonly activityRegistry = new TabActivityRegistry()
   /** Tabs with an unsaved editor buffer, per window — a task holding one is not swept. */
   private readonly dirtyTabsByWindow = new Map<number, Set<string>>()
+  /** Which window last reported each hook-less tab's status (`report-tab-status`). */
+  private readonly statusReporters = new Map<string, number>()
   private hookInjector!: HookInjector
   private sshManager!: SshConnectionManager
   /** Claude chat tabs' processes — the Agent SDK counterpart of `ptySessions`. */
   private chatManager!: ClaudeChatManager
+  /** Phones: relay connection, pairing and the inbox they see. Dormant while Mobile is off. */
+  private mobileService!: MobileService
   private started = false
   private quitting = false
   private socksProxyEnabled = new Map<string, boolean>()
@@ -198,8 +215,87 @@ export class AppRuntime {
       this.broadcastToAllWindows('notebook-kernel-event', tabId, event)
     })
     this.chatManager = this.createChatManager()
+    this.mobileService = this.createMobileService()
     this.registerEventForwarders()
     this.registerIpcHandlers()
+    this.mobileService.start()
+  }
+
+  private createMobileService(): MobileService {
+    const mobileDir = path.join(CONFIG_DIR, 'mobile')
+    const log = (message: string) => this.logDebug(message)
+    // Loaded on first use (Mobile on, or a pairing started), never at startup:
+    // safeStorage can raise a Keychain prompt on macOS.
+    const identity = new IdentityStore(mobileDir, {
+      isAvailable: () => safeStorage.isEncryptionAvailable(),
+      encrypt: (plaintext) => safeStorage.encryptString(plaintext),
+      decrypt: (ciphertext) => safeStorage.decryptString(ciphertext)
+    }, log)
+    const desktopName = () => normalizeMobileConfig(this.config.mobile).desktopName?.trim() || os.hostname().replace(/\.local$/, '')
+    // The emitter and the service need each other: it sends through the service, and
+    // the bridge (inside the service's deps) tells it which turns a phone started.
+    let service: MobileService | null = null
+    let bridge: ChatBridge | null = null
+    const push = new PushEmitter({
+      chats: this.chatManager,
+      projects: { peek: () => this.projectsStore.peek() },
+      targets: () => service?.pushTargets() ?? [],
+      openTab: (phoneId) => bridge?.openTab(phoneId) ?? null,
+      send: (phoneId, data) => service?.sendPush(phoneId, data) ?? Promise.resolve('not-sent'),
+      desktopId: () => identity.peekId(),
+      now: () => Date.now(),
+      log
+    })
+    bridge = new ChatBridge({
+      chats: this.chatManager,
+      projects: { peek: () => this.projectsStore.peek() },
+      timers: {
+        now: () => Date.now(),
+        setTimeout: (fn, ms) => setTimeout(fn, ms),
+        clearTimeout: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>)
+      },
+      log,
+      onPhoneSend: (phoneId, tabId) => push.phoneSent(phoneId, tabId)
+    })
+    push.start()
+    service = new MobileService({
+      getConfig: () => normalizeMobileConfig(this.config.mobile),
+      saveConfig: (mobile) => this.applyConfig({ mobile }),
+      projects: {
+        peek: () => this.projectsStore.peek(),
+        subscribe: (listener) => this.projectsStore.subscribe(() => listener())
+      },
+      activity: this.activityRegistry,
+      pairings: new PairingsStore(mobileDir, log),
+      getDesktopId: () => identity.peekId(),
+      defaultDesktopName: () => os.hostname().replace(/\.local$/, ''),
+      createTransport: () => new RelayClient({
+        ed25519: () => identity.get().ed25519,
+        deviceId: () => identity.get().id,
+        log: (message) => this.logDebug(`mobile ${message}`)
+      }),
+      channels: createNoiseChannelFactory({
+        staticKey: () => identity.get().x25519,
+        app: `devtool/${app.getVersion()}`,
+        desktopName,
+        features: () => [CHAT_NEW_FEATURE],
+        log
+      }),
+      createInvite: (options) => createInvite(identity.get(), options),
+      broadcastState: (state) => this.broadcastToAllWindows('mobile-state-changed', state),
+      log,
+      chat: bridge,
+      newChat: (taskId) => {
+        if (!this.config.enableClaude) {
+          return { ok: false, code: AppErrorCode.Unsupported, message: 'Claude is turned off on this desktop' }
+        }
+        const added = addChatTab(this.projectsStore.peek(), taskId)
+        if (!added.ok) return added
+        this.commitProjects(added.data)
+        return { ok: true, tabId: added.tabId }
+      }
+    })
+    return service
   }
 
   registerWindow(window: BrowserWindow, initialViewState?: WindowViewState | null): void {
@@ -225,6 +321,11 @@ export class AppRuntime {
       // A closed window's unsaved buffers went with it; leaving them behind would
       // protect their tasks from cleanup forever.
       this.dirtyTabsByWindow.delete(window.id)
+      for (const [tabId, windowId] of this.statusReporters) {
+        if (windowId !== window.id) continue
+        this.statusReporters.delete(tabId)
+        this.activityRegistry.unreported(tabId)
+      }
       if (!this.quitting) {
         this.windowStates.delete(window.id)
         this.persistWindowSession()
@@ -355,6 +456,7 @@ export class AppRuntime {
       },
       deleteScrollback: (tabId) => this.scrollbackStorage.delete(tabId),
       forgetActivity: (tabId) => {
+        this.statusReporters.delete(tabId)
         this.activityRegistry.remove(tabId)
         this.broadcastAgentActivity(tabId)
       },
@@ -404,6 +506,7 @@ export class AppRuntime {
       this.idleCleanupTimer = null
     }
     this.persistWindowSession()
+    this.mobileService?.stop()
     this.ptySessions.saveAllScrollback()
     this.ptySessions.killAll()
     this.notebookKernels.shutdownAll()
@@ -583,6 +686,10 @@ export class AppRuntime {
       paletteFrecency: this.paletteFrecencyStorage,
       getAgentActivity: () => this.activityRegistry.getActivitySnapshot(),
       getCleanupActivity: () => this.getCleanupActivity(),
+      reportTabStatus: (windowId, tabId, status) => {
+        this.statusReporters.set(tabId, windowId)
+        this.activityRegistry.reported(tabId, status)
+      },
       setDirtyTabs: (windowId, tabIds) => {
         if (tabIds.length === 0) this.dirtyTabsByWindow.delete(windowId)
         else this.dirtyTabsByWindow.set(windowId, new Set(tabIds))
@@ -634,6 +741,7 @@ export class AppRuntime {
       cleanupRemoteHooks: (projectId, sshConfig, remoteDir, tabId) =>
         this.cleanupRemoteHooks(projectId, sshConfig, remoteDir, tabId),
       forgetActivity: (tabId) => {
+        this.statusReporters.delete(tabId)
         this.activityRegistry.remove(tabId)
         this.broadcastAgentActivity(tabId)
       },
@@ -659,6 +767,7 @@ export class AppRuntime {
       shutdown: (tabId) => this.shutdownNotebookKernel(tabId),
       listCondaEnvs: () => listCondaEnvs({}, { force: true })
     })
+    registerMobileHandlers(ipc, { mobile: () => this.mobileService })
   }
 
   /**

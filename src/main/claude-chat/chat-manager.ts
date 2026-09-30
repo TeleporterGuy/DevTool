@@ -45,12 +45,22 @@ export interface ChatManagerDeps {
   log: (message: string) => void
 }
 
+/**
+ * A non-window subscriber (the mobile bridge): called after every event, with the
+ * state already folded. `state` is the runtime's own (treat it as read-only).
+ */
+export type ChatListener = (seq: number, event: ChatEvent, state: ChatState) => void
+
+/** Every chat's events, whether or not anything attached (the mobile push emitter). */
+export type ChatWatcher = (tabId: string, event: ChatEvent, state: ChatState) => void
+
 interface ChatRuntime {
   tabId: string
   config: ChatTabConfig
   state: ChatState
   seq: number
   attached: Set<number>
+  listeners: Set<ChatListener>
   session: ChatSession | null
   /** History loaded (or being loaded); later attaches wait on it. */
   ready: Promise<void>
@@ -72,10 +82,49 @@ interface ChatRuntime {
  */
 export class ClaudeChatManager {
   private readonly runtimes = new Map<string, ChatRuntime>()
+  private readonly watchers = new Set<ChatWatcher>()
 
   constructor(private readonly deps: ChatManagerDeps) {}
 
   async attach(windowId: number, tabId: string, config: ChatTabConfig): Promise<ChatSnapshot> {
+    const runtime = this.runtimeFor(tabId, config)
+    runtime.attached.add(windowId)
+    return this.ready(runtime)
+  }
+
+  /**
+   * Attach a non-window subscriber, the way a window attaches: the runtime is created
+   * from `config` (loading history, starting the process) if the tab has none yet.
+   * The listener sees every event from now on; call the returned function to stop.
+   * Removing the last listener never stops the process, as a window detaching doesn't.
+   */
+  async listen(tabId: string, config: ChatTabConfig, listener: ChatListener): Promise<{ snapshot: ChatSnapshot; stop: () => void }> {
+    const runtime = this.runtimeFor(tabId, config)
+    runtime.listeners.add(listener)
+    const stop = (): void => {
+      runtime.listeners.delete(listener)
+    }
+    try {
+      return { snapshot: await this.ready(runtime), stop }
+    } catch (err) {
+      stop()
+      throw err
+    }
+  }
+
+  /** The folded state so far, or null when the tab has no runtime. */
+  /** See every chat's events from now on; call the returned function to stop. */
+  watch(watcher: ChatWatcher): () => void {
+    this.watchers.add(watcher)
+    return () => { this.watchers.delete(watcher) }
+  }
+
+  snapshot(tabId: string): ChatSnapshot | null {
+    const runtime = this.runtimes.get(tabId)
+    return runtime ? { seq: runtime.seq, state: runtime.state } : null
+  }
+
+  private runtimeFor(tabId: string, config: ChatTabConfig): ChatRuntime {
     let runtime = this.runtimes.get(tabId)
     if (!runtime) {
       runtime = this.createRuntime(tabId, config)
@@ -83,7 +132,10 @@ export class ClaudeChatManager {
       // A dead process is restarted on the next send; keep config fresh for it.
       runtime.config = config
     }
-    runtime.attached.add(windowId)
+    return runtime
+  }
+
+  private async ready(runtime: ChatRuntime): Promise<ChatSnapshot> {
     await runtime.ready
     if (!runtime.session || runtime.session.isEnded()) {
       if (runtime.state.process === 'idle') void this.startSession(runtime)
@@ -212,6 +264,7 @@ export class ClaudeChatManager {
       state: emptyChatState(),
       seq: 0,
       attached: new Set(),
+      listeners: new Set(),
       session: null,
       ready: Promise.resolve(),
       hasTranscript: false
@@ -316,6 +369,20 @@ export class ClaudeChatManager {
     runtime.seq += 1
     for (const windowId of runtime.attached) {
       this.deps.sendToWindow(windowId, 'chat-event', runtime.tabId, runtime.seq, event)
+    }
+    for (const listener of runtime.listeners) {
+      try {
+        listener(runtime.seq, event, runtime.state)
+      } catch (err) {
+        this.deps.log(`chatListener tab=${runtime.tabId} error=${err instanceof Error ? err.message : String(err)}`)
+      }
+    }
+    for (const watcher of this.watchers) {
+      try {
+        watcher(runtime.tabId, event, runtime.state)
+      } catch (err) {
+        this.deps.log(`chatWatcher tab=${runtime.tabId} error=${err instanceof Error ? err.message : String(err)}`)
+      }
     }
   }
 }

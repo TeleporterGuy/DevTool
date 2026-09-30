@@ -10,7 +10,7 @@ import {
 } from '../../shared/conda'
 import { useApp } from '../context/AppContext'
 import TagPicker from './TagPicker'
-import { Modal, SetBlock, Field, HelperText, PrimaryButton } from './ui'
+import { Modal, SetBlock, Field, HelperText, PrimaryButton, Switch } from './ui'
 import ThemedSelect from './ThemedSelect'
 import {
   dashboardIconUrl,
@@ -29,6 +29,7 @@ interface Props {
     directory?: string
     condaEnvName?: string
     condaEnvPrefix?: string
+    hideFromMobile?: true
   }) => void
   onClose: () => void
 }
@@ -52,6 +53,7 @@ export default function ProjectSettings({ project, onSave, onClose }: Props): Re
   const [condaEnvs, setCondaEnvs] = useState<CondaEnvInfo[]>([])
   const [condaError, setCondaError] = useState<string | null>(null)
   const [condaLoading, setCondaLoading] = useState(false)
+  const [hideFromMobile, setHideFromMobile] = useState(!!project.hideFromMobile)
   const suggestionsRef = useRef<HTMLDivElement>(null)
   const canEditDirectory = !isRemoteProject(project) && !isShellCommandProject(project)
   const canPickConda = canEditDirectory
@@ -121,6 +123,8 @@ export default function ProjectSettings({ project, onSave, onClose }: Props): Re
       emoji: emoji.trim() || undefined,
       icon: icon.trim() || undefined,
       tagIds,
+      // Explicit undefined so turning it back off clears the stored flag.
+      hideFromMobile: hideFromMobile ? true : undefined,
     }
     if (canEditDirectory) updates.directory = cleanedDirectory
     if (canPickConda) {
@@ -293,6 +297,13 @@ export default function ProjectSettings({ project, onSave, onClose }: Props): Re
           ))}
         </div>
         <HelperText>Extra CLI arguments passed when the tool starts in this project.</HelperText>
+      </SetBlock>
+
+      <SetBlock label="Hide from mobile" divider>
+        <div className="flex items-center justify-between gap-3">
+          <HelperText>Paired phones won&apos;t see this project or its tasks.</HelperText>
+          <Switch checked={hideFromMobile} onChange={setHideFromMobile} />
+        </div>
       </SetBlock>
     </Modal>
   )

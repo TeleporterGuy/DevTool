@@ -1,0 +1,83 @@
+{
+  "description": "Pairing URIs (§2). `valid[].uri` is exactly what encoding `payload` produces; decoding it must give `payload` back.",
+  "valid": [
+    {
+      "payload": {
+        "v": 1,
+        "relay": "wss://relay.devtool.awantech.sk",
+        "id": "20671253fbf6054273bb719d3a34999b",
+        "x": "WRk8EC12yt0PtSot-_yhxB9h4cRudFFsSSPgNo0WKSg",
+        "e": "SbXmiGk-eBn6epUtGoZZ43PtMhSIX6GGs84g-2wogoQ",
+        "s": "3lEIG_tNXKBHhPcq8xxwEdVTuDKzAeuG-m_0P_M53Ag",
+        "n": "join3r-mbp",
+        "exp": 1790000300
+      },
+      "uri": "devtool://pair?d=eyJ2IjoxLCJyZWxheSI6IndzczovL3JlbGF5LmRldnRvb2wuYXdhbnRlY2guc2siLCJpZCI6IjIwNjcxMjUzZmJmNjA1NDI3M2JiNzE5ZDNhMzQ5OTliIiwieCI6IldSazhFQzEyeXQwUHRTb3QtX3loeEI5aDRjUnVkRkZzU1NQZ05vMFdLU2ciLCJlIjoiU2JYbWlHay1lQm42ZXBVdEdvWlo0M1B0TWhTSVg2R0dzODRnLTJ3b2dvUSIsInMiOiIzbEVJR190TlhLQkhoUGNxOHh4d0VkVlR1REt6QWV1Ry1tXzBQX001M0FnIiwibiI6ImpvaW4zci1tYnAiLCJleHAiOjE3OTAwMDAzMDB9"
+    },
+    {
+      "payload": {
+        "v": 1,
+        "relay": "ws://localhost:8787",
+        "id": "20671253fbf6054273bb719d3a34999b",
+        "x": "WRk8EC12yt0PtSot-_yhxB9h4cRudFFsSSPgNo0WKSg",
+        "e": "SbXmiGk-eBn6epUtGoZZ43PtMhSIX6GGs84g-2wogoQ",
+        "s": "3lEIG_tNXKBHhPcq8xxwEdVTuDKzAeuG-m_0P_M53Ag",
+        "n": "Žluťoučký kůň 🐴",
+        "exp": 1790000300
+      },
+      "uri": "devtool://pair?d=eyJ2IjoxLCJyZWxheSI6IndzOi8vbG9jYWxob3N0Ojg3ODciLCJpZCI6IjIwNjcxMjUzZmJmNjA1NDI3M2JiNzE5ZDNhMzQ5OTliIiwieCI6IldSazhFQzEyeXQwUHRTb3QtX3loeEI5aDRjUnVkRkZzU1NQZ05vMFdLU2ciLCJlIjoiU2JYbWlHay1lQm42ZXBVdEdvWlo0M1B0TWhTSVg2R0dzODRnLTJ3b2dvUSIsInMiOiIzbEVJR190TlhLQkhoUGNxOHh4d0VkVlR1REt6QWV1Ry1tXzBQX001M0FnIiwibiI6IsW9bHXFpW91xI1rw70ga8WvxYgg8J-QtCIsImV4cCI6MTc5MDAwMDMwMH0"
+    },
+    {
+      "note": "unknown JSON fields are dropped on decode",
+      "payload": {
+        "v": 1,
+        "relay": "wss://relay.devtool.awantech.sk",
+        "id": "20671253fbf6054273bb719d3a34999b",
+        "x": "WRk8EC12yt0PtSot-_yhxB9h4cRudFFsSSPgNo0WKSg",
+        "e": "SbXmiGk-eBn6epUtGoZZ43PtMhSIX6GGs84g-2wogoQ",
+        "s": "3lEIG_tNXKBHhPcq8xxwEdVTuDKzAeuG-m_0P_M53Ag",
+        "n": "join3r-mbp",
+        "exp": 1790000300
+      },
+      "uri": "devtool://pair?d=eyJ2IjoxLCJyZWxheSI6IndzczovL3JlbGF5LmRldnRvb2wuYXdhbnRlY2guc2siLCJpZCI6IjIwNjcxMjUzZmJmNjA1NDI3M2JiNzE5ZDNhMzQ5OTliIiwieCI6IldSazhFQzEyeXQwUHRTb3QtX3loeEI5aDRjUnVkRkZzU1NQZ05vMFdLU2ciLCJlIjoiU2JYbWlHay1lQm42ZXBVdEdvWlo0M1B0TWhTSVg2R0dzODRnLTJ3b2dvUSIsInMiOiIzbEVJR190TlhLQkhoUGNxOHh4d0VkVlR1REt6QWV1Ry1tXzBQX001M0FnIiwibiI6ImpvaW4zci1tYnAiLCJleHAiOjE3OTAwMDAzMDAsImZ1dHVyZSI6eyJ4IjoxfX0"
+    }
+  ],
+  "invalid": [
+    {
+      "reason": "wrong scheme",
+      "uri": "https://pair?d=eyJ2IjoxLCJyZWxheSI6IndzczovL3JlbGF5LmRldnRvb2wuYXdhbnRlY2guc2siLCJpZCI6IjIwNjcxMjUzZmJmNjA1NDI3M2JiNzE5ZDNhMzQ5OTliIiwieCI6IldSazhFQzEyeXQwUHRTb3QtX3loeEI5aDRjUnVkRkZzU1NQZ05vMFdLU2ciLCJlIjoiU2JYbWlHay1lQm42ZXBVdEdvWlo0M1B0TWhTSVg2R0dzODRnLTJ3b2dvUSIsInMiOiIzbEVJR190TlhLQkhoUGNxOHh4d0VkVlR1REt6QWV1Ry1tXzBQX001M0FnIiwibiI6ImpvaW4zci1tYnAiLCJleHAiOjE3OTAwMDAzMDB9"
+    },
+    {
+      "reason": "wrong host",
+      "uri": "devtool://pear?d=eyJ2IjoxLCJyZWxheSI6IndzczovL3JlbGF5LmRldnRvb2wuYXdhbnRlY2guc2siLCJpZCI6IjIwNjcxMjUzZmJmNjA1NDI3M2JiNzE5ZDNhMzQ5OTliIiwieCI6IldSazhFQzEyeXQwUHRTb3QtX3loeEI5aDRjUnVkRkZzU1NQZ05vMFdLU2ciLCJlIjoiU2JYbWlHay1lQm42ZXBVdEdvWlo0M1B0TWhTSVg2R0dzODRnLTJ3b2dvUSIsInMiOiIzbEVJR190TlhLQkhoUGNxOHh4d0VkVlR1REt6QWV1Ry1tXzBQX001M0FnIiwibiI6ImpvaW4zci1tYnAiLCJleHAiOjE3OTAwMDAzMDB9"
+    },
+    {
+      "reason": "missing payload",
+      "uri": "devtool://pair"
+    },
+    {
+      "reason": "payload not base64url",
+      "uri": "devtool://pair?d=***"
+    },
+    {
+      "reason": "unsupported version",
+      "uri": "devtool://pair?d=eyJ2IjoyLCJyZWxheSI6IndzczovL3JlbGF5LmRldnRvb2wuYXdhbnRlY2guc2siLCJpZCI6IjIwNjcxMjUzZmJmNjA1NDI3M2JiNzE5ZDNhMzQ5OTliIiwieCI6IldSazhFQzEyeXQwUHRTb3QtX3loeEI5aDRjUnVkRkZzU1NQZ05vMFdLU2ciLCJlIjoiU2JYbWlHay1lQm42ZXBVdEdvWlo0M1B0TWhTSVg2R0dzODRnLTJ3b2dvUSIsInMiOiIzbEVJR190TlhLQkhoUGNxOHh4d0VkVlR1REt6QWV1Ry1tXzBQX001M0FnIiwibiI6ImpvaW4zci1tYnAiLCJleHAiOjE3OTAwMDAzMDB9"
+    },
+    {
+      "reason": "id does not match e",
+      "uri": "devtool://pair?d=eyJ2IjoxLCJyZWxheSI6IndzczovL3JlbGF5LmRldnRvb2wuYXdhbnRlY2guc2siLCJpZCI6IjAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwIiwieCI6IldSazhFQzEyeXQwUHRTb3QtX3loeEI5aDRjUnVkRkZzU1NQZ05vMFdLU2ciLCJlIjoiU2JYbWlHay1lQm42ZXBVdEdvWlo0M1B0TWhTSVg2R0dzODRnLTJ3b2dvUSIsInMiOiIzbEVJR190TlhLQkhoUGNxOHh4d0VkVlR1REt6QWV1Ry1tXzBQX001M0FnIiwibiI6ImpvaW4zci1tYnAiLCJleHAiOjE3OTAwMDAzMDB9"
+    },
+    {
+      "reason": "secret wrong length",
+      "uri": "devtool://pair?d=eyJ2IjoxLCJyZWxheSI6IndzczovL3JlbGF5LmRldnRvb2wuYXdhbnRlY2guc2siLCJpZCI6IjIwNjcxMjUzZmJmNjA1NDI3M2JiNzE5ZDNhMzQ5OTliIiwieCI6IldSazhFQzEyeXQwUHRTb3QtX3loeEI5aDRjUnVkRkZzU1NQZ05vMFdLU2ciLCJlIjoiU2JYbWlHay1lQm42ZXBVdEdvWlo0M1B0TWhTSVg2R0dzODRnLTJ3b2dvUSIsInMiOiJBQUFBQUFBQUFBQUFBQUFBQUFBQUFBIiwibiI6ImpvaW4zci1tYnAiLCJleHAiOjE3OTAwMDAzMDB9"
+    },
+    {
+      "reason": "relay not a websocket URL",
+      "uri": "devtool://pair?d=eyJ2IjoxLCJyZWxheSI6Imh0dHBzOi8vcmVsYXkuZXhhbXBsZSIsImlkIjoiMjA2NzEyNTNmYmY2MDU0MjczYmI3MTlkM2EzNDk5OWIiLCJ4IjoiV1JrOEVDMTJ5dDBQdFNvdC1feWh4QjloNGNSdWRGRnNTU1BnTm8wV0tTZyIsImUiOiJTYlhtaUdrLWVCbjZlcFV0R29aWjQzUHRNaFNJWDZHR3M4NGctMndvZ29RIiwicyI6IjNsRUlHX3ROWEtCSGhQY3E4eHh3RWRWVHVES3pBZXVHLW1fMFBfTTUzQWciLCJuIjoiam9pbjNyLW1icCIsImV4cCI6MTc5MDAwMDMwMH0"
+    },
+    {
+      "reason": "exp missing",
+      "uri": "devtool://pair?d=eyJ2IjoxLCJyZWxheSI6IndzczovL3JlbGF5LmRldnRvb2wuYXdhbnRlY2guc2siLCJpZCI6IjIwNjcxMjUzZmJmNjA1NDI3M2JiNzE5ZDNhMzQ5OTliIiwieCI6IldSazhFQzEyeXQwUHRTb3QtX3loeEI5aDRjUnVkRkZzU1NQZ05vMFdLU2ciLCJlIjoiU2JYbWlHay1lQm42ZXBVdEdvWlo0M1B0TWhTSVg2R0dzODRnLTJ3b2dvUSIsInMiOiIzbEVJR190TlhLQkhoUGNxOHh4d0VkVlR1REt6QWV1Ry1tXzBQX001M0FnIiwibiI6ImpvaW4zci1tYnAifQ"
+    }
+  ]
+}
