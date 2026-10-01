@@ -47,7 +47,7 @@ export default function ChipMenu({ label, title, options, value, onChange, disab
         onClick={() => setOpen(!open)}
         className="inline-flex items-center gap-1 h-5 px-1.5 rounded-md border-0 bg-transparent text-xs text-text-muted cursor-pointer hover:bg-surface-3 hover:text-text disabled:opacity-50 disabled:cursor-default transition-colors duration-(--motion-fast)"
       >
-        <span className="truncate max-w-40">{label}</span>
+        <span className="truncate max-w-52">{label}</span>
         <ChevronDown size={11} className="shrink-0 opacity-70" />
       </button>
       {open && (

@@ -54,6 +54,17 @@ interface SideQuestionQuery {
   askSideQuestion?: (question: string) => Promise<{ response: string; synthetic: boolean } | null>
 }
 
+/** A local chat's mode when no settings file sets `permissions.defaultMode`. */
+const DEFAULT_CHAT_MODE = 'auto'
+
+/**
+ * `get_settings` in the SDK: shipped in its code, not yet in its types. `applied`
+ * is what the next request sends, with the settings' and the model's defaults resolved.
+ */
+interface SettingsQuery {
+  getSettings?: () => Promise<{ applied?: { model?: unknown; effort?: unknown } } | null>
+}
+
 /** Mid-turn context refreshes are at most this often; a turn's end always refreshes. */
 const CONTEXT_REFRESH_MS = 20_000
 
@@ -251,20 +262,22 @@ export class ChatSession {
 
     // The SDK always passes `--permission-mode`, which would override the user's own
     // `permissions.defaultMode`. Resolve it the way the CLI does (repo-committed
-    // escalations filtered out) so a chat starts in the mode a terminal would.
-    // Remote settings live on the host, where the CLI's default applies.
+    // escalations filtered out) so a chat starts in the mode a terminal would, and
+    // in Auto when no settings file names one. Remote settings live on the host,
+    // where the CLI's default applies.
     if (!o.permissionMode && !o.spawn) {
+      let mode: string | undefined
       try {
         const resolved = await sdk.resolveSettings({ cwd: o.cwd, settingSources: ['user', 'project', 'local'] })
-        const mode = sdk.filterEscalatingDefaultMode(resolved).permissions?.defaultMode
-        if (mode) queryOptions.permissionMode = mode as PermissionMode
+        mode = sdk.filterEscalatingDefaultMode(resolved).permissions?.defaultMode
       } catch {
-        // Fall back to the CLI default.
+        // Unreadable settings: start in Auto all the same.
       }
+      queryOptions.permissionMode = (mode ?? DEFAULT_CHAT_MODE) as PermissionMode
     }
 
     o.onEvent({ t: 'process', state: 'starting' })
-    if (queryOptions.permissionMode) o.onEvent({ t: 'meta', info: { permissionMode: queryOptions.permissionMode } })
+    o.onEvent({ t: 'meta', info: { modelPicked: Boolean(o.model), ...(queryOptions.permissionMode ? { permissionMode: queryOptions.permissionMode } : {}) } })
     this.query = sdk.query({ prompt: this.input, options: queryOptions })
     void this.pump(this.query)
     void this.loadMeta(this.query)
@@ -322,6 +335,8 @@ export class ChatSession {
         this.options.onEvent({ t: 'meta', usage: { costUsd: m.total_cost_usd } })
       }
       this.refreshUsage(true)
+      // A `/model` or `/effort` sent as a message changes them too.
+      this.refreshApplied()
     } else if (m.type === 'rate_limit_event') {
       this.refreshUsage(true)
     } else if (m.type === 'conversation_reset' || (m.type === 'system' && m.subtype === 'compact_boundary')) {
@@ -375,6 +390,7 @@ export class ChatSession {
       // only comes with the first turn.
       if (!this.ended) this.markRunning()
       this.refreshUsage(true)
+      this.refreshApplied()
       this.options.onEvent({
         t: 'meta',
         models: models.map((m) => ({
@@ -533,9 +549,30 @@ export class ChatSession {
     return false
   }
 
+  /** Read the model and effort the CLI will use, for the footer's "Default (…)" labels. Best-effort. */
+  private refreshApplied(): void {
+    const query = this.query as (Query & SettingsQuery) | null
+    if (!query?.getSettings || this.ended) return
+    void query.getSettings().then((settings) => {
+      const applied = settings?.applied
+      if (!applied || this.ended) return
+      this.options.onEvent({
+        t: 'meta',
+        info: {
+          applied: {
+            model: typeof applied.model === 'string' ? applied.model : undefined,
+            effort: typeof applied.effort === 'string' ? applied.effort : null
+          }
+        }
+      })
+    }).catch(() => { /* an older CLI: the labels say just "Default" */ })
+  }
+
   async setModel(model: string | undefined): Promise<void> {
     await this.query?.setModel(model)
-    this.options.onEvent({ t: 'meta', info: { model } })
+    this.options.onEvent({ t: 'meta', info: { model, modelPicked: model !== undefined } })
+    // The default effort is per model.
+    this.refreshApplied()
   }
 
   async setPermissionMode(mode: string): Promise<void> {
@@ -546,6 +583,7 @@ export class ChatSession {
   async setEffort(effort: string | undefined): Promise<void> {
     await this.query?.applyFlagSettings({ effortLevel: (effort ?? null) as never })
     this.options.onEvent({ t: 'meta', info: { effort } })
+    this.refreshApplied()
   }
 
   isEnded(): boolean {

@@ -157,6 +157,24 @@ export default function ClaudeChatTab({ tabId, visible, sessionId, pane, project
     if (stickRef.current) el.scrollTop = el.scrollHeight
   }, [state.items, state.pending, state.busy, visible])
 
+  // A growing composer (or prompt card) shrinks the timeline from below: keep the
+  // bottom edge where it was, so the last line stays in view instead of going under it.
+  useEffect(() => {
+    const el = scrollRef.current
+    if (!el) return
+    let height = el.clientHeight
+    const observer = new ResizeObserver(() => {
+      const next = el.clientHeight
+      // Hidden tabs report 0; their next show is handled by the follow effect.
+      if (next === 0 || height === 0) { height = next; return }
+      if (stickRef.current) el.scrollTop = el.scrollHeight
+      else if (next !== height) el.scrollTop += height - next
+      height = next
+    })
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [])
+
   const onScroll = (): void => {
     const el = scrollRef.current
     if (!el) return

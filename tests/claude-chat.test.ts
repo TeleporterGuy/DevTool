@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest'
 import { PassThrough } from 'stream'
 import { emptyChatState, findModelOption, reduceChat, type ChatEvent, type ChatState } from '../src/shared/claude-chat'
 import { buildTimeline, summarizeGroup } from '../src/renderer/components/claude-chat/timelineRows'
-import { contextTone, formatCost, formatResetIn, formatTokens } from '../src/renderer/components/claude-chat/UsageMeter'
+import { contextTone, formatCost, formatResetAt, formatResetIn, formatTokens, limitTone } from '../src/renderer/components/claude-chat/UsageMeter'
 import { diffLines, diffStats, editPairs } from '../src/renderer/components/claude-chat/diff'
 import { JsonLineGate, sdkAddedEnv } from '../src/main/claude-chat/remote-spawn'
 import { extraArgsRecord, isDisplayRelevant } from '../src/main/claude-chat/chat-session'
@@ -229,6 +229,23 @@ describe('usage meter', () => {
     expect(formatResetIn('2026-09-23T13:12:00Z', now)).toBe('3h 12m')
     expect(formatResetIn('2026-09-25T15:00:00Z', now)).toBe('2d 5h')
     expect(formatResetIn('2026-09-23T09:59:00Z', now)).toBe('now')
+  })
+
+  it('names the reset on the clock, with the weekday when it is not today', () => {
+    // Local times, so the check holds in any time zone.
+    const now = new Date(2026, 8, 23, 10, 0).getTime()
+    const time = (h: number, m: number): string => new Date(2026, 8, 23, h, m).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })
+    expect(formatResetAt(new Date(2026, 8, 23, 14, 30).toISOString(), now)).toBe(time(14, 30))
+    const later = new Date(2026, 8, 24, 9, 10)
+    expect(formatResetAt(later.toISOString(), now)).toBe(`${later.toLocaleDateString([], { weekday: 'short' })} ${time(9, 10)}`)
+    expect(formatResetAt('not a date', now)).toBe('')
+  })
+
+  it('colours a plan window by the share used', () => {
+    expect(limitTone(38)).toBe('success')
+    expect(limitTone(75)).toBe('success')
+    expect(limitTone(81)).toBe('warn')
+    expect(limitTone(96)).toBe('danger')
   })
 
   it('merges usage from meta events and keeps it across a reset', () => {

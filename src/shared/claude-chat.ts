@@ -136,6 +136,10 @@ export interface ChatSessionInfo {
   model?: string
   permissionMode?: string
   effort?: string
+  /** The model was picked in this tab; otherwise `model` is whatever the settings default resolved to. */
+  modelPicked?: boolean
+  /** What the CLI sends next (`get_settings`'s `applied`): the defaults resolved, once read. */
+  applied?: { model?: string; effort?: string | null }
   cwd?: string
   claudeVersion?: string
 }
