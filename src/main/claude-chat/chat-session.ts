@@ -21,6 +21,7 @@ import {
   type ChatPrompt,
   type ChatPromptResponse,
   type ChatSideAnswer,
+  type ChatColdCache,
   type ChatUsage
 } from '../../shared/claude-chat'
 
@@ -31,10 +32,45 @@ import {
  * gone. The session reports prompts itself, from `canUseTool`, which is exact.
  */
 export const FORWARDED_HOOK_EVENTS: HookEvent[] = [
-  'SessionStart', 'UserPromptSubmit', 'Stop', 'StopFailure', 'Notification',
+  'UserPromptSubmit', 'Stop', 'StopFailure', 'Notification',
   'PreToolUse', 'PostToolUse', 'PostToolUseFailure',
   'SubagentStart', 'SubagentStop', 'PreCompact', 'PostCompact', 'SessionEnd'
 ]
+
+/**
+ * SessionStart runs before the CLI registers SDK hook callbacks, so a callback never
+ * sees it. A command hook does: it echoes its input to stderr, which comes back in
+ * the `hook_response` message over the protocol channel, so it works through ssh
+ * with no tunnel. Stdout stays `{}`: a SessionStart hook's plain stdout would be
+ * added to Claude's context.
+ */
+export const SESSION_START_HOOK = { type: 'command', command: "cat >&2; printf '{}'", shell: 'bash', timeout: 10 } as const
+
+/** The input our {@link SESSION_START_HOOK} echoed, from a `hook_response` message. */
+export function sessionStartInput(message: unknown): Record<string, unknown> | null {
+  const m = message as { type?: unknown; subtype?: unknown; hook_event?: unknown; stderr?: unknown } | null
+  if (!m || m.type !== 'system' || m.subtype !== 'hook_response' || m.hook_event !== 'SessionStart') return null
+  if (typeof m.stderr !== 'string' || !m.stderr.trimStart().startsWith('{')) return null
+  try {
+    const input = JSON.parse(m.stderr) as Record<string, unknown>
+    return input && input.hook_event_name === 'SessionStart' && typeof input.session_id === 'string' ? input : null
+  } catch {
+    // Some other SessionStart hook's stderr.
+    return null
+  }
+}
+
+/** A resume whose prompt cache the CLI thinks has expired, or null. */
+export function coldCacheFrom(input: Record<string, unknown>): ChatColdCache | null {
+  if (input.source !== 'resume' && input.source !== 'fork') return null
+  if (input.prompt_cache_likely_expired !== true) return null
+  const tokens = input.context_tokens
+  if (typeof tokens !== 'number' || tokens <= 0) return null
+  const cache: ChatColdCache = { contextTokens: tokens }
+  if (typeof input.seconds_since_last_response === 'number') cache.idleSeconds = input.seconds_since_last_response
+  if (typeof input.estimated_cache_write_usd === 'number') cache.estimatedUsd = input.estimated_cache_write_usd
+  return cache
+}
 
 /**
  * The CLI leaves the Artifact tool off in SDK sessions ("sdk_default_off") unless
@@ -257,6 +293,9 @@ export class ChatSession {
       ...(o.permissionMode ? { permissionMode: o.permissionMode as PermissionMode } : {}),
       ...(o.effort ? { effort: o.effort as Options['effort'] } : {}),
       ...(o.spawn ? { spawnClaudeCodeProcess: o.spawn } : {}),
+      // A project's own `--settings` would collide with this one; it wins, and the
+      // tab loses SessionStart status and the cold-cache warning.
+      ...('settings' in extra ? {} : { settings: { hooks: { SessionStart: [{ hooks: [SESSION_START_HOOK] }] } } }),
       stderr: (data: string) => { this.captureStderr(data) }
     }
 
@@ -295,6 +334,8 @@ export class ChatSession {
           this.markRunning()
         }
         if (isDisplayRelevant(message)) this.options.onEvent({ t: 'sdk', m: message, at: Date.now() })
+        const started = sessionStartInput(message)
+        if (started) this.onSessionStart(started)
         this.noteForUsage(message as { type?: string; subtype?: string; parent_tool_use_id?: unknown; total_cost_usd?: unknown })
       }
     } catch (err) {
@@ -307,6 +348,12 @@ export class ChatSession {
     } finally {
       this.finish(error)
     }
+  }
+
+  private onSessionStart(input: Record<string, unknown>): void {
+    try { this.options.onHook(input) } catch { /* status is best-effort */ }
+    const cache = coldCacheFrom(input)
+    if (cache) this.options.onEvent({ t: 'cold-cache', cache })
   }
 
   private markRunning(): void {

@@ -4,7 +4,7 @@ import { useApp } from '../../context/AppContext'
 import { useTabStatusStore } from '../../context/TabStatusContext'
 import type { SshConfig } from '../../../shared/types'
 import { classifyNotification, nextAiStatus, type AiNotificationKind, type AiStatusDecision, type AiStatusEvent } from '../../../shared/ai-status'
-import { PERMISSIONS_COMMAND, SIDE_QUESTION_COMMAND, type ChatImage, type ChatPromptResponse } from '../../../shared/claude-chat'
+import { PERMISSIONS_COMMAND, SIDE_QUESTION_COMMAND, type ChatColdCache, type ChatImage, type ChatPromptResponse } from '../../../shared/claude-chat'
 import { parseExtraArgs } from '../aiToolTabUtils'
 import { ensureHookListeners, hookStatusCallbacks } from '../hookStatusListeners'
 import { normalizeBrowserUrl } from '../../browserUrl'
@@ -13,6 +13,7 @@ import Timeline, { type TimelineFocus } from './Timeline'
 import TaskIndicator from './TaskIndicator'
 import PromptCard from './PromptCards'
 import SideQuestion, { type SideQuestionState } from './SideQuestion'
+import ColdCacheNotice from './ColdCacheNotice'
 import PermissionsDialog from './PermissionsDialog'
 import Composer from './Composer'
 import { noteAgentTabTyped } from '../../agentLink/agentTabRecency'
@@ -290,6 +291,9 @@ export default function ClaudeChatTab({ tabId, visible, sessionId, pane, project
     setFocus({ toolId: toolUseId, seq: focusSeq.current })
   }, [toolIndex])
 
+  const [dismissedCache, setDismissedCache] = useState<ChatColdCache | null>(null)
+  const coldCache = state.coldCache && state.coldCache !== dismissedCache ? state.coldCache : null
+
   const hasTasks = Object.keys(tasks).length > 0
   const empty = state.items.length === 0 && !state.busy
   const starting = state.process === 'starting' && state.items.length === 0
@@ -346,6 +350,7 @@ export default function ClaudeChatTab({ tabId, visible, sessionId, pane, project
         {state.pending.map((prompt) => (
           <PromptCard key={prompt.id} prompt={prompt} permissionMode={state.info.permissionMode} onRespond={(response) => respond(prompt.id, response)} />
         ))}
+        {coldCache && <ColdCacheNotice cache={coldCache} onDismiss={() => setDismissedCache(coldCache)} />}
         {side && <SideQuestion side={side} onDismiss={() => setSide(null)} onOpenLink={openLink} />}
         <Composer
           busy={state.busy}
