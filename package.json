@@ -64,7 +64,7 @@
     "win": {
       "target": "dir",
       "icon": "build/icon.png",
-      "signAndEditExecutable": true,
+      "signAndEditExecutable": false,
       "signtoolOptions": {
         "sign": "scripts/sign-win.cjs"
       }
@@ -85,7 +85,8 @@
       "owner": "TeleporterGuy",
       "repo": "DevTool"
     },
-    "electronDist": "node_modules/electron/dist"
+    "electronDist": "node_modules/electron/dist",
+    "afterPack": "scripts/win-rcedit.cjs"
   },
   "keywords": [],
   "author": "",
@@ -113,6 +114,7 @@
     "globals": "^17.12.0",
     "jsdom": "^29.1.1",
     "pngjs": "^7.0.0",
+    "rcedit": "^5.0.2",
     "tailwindcss": "^4.2.4",
     "typescript": "^5.9.3",
     "typescript-eslint": "^8.70.1",

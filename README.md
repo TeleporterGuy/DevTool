@@ -110,7 +110,7 @@ Limits of this path:
 
 - It is **run-only**. You cannot `npm run dev` or change the Electron native addon without a VS build machine.
 - Architecture must match (x64 build for x64 Windows).
-- The portable `DevTool.exe` is unsigned. The build still stamps DevTool's icon and version resources onto it (`signAndEditExecutable` on, no certificate), so Task Manager and file properties say DevTool, not Electron.
+- The portable `DevTool.exe` is unsigned. The build still stamps DevTool's icon and version resources onto it (an `afterPack` hook, `scripts/win-rcedit.cjs`, runs the `rcedit` npm package; no certificate), so Task Manager and file properties say DevTool, not Electron.
 
 #### Windows installer (per-user Setup.exe)
 
