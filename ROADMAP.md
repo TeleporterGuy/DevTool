@@ -361,6 +361,14 @@ Items 2–3 are small and independent of the certificate; they can tag as `0.5.x
 
 Software Center / MSI may be a **separate IT artifact**, not this phase’s default output.
 
+**Status (branch `phase5-packaging`; Windows verify pending):**
+
+- **2. Icon** — landed. `build/icon.png` is generated from join3r's iOS app icon (`npm run make-icon` → `scripts/make-icon.mjs`: macOS grid, rounded corners, transparent padding); electron-builder derives `.ico` / `.icns`. Window icon on Windows/Linux, Dock icon in macOS dev runs.
+- **3. Name** — landed. `app.setName('DevTool')` with userData pinned to its old path (dev stays on `<appData>/devtool`, not merged into the packaged `DevTool` profile). Dev `Electron.app` plist gets `CFBundleName` / `CFBundleDisplayName` (postinstall + `predev`). Windows: `signAndEditExecutable: true` with no certificate (rcedit stamps icon + version resources, exe stays unsigned) and `setAppUserModelId('com.devtool.app')` (`.dev` for dev runs). **Check on Windows first:** if rcedit's `winCodeSign` download fails without symlink rights, switch to an `afterPack` rcedit hook instead.
+- **4. NSIS** — landed. `npm run build:win:setup` → per-user `DevTool-Setup-<v>.exe` (no admin, Start Menu shortcut, never touches `~/.devtool`) + portable zip. `npm run release:win` uploads a draft GitHub Release from the Windows box.
+- **5. Signing** — wired, dormant. No certificate. `scripts/sign-win.cjs` runs `DEVTOOL_SIGN_CMD` when set (token/cloud-HSM certs sign through a command, not a `.pfx`). Options to look at when it matters: Certum Open Source Code Signing, SignPath Foundation (needs CI builds), Azure Artifact Signing (check eligibility). Stem (`join3r/stem`) does not sign on Windows either.
+- **6. Updates** — landed, stem's model. Every packaged build checks GitHub Releases (Settings → Updates, Check for Updates…, opt-out toggle). Unsigned builds only announce a new version and open its page; only a `--signed` Setup.exe install self-updates via electron-updater. Unsigned releases carry no `latest.yml`.
+
 Stay out of: language servers, conda GUI, a second Windows shell, reviving JupyterLab-in-browser.
 
 **Verify:** on Windows — exe icon, taskbar, Task Manager name, Start Menu shortcut, installer per-user without admin, portable folder still runs. On macOS — `npm run dev` menu bar and Dock say DevTool with the DevTool icon; packaged `build:mac` the same.
