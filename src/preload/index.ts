@@ -14,6 +14,7 @@ import type {
   ProjectsEnvelope,
   ProjectsSaveResult,
   SshConfig,
+  TabStatusValue,
   TaskRemoval,
   TunnelConfig,
   TunnelState,
@@ -26,8 +27,10 @@ import type {
 import type { CondaListResult } from '../shared/conda'
 import type { NotebookKernelCondaOverride, NotebookKernelEvent } from '../shared/notebook'
 import type { AgentActivity } from '../shared/agent-activity'
+import type { MobilePairingInvite, MobileState } from '../shared/mobile'
 import type { AiStatusEvent } from '../shared/ai-status'
 import type { ChatEvent, ChatImage, ChatPromptResponse, ChatSideAnswer, ChatSnapshot } from '../shared/claude-chat'
+import type { PermissionBehavior, PermissionSettingsSource, PermissionSourceKind } from '../shared/chat-permissions'
 
 const api = {
   // Projects
@@ -45,6 +48,8 @@ const api = {
   // Idle task cleanup runs entirely in main — a window only reports what main
   // cannot see (its unsaved buffers) and reacts to what main removed.
   reportDirtyTabs: (tabIds: string[]): Promise<void> => ipcRenderer.invoke('report-dirty-tabs', tabIds),
+  /** Status of a tab main has no hooks for (Codex, shells), for the phone's inbox. */
+  reportTabStatus: (tabId: string, status: TabStatusValue): Promise<void> => ipcRenderer.invoke('report-tab-status', tabId, status),
   getCleanupActivity: (): Promise<CleanupActivity> => ipcRenderer.invoke('get-cleanup-activity'),
   onTasksRemoved: (callback: (removal: TaskRemoval) => void): (() => void) => {
     const handler = (_event: Electron.IpcRendererEvent, removal: TaskRemoval) => callback(removal)
@@ -138,6 +143,8 @@ const api = {
   // Theme
   getNativeTheme: (): Promise<'dark' | 'light'> => ipcRenderer.invoke('get-native-theme'),
   clipboardWriteText: (text: string): Promise<void> => ipcRenderer.invoke('clipboard-write-text', text),
+  /** Open a project/workspace directory in the OS file manager, or select a path under it. */
+  revealInFolder: (folder: string, relativePath?: string): Promise<void> => ipcRenderer.invoke('reveal-in-folder', folder, relativePath),
   clipboardReadText: (): Promise<string> => ipcRenderer.invoke('clipboard-read-text'),
   openExternal: (url: string): Promise<void> => ipcRenderer.invoke('open-external', url),
   onThemeChanged: (callback: (theme: 'dark' | 'light') => void): void => {
@@ -199,6 +206,7 @@ const api = {
   chatDetach: (tabId: string): void => ipcRenderer.send('chat-detach', tabId),
   chatSend: (tabId: string, text: string, images?: ChatImage[]): Promise<void> =>
     ipcRenderer.invoke('chat-send', tabId, text, images),
+  chatBash: (tabId: string, command: string): Promise<void> => ipcRenderer.invoke('chat-bash', tabId, command),
   chatSideQuestion: (tabId: string, question: string): Promise<ChatSideAnswer> =>
     ipcRenderer.invoke('chat-side-question', tabId, question),
   chatInterrupt: (tabId: string): Promise<void> => ipcRenderer.invoke('chat-interrupt', tabId),
@@ -214,6 +222,14 @@ const api = {
   chatClose: (tabId: string): void => ipcRenderer.send('chat-close', tabId),
   chatListFiles: (cwd: string, projectId?: string, sshConfig?: SshConfig): Promise<string[]> =>
     ipcRenderer.invoke('chat-list-files', cwd, projectId, sshConfig),
+  chatPermissionsRead: (cwd: string): Promise<PermissionSettingsSource[]> => ipcRenderer.invoke('chat-permissions-read', cwd),
+  chatPermissionsUpdate: (
+    cwd: string,
+    kind: PermissionSourceKind,
+    behavior: PermissionBehavior,
+    rule: string,
+    action: 'add' | 'remove'
+  ): Promise<void> => ipcRenderer.invoke('chat-permissions-update', cwd, kind, behavior, rule, action),
   onChatEvent: (callback: (tabId: string, seq: number, event: ChatEvent) => void): (() => void) => {
     const handler = (_event: Electron.IpcRendererEvent, tabId: string, seq: number, event: ChatEvent) => callback(tabId, seq, event)
     ipcRenderer.on('chat-event', handler)
@@ -393,6 +409,20 @@ const api = {
     const handler = (_e: Electron.IpcRendererEvent, tabId: string, event: NotebookKernelEvent) => callback(tabId, event)
     ipcRenderer.on('notebook-kernel-event', handler)
     return () => ipcRenderer.removeListener('notebook-kernel-event', handler)
+  },
+  // Mobile (Settings → Mobile). Main owns the state; every change is also broadcast.
+  mobileGetState: (): Promise<MobileState> => ipcRenderer.invoke('mobile-get-state'),
+  mobileSetEnabled: (enabled: boolean): Promise<MobileState> => ipcRenderer.invoke('mobile-set-enabled', enabled),
+  mobileSetRelayUrl: (url: string): Promise<MobileState> => ipcRenderer.invoke('mobile-set-relay-url', url),
+  mobileStartPairing: (): Promise<MobilePairingInvite> => ipcRenderer.invoke('mobile-start-pairing'),
+  mobileCancelPairing: (): Promise<MobileState> => ipcRenderer.invoke('mobile-cancel-pairing'),
+  mobileAccept: (phoneId: string): Promise<MobileState> => ipcRenderer.invoke('mobile-accept', phoneId),
+  mobileReject: (phoneId: string): Promise<MobileState> => ipcRenderer.invoke('mobile-reject', phoneId),
+  mobileRevoke: (phoneId: string): Promise<MobileState> => ipcRenderer.invoke('mobile-revoke', phoneId),
+  onMobileStateChanged: (callback: (state: MobileState) => void): (() => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, state: MobileState) => callback(state)
+    ipcRenderer.on('mobile-state-changed', handler)
+    return () => ipcRenderer.removeListener('mobile-state-changed', handler)
   }
 }
 

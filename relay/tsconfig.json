@@ -1,0 +1,22 @@
+{
+  // Typecheck only: the relay runs straight from source under Node's type stripping,
+  // so this config never emits and must only allow erasable TypeScript syntax.
+  "compilerOptions": {
+    "target": "es2023",
+    "lib": ["es2023"],
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+    "types": ["node"],
+    "strict": true,
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
+    "verbatimModuleSyntax": true,
+    "erasableSyntaxOnly": true,
+    "isolatedModules": true,
+    "skipLibCheck": true,
+    "noFallthroughCasesInSwitch": true,
+    "forceConsistentCasingInFileNames": true
+  },
+  "include": ["src/**/*.ts", "test/**/*.ts", "vitest.config.ts", "../protocol/ts/*.ts", "../protocol/tools/fake-desktop-core.ts"],
+  "exclude": ["../protocol/ts/*.test.ts"]
+}

@@ -1,6 +1,7 @@
 import React, { createContext, memo, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import { Check, ChevronRight, CircleSlash, X } from 'lucide-react'
-import type { ChatImage, ChatItem, ChatToolItem } from '../../../shared/claude-chat'
+import type { ChatBashItem, ChatImage, ChatItem, ChatToolItem } from '../../../shared/claude-chat'
+import { firstLine } from '../../../shared/agent-activity'
 import { buildTimeline, summarizeGroup, type TimelineRow } from './timelineRows'
 import { renderChatMarkdown } from './markdown'
 import { diffLines, diffStats, editPairs } from './diff'
@@ -92,8 +93,39 @@ const Row = memo(function Row({ row }: { row: TimelineRow }): React.ReactElement
       return <ToolRow tool={item} />
     case 'notice':
       return <Notice text={item.text} tone={item.tone} />
+    case 'bash':
+      return <BashRow item={item} />
   }
 })
+
+/** A `!command` you ran: output open by default, since you asked to see it. */
+function BashRow({ item }: { item: ChatBashItem }): React.ReactElement {
+  const [open, setOpen] = useState(true)
+  const failed = !item.running && item.exitCode !== undefined && item.exitCode !== 0
+  const status: ChatToolItem['status'] = item.running ? 'running' : failed ? 'error' : 'done'
+  const meta = [
+    failed ? (item.exitCode === null ? 'killed' : `exit ${item.exitCode}`) : undefined,
+    item.pendingContext ? 'Claude sees this with your next message' : undefined
+  ].filter(Boolean).join(' · ')
+  const hasOutput = Boolean(item.stdout || item.stderr)
+  return (
+    <div className="text-sm">
+      <button type="button" className="chat-row-btn w-full" onClick={() => setOpen(!open)}>
+        <StatusIcon status={status} />
+        <span className="truncate font-mono text-text"><span className="text-accent">!</span> {firstLine(item.command, 200) ?? ''}</span>
+        {meta && <span className="ml-auto pl-3 shrink-0 text-xs text-text-subtle">{meta}</span>}
+      </button>
+      {open && (item.command.includes('\n') || hasOutput) && (
+        <div className="ml-5 mt-1 mb-1.5 flex flex-col gap-1">
+          {item.command.includes('\n') && <Pre>{`$ ${item.command}`}</Pre>}
+          {item.stdout && <Pre>{item.stdout}</Pre>}
+          {item.stderr && <Pre tone={failed ? 'error' : undefined}>{item.stderr}</Pre>}
+        </div>
+      )}
+      {open && !item.running && !hasOutput && <div className="ml-5 text-xs text-text-subtle">No output</div>}
+    </div>
+  )
+}
 
 function UserMessage({ item }: { item: Extract<ChatItem, { kind: 'user' }> }): React.ReactElement {
   return (

@@ -1,0 +1,403 @@
+{
+  "description": "Sample JSON for handshake payloads and app messages. Parse `json`; the result must equal `expected` (null = ignore the message). `invalid` entries must fail to parse.",
+  "phoneHello": [
+    {
+      "json": "{\"v\":1,\"min\":1,\"app\":\"ios/0.1.0\",\"features\":[],\"kind\":\"pair\",\"proof\":\"IbGTAw7kM1BPSfcmnyearcAB2SrMJMIGWGUeA_Z2gBU\",\"deviceName\":\"Vladimir's iPhone\",\"ed\":\"fxqOjqvRnEoTYmv-hcQPOvxXxEXNugdVDJPdwavFuEk\"}",
+      "expected": {
+        "v": 1,
+        "min": 1,
+        "app": "ios/0.1.0",
+        "features": [],
+        "kind": "pair",
+        "deviceName": "Vladimir's iPhone",
+        "ed": "fxqOjqvRnEoTYmv-hcQPOvxXxEXNugdVDJPdwavFuEk",
+        "proof": "IbGTAw7kM1BPSfcmnyearcAB2SrMJMIGWGUeA_Z2gBU"
+      }
+    },
+    {
+      "json": "{\"v\":1,\"min\":1,\"app\":\"ios/0.1.0\",\"features\":[\"x\"],\"kind\":\"resume\",\"deviceName\":\"iPad\",\"ed\":\"fxqOjqvRnEoTYmv-hcQPOvxXxEXNugdVDJPdwavFuEk\"}",
+      "expected": {
+        "v": 1,
+        "min": 1,
+        "app": "ios/0.1.0",
+        "features": [
+          "x"
+        ],
+        "kind": "resume",
+        "deviceName": "iPad",
+        "ed": "fxqOjqvRnEoTYmv-hcQPOvxXxEXNugdVDJPdwavFuEk"
+      }
+    },
+    {
+      "json": "{\"v\":1,\"min\":1,\"app\":\"ios/0.1.0\",\"features\":[\"x\"],\"kind\":\"resume\",\"deviceName\":\"iPad\",\"ed\":\"fxqOjqvRnEoTYmv-hcQPOvxXxEXNugdVDJPdwavFuEk\",\"pushCap\":\"future\",\"proof\":\"IbGTAw7kM1BPSfcmnyearcAB2SrMJMIGWGUeA_Z2gBU\"}",
+      "expected": {
+        "v": 1,
+        "min": 1,
+        "app": "ios/0.1.0",
+        "features": [
+          "x"
+        ],
+        "kind": "resume",
+        "deviceName": "iPad",
+        "ed": "fxqOjqvRnEoTYmv-hcQPOvxXxEXNugdVDJPdwavFuEk"
+      }
+    }
+  ],
+  "desktopHello": [
+    {
+      "json": "{\"v\":1,\"min\":1,\"app\":\"devtool/0.3.2\",\"features\":[],\"desktopName\":\"join3r-mbp\",\"result\":\"ok\"}",
+      "expected": {
+        "v": 1,
+        "min": 1,
+        "app": "devtool/0.3.2",
+        "features": [],
+        "desktopName": "join3r-mbp",
+        "result": "ok"
+      }
+    },
+    {
+      "json": "{\"v\":1,\"min\":1,\"app\":\"devtool/0.3.2\",\"features\":[],\"desktopName\":\"join3r-mbp\",\"result\":\"unknown-device\",\"extra\":[1,2]}",
+      "expected": {
+        "v": 1,
+        "min": 1,
+        "app": "devtool/0.3.2",
+        "features": [],
+        "desktopName": "join3r-mbp",
+        "result": "unknown-device"
+      }
+    }
+  ],
+  "appMessages": [
+    {
+      "json": "{\"t\":\"req\",\"id\":1,\"op\":\"inbox.get\"}",
+      "expected": {
+        "t": "req",
+        "id": 1,
+        "op": "inbox.get"
+      }
+    },
+    {
+      "json": "{\"t\":\"req\",\"id\":2,\"op\":\"chat.send\",\"args\":{\"text\":\"hi\"}}",
+      "expected": {
+        "t": "req",
+        "id": 2,
+        "op": "chat.send"
+      }
+    },
+    {
+      "json": "{\"t\":\"res\",\"id\":1,\"ok\":true,\"result\":{\"desktop\":{\"id\":\"20671253fbf6054273bb719d3a34999b\",\"name\":\"join3r-mbp\"},\"generatedAt\":1790000000000,\"projects\":[{\"id\":\"p1\",\"name\":\"api-server\",\"emoji\":\"🚀\",\"remote\":false,\"tasks\":[{\"id\":\"t1\",\"name\":\"fix-auth\",\"lastInteractedAt\":1790000000000,\"attentionAt\":1790000000000,\"tabs\":[{\"id\":\"tab1\",\"type\":\"claude-chat\",\"title\":\"Claude\",\"status\":\"working\",\"since\":1790000000000,\"activity\":\"Running Bash\"},{\"id\":\"tab2\",\"type\":\"terminal\",\"title\":\"zsh\",\"status\":\"idle\"}]}]},{\"id\":\"p2\",\"name\":\"remote-box\",\"remote\":true,\"tasks\":[]}]}}",
+      "expected": {
+        "t": "res",
+        "id": 1,
+        "ok": true,
+        "result": {
+          "desktop": {
+            "id": "20671253fbf6054273bb719d3a34999b",
+            "name": "join3r-mbp"
+          },
+          "generatedAt": 1790000000000,
+          "projects": [
+            {
+              "id": "p1",
+              "name": "api-server",
+              "emoji": "🚀",
+              "remote": false,
+              "tasks": [
+                {
+                  "id": "t1",
+                  "name": "fix-auth",
+                  "lastInteractedAt": 1790000000000,
+                  "attentionAt": 1790000000000,
+                  "tabs": [
+                    {
+                      "id": "tab1",
+                      "type": "claude-chat",
+                      "title": "Claude",
+                      "status": "working",
+                      "since": 1790000000000,
+                      "activity": "Running Bash"
+                    },
+                    {
+                      "id": "tab2",
+                      "type": "terminal",
+                      "title": "zsh",
+                      "status": "idle"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "id": "p2",
+              "name": "remote-box",
+              "remote": true,
+              "tasks": []
+            }
+          ]
+        }
+      }
+    },
+    {
+      "json": "{\"t\":\"res\",\"id\":2,\"ok\":false,\"error\":{\"code\":\"unsupported\",\"message\":\"Unknown op chat.send\"}}",
+      "expected": {
+        "t": "res",
+        "id": 2,
+        "ok": false,
+        "error": {
+          "code": "unsupported",
+          "message": "Unknown op chat.send"
+        }
+      }
+    },
+    {
+      "json": "{\"t\":\"evt\",\"e\":\"inbox\",\"seq\":1,\"inbox\":{\"desktop\":{\"id\":\"20671253fbf6054273bb719d3a34999b\",\"name\":\"join3r-mbp\"},\"generatedAt\":1790000000000,\"projects\":[{\"id\":\"p1\",\"name\":\"api-server\",\"emoji\":\"🚀\",\"remote\":false,\"tasks\":[{\"id\":\"t1\",\"name\":\"fix-auth\",\"lastInteractedAt\":1790000000000,\"attentionAt\":1790000000000,\"tabs\":[{\"id\":\"tab1\",\"type\":\"claude-chat\",\"title\":\"Claude\",\"status\":\"working\",\"since\":1790000000000,\"activity\":\"Running Bash\"},{\"id\":\"tab2\",\"type\":\"terminal\",\"title\":\"zsh\",\"status\":\"idle\"}]}]},{\"id\":\"p2\",\"name\":\"remote-box\",\"remote\":true,\"tasks\":[]}]}}",
+      "expected": {
+        "t": "evt",
+        "e": "inbox",
+        "seq": 1,
+        "inbox": {
+          "desktop": {
+            "id": "20671253fbf6054273bb719d3a34999b",
+            "name": "join3r-mbp"
+          },
+          "generatedAt": 1790000000000,
+          "projects": [
+            {
+              "id": "p1",
+              "name": "api-server",
+              "remote": false,
+              "tasks": [
+                {
+                  "id": "t1",
+                  "name": "fix-auth",
+                  "tabs": [
+                    {
+                      "id": "tab1",
+                      "type": "claude-chat",
+                      "title": "Claude",
+                      "status": "working",
+                      "since": 1790000000000,
+                      "activity": "Running Bash"
+                    },
+                    {
+                      "id": "tab2",
+                      "type": "terminal",
+                      "title": "zsh",
+                      "status": "idle"
+                    }
+                  ],
+                  "lastInteractedAt": 1790000000000,
+                  "attentionAt": 1790000000000
+                }
+              ],
+              "emoji": "🚀"
+            },
+            {
+              "id": "p2",
+              "name": "remote-box",
+              "remote": true,
+              "tasks": []
+            }
+          ]
+        }
+      }
+    },
+    {
+      "json": "{\"t\":\"evt\",\"e\":\"inbox\",\"seq\":2,\"inbox\":{\"desktop\":{\"id\":\"20671253fbf6054273bb719d3a34999b\",\"name\":\"join3r-mbp\",\"color\":\"blue\"},\"generatedAt\":1790000000000,\"layout\":\"grid\",\"projects\":[{\"id\":\"p1\",\"name\":\"api-server\",\"remote\":false,\"emoji\":null,\"pinned\":true,\"tasks\":[{\"id\":\"t1\",\"name\":\"fix-auth\",\"notes\":\"x\",\"attentionAt\":null,\"tabs\":[{\"id\":\"tab1\",\"type\":\"gemini\",\"title\":\"Gemini\",\"status\":\"thinking\",\"since\":5,\"badge\":3},{\"id\":\"tab2\",\"type\":\"pi\",\"title\":\"Pi\",\"status\":\"attention\",\"activity\":null}]}]}]},\"compressed\":false}",
+      "expected": {
+        "t": "evt",
+        "e": "inbox",
+        "seq": 2,
+        "inbox": {
+          "desktop": {
+            "id": "20671253fbf6054273bb719d3a34999b",
+            "name": "join3r-mbp"
+          },
+          "generatedAt": 1790000000000,
+          "projects": [
+            {
+              "id": "p1",
+              "name": "api-server",
+              "remote": false,
+              "tasks": [
+                {
+                  "id": "t1",
+                  "name": "fix-auth",
+                  "tabs": [
+                    {
+                      "id": "tab1",
+                      "type": "gemini",
+                      "title": "Gemini",
+                      "status": "idle",
+                      "since": 5
+                    },
+                    {
+                      "id": "tab2",
+                      "type": "pi",
+                      "title": "Pi",
+                      "status": "attention"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "json": "{\"t\":\"evt\",\"e\":\"pairing\",\"status\":\"accepted\"}",
+      "expected": {
+        "t": "evt",
+        "e": "pairing",
+        "status": "accepted"
+      }
+    },
+    {
+      "json": "{\"t\":\"evt\",\"e\":\"pairing\",\"status\":\"revoked\",\"reason\":\"user\"}",
+      "expected": {
+        "t": "evt",
+        "e": "pairing",
+        "status": "revoked"
+      }
+    },
+    {
+      "json": "{\"t\":\"evt\",\"e\":\"future\",\"seq\":1}",
+      "expected": null
+    },
+    {
+      "json": "{\"t\":\"hint\",\"text\":\"future message type\"}",
+      "expected": null
+    }
+  ],
+  "inboxWithUnknownFields": {
+    "json": "{\"desktop\":{\"id\":\"20671253fbf6054273bb719d3a34999b\",\"name\":\"join3r-mbp\",\"color\":\"blue\"},\"generatedAt\":1790000000000,\"layout\":\"grid\",\"projects\":[{\"id\":\"p1\",\"name\":\"api-server\",\"remote\":false,\"emoji\":null,\"pinned\":true,\"tasks\":[{\"id\":\"t1\",\"name\":\"fix-auth\",\"notes\":\"x\",\"attentionAt\":null,\"tabs\":[{\"id\":\"tab1\",\"type\":\"gemini\",\"title\":\"Gemini\",\"status\":\"thinking\",\"since\":5,\"badge\":3},{\"id\":\"tab2\",\"type\":\"pi\",\"title\":\"Pi\",\"status\":\"attention\",\"activity\":null}]}]}]}",
+    "expected": {
+      "desktop": {
+        "id": "20671253fbf6054273bb719d3a34999b",
+        "name": "join3r-mbp"
+      },
+      "generatedAt": 1790000000000,
+      "projects": [
+        {
+          "id": "p1",
+          "name": "api-server",
+          "remote": false,
+          "tasks": [
+            {
+              "id": "t1",
+              "name": "fix-auth",
+              "tabs": [
+                {
+                  "id": "tab1",
+                  "type": "gemini",
+                  "title": "Gemini",
+                  "status": "idle",
+                  "since": 5
+                },
+                {
+                  "id": "tab2",
+                  "type": "pi",
+                  "title": "Pi",
+                  "status": "attention"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "invalid": {
+    "phoneHello": [
+      "{\"v\":1,\"min\":1,\"app\":\"ios/0.1.0\",\"features\":[],\"kind\":\"pair\",\"deviceName\":\"Vladimir's iPhone\",\"ed\":\"fxqOjqvRnEoTYmv-hcQPOvxXxEXNugdVDJPdwavFuEk\"}",
+      "{\"v\":1,\"min\":1,\"app\":\"ios/0.1.0\",\"features\":[],\"kind\":\"bond\",\"proof\":\"IbGTAw7kM1BPSfcmnyearcAB2SrMJMIGWGUeA_Z2gBU\",\"deviceName\":\"Vladimir's iPhone\",\"ed\":\"fxqOjqvRnEoTYmv-hcQPOvxXxEXNugdVDJPdwavFuEk\"}",
+      "{\"v\":1,\"min\":1,\"app\":\"ios/0.1.0\",\"features\":[],\"kind\":\"pair\",\"proof\":\"IbGTAw7kM1BPSfcmnyearcAB2SrMJMIGWGUeA_Z2gBU\",\"deviceName\":\"Vladimir's iPhone\",\"ed\":\"short\"}",
+      "{\"v\":1,\"min\":2,\"app\":\"ios/0.1.0\",\"features\":[],\"kind\":\"pair\",\"proof\":\"IbGTAw7kM1BPSfcmnyearcAB2SrMJMIGWGUeA_Z2gBU\",\"deviceName\":\"Vladimir's iPhone\",\"ed\":\"fxqOjqvRnEoTYmv-hcQPOvxXxEXNugdVDJPdwavFuEk\"}"
+    ],
+    "desktopHello": [
+      "{\"v\":1,\"min\":1,\"app\":\"devtool/0.3.2\",\"features\":[],\"desktopName\":\"join3r-mbp\",\"result\":\"maybe\"}",
+      "{\"v\":1,\"min\":1,\"app\":\"devtool/0.3.2\",\"features\":[],\"desktopName\":7,\"result\":\"ok\"}"
+    ],
+    "appMessages": [
+      "{\"t\":\"req\",\"op\":\"inbox.get\"}",
+      "{\"t\":\"res\",\"id\":1,\"ok\":\"yes\"}",
+      "{\"t\":\"evt\",\"e\":\"inbox\",\"seq\":1,\"inbox\":{\"projects\":[]}}",
+      "{\"t\":\"evt\",\"e\":\"pairing\",\"status\":\"maybe\"}",
+      "[1,2,3]",
+      "not json"
+    ]
+  },
+  "versionNegotiation": [
+    {
+      "local": {
+        "v": 1,
+        "min": 1
+      },
+      "remote": {
+        "v": 1,
+        "min": 1
+      },
+      "result": {
+        "ok": true,
+        "version": 1
+      }
+    },
+    {
+      "local": {
+        "v": 2,
+        "min": 1
+      },
+      "remote": {
+        "v": 1,
+        "min": 1
+      },
+      "result": {
+        "ok": true,
+        "version": 1
+      }
+    },
+    {
+      "local": {
+        "v": 1,
+        "min": 1
+      },
+      "remote": {
+        "v": 3,
+        "min": 2
+      },
+      "result": {
+        "ok": false,
+        "update": "local"
+      }
+    },
+    {
+      "local": {
+        "v": 3,
+        "min": 3
+      },
+      "remote": {
+        "v": 2,
+        "min": 1
+      },
+      "result": {
+        "ok": false,
+        "update": "remote"
+      }
+    },
+    {
+      "local": {
+        "v": 1,
+        "min": 1
+      },
+      "remote": {
+        "v": 3,
+        "min": 3
+      },
+      "result": {
+        "ok": false,
+        "update": "local"
+      }
+    }
+  ]
+}

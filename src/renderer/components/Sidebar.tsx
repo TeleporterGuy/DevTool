@@ -308,6 +308,12 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
   const handleDeleteTask = async (projectId: string, taskId: string) => {
     const project = projects.find(p => p.id === projectId)
     const task = project?.tasks.find(t => t.id === taskId)
+    if (!task) return
+    // Asked before the workspace pre-flight below: for a clean, merged workspace
+    // that call already removes the worktree.
+    if (!window.confirm(task.workspace
+      ? `Delete task "${task.name}" and its workspace?\n\nThe worktree folder is removed from disk.`
+      : `Delete task "${task.name}"? Its tabs close.`)) return
 
     if (task?.workspace && project) {
       let keepBranch = false

@@ -1,7 +1,8 @@
 import type { AiTabType } from '../../shared/types'
+import { splitExtraArgs } from '../../shared/chat-tab-config'
 
 export function parseExtraArgs(extraArgs?: string): string[] {
-  return extraArgs ? extraArgs.trim().split(/\s+/).filter(Boolean) : []
+  return splitExtraArgs(extraArgs)
 }
 
 export function buildAiToolArgs(toolType: AiTabType, parsedExtraArgs: string[], resumeSessionId?: string): string[] {

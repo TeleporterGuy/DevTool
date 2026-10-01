@@ -192,6 +192,12 @@ export default function AiToolTab({ tabId, toolType, visible, sessionId, pane, p
     return decision
   }, [statusStore, tabId, isHookTab])
 
+  // Hook tabs reach main on their own; for the rest (Codex) this window's
+  // heuristics are the only status there is.
+  useEffect(() => {
+    if (!isHookTab) return statusStore.mirrorToMain(tabId)
+  }, [statusStore, tabId, isHookTab])
+
   // Restarted by anything that proves the agent is still alive (output, a hook).
   const restartStaleTimer = useCallback(() => {
     if (!isHookTab) return

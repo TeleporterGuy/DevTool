@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>DevTool Privacy Policy</title>
+  <meta name="description" content="What DevTool for iOS and the DevTool relay store, see and share.">
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<main>
+  <h1>Privacy Policy</h1>
+  <p class="meta">DevTool for iOS and the DevTool relay · Last updated 30 September 2026</p>
+
+  <p>DevTool for iOS lets you follow and answer the coding agents running in the DevTool desktop app. It has no accounts, no ads, no analytics and no third-party SDKs. This page explains what data exists, where it lives and who can see it.</p>
+
+  <h2>End-to-end encryption</h2>
+  <p>Your phone and your desktop talk through a relay server, <code>relay.devtool.awantech.sk</code>, unless you set up your own. Everything they exchange — project, task and tab names, agent status, chat transcripts, your replies and approvals — is encrypted on one device and decrypted only on the other (Noise protocol, keys created on your devices when you pair). The relay forwards the encrypted messages and cannot read or change them.</p>
+
+  <h2>On your phone</h2>
+  <ul>
+    <li><strong>Device keys.</strong> The app creates its own keys on first launch and keeps them in the iOS Keychain, on this device only.</li>
+    <li><strong>Pairings.</strong> For each paired desktop: its name, public key and relay address.</li>
+    <li><strong>Offline copy.</strong> The last inbox of each desktop and the latest part of recently opened chats, so you can read them while the desktop is offline. This stays in the app's storage and is deleted when you remove the desktop in the app or delete the app.</li>
+    <li><strong>Camera.</strong> Used only to scan the pairing QR code. No image is saved or sent.</li>
+    <li><strong>Face ID.</strong> If you turn on “Require Face ID for approvals”, iOS checks your face or passcode. The app only learns whether the check passed.</li>
+  </ul>
+
+  <h2>On the relay</h2>
+  <p>To route messages, the relay necessarily sees:</p>
+  <ul>
+    <li>device IDs and public keys of desktops and phones, and which phone is paired with which desktop;</li>
+    <li>IP addresses, connection times, and the size and timing of encrypted messages.</li>
+  </ul>
+  <p>It stores only the list of pairings (device IDs, public keys and when they were made) until the desktop unpairs the phone. Its logs contain device IDs, IP addresses and connection events, never message contents, and are rotated so that only recent entries are kept. They are used only to run the service and investigate faults.</p>
+
+  <h2>Push notifications</h2>
+  <p>If you enable notifications, iOS gives the app an Apple push token. The app sends it to the DevTool push gateway (part of the relay), which seals it with a key only the gateway knows and hands the sealed value back. The token itself is not stored by the gateway; it keeps only a counter per device so that older sealed values stop working.</p>
+  <p>When an agent needs you, your desktop encrypts the notification text for your phone. The gateway passes it to Apple, and your phone decrypts it on the device. Apple and the gateway see that a notification was sent, but not what it says — without the key, only the generic text “An agent needs you” is visible.</p>
+
+  <h2>What we don't do</h2>
+  <ul>
+    <li>No tracking across apps or websites, and no advertising.</li>
+    <li>No selling or sharing of data with anyone.</li>
+    <li>No access to your code, prompts or chats — they never leave your devices unencrypted.</li>
+  </ul>
+
+  <h2>Your choices</h2>
+  <ul>
+    <li>Remove a desktop in the app to delete its pairing and cached data from the phone. Unpair the phone in the desktop's Settings → Mobile to remove the pairing from the relay as well.</li>
+    <li>Turn notifications off, or per category, in the app's Settings.</li>
+    <li>Run your own relay: the relay is open source and the app accepts any relay address in the pairing code.</li>
+    <li>Delete the app to remove everything it stored on the phone.</li>
+  </ul>
+
+  <h2>Children</h2>
+  <p>DevTool is a developer tool and is not directed at children.</p>
+
+  <h2>Changes and contact</h2>
+  <p>If this policy changes, the new version will be posted here with a new date. Questions or requests about your data: open an issue in the <a href="https://github.com/join3r/claude-project/issues">DevTool repository</a>.</p>
+
+  <footer><a href="/">DevTool</a> · Operated by Awantech s.r.o., Slovakia</footer>
+</main>
+</body>
+</html>

@@ -2,10 +2,11 @@ import { describe, it, expect } from 'vitest'
 import { PassThrough } from 'stream'
 import { emptyChatState, findModelOption, reduceChat, type ChatEvent, type ChatState } from '../src/shared/claude-chat'
 import { buildTimeline, summarizeGroup } from '../src/renderer/components/claude-chat/timelineRows'
-import { contextTone, formatCost, formatResetIn, formatTokens } from '../src/renderer/components/claude-chat/UsageMeter'
+import { contextTone, formatCost, formatResetAt, formatResetIn, formatTokens, limitTone } from '../src/renderer/components/claude-chat/UsageMeter'
 import { diffLines, diffStats, editPairs } from '../src/renderer/components/claude-chat/diff'
 import { JsonLineGate, sdkAddedEnv } from '../src/main/claude-chat/remote-spawn'
-import { extraArgsRecord, isDisplayRelevant } from '../src/main/claude-chat/chat-session'
+import { coldCacheFrom, extraArgsRecord, isDisplayRelevant, sessionStartInput } from '../src/main/claude-chat/chat-session'
+import { coldCacheText, formatIdle } from '../src/renderer/components/claude-chat/ColdCacheNotice'
 import { parseTranscriptLines, remoteTranscriptScript } from '../src/main/claude-chat/transcript'
 import { claudeTabType, createTab, newTaskInitialTabs } from '../src/renderer/components/newTaskTabs'
 
@@ -231,6 +232,23 @@ describe('usage meter', () => {
     expect(formatResetIn('2026-09-23T09:59:00Z', now)).toBe('now')
   })
 
+  it('names the reset on the clock, with the weekday when it is not today', () => {
+    // Local times, so the check holds in any time zone.
+    const now = new Date(2026, 8, 23, 10, 0).getTime()
+    const time = (h: number, m: number): string => new Date(2026, 8, 23, h, m).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })
+    expect(formatResetAt(new Date(2026, 8, 23, 14, 30).toISOString(), now)).toBe(time(14, 30))
+    const later = new Date(2026, 8, 24, 9, 10)
+    expect(formatResetAt(later.toISOString(), now)).toBe(`${later.toLocaleDateString([], { weekday: 'short' })} ${time(9, 10)}`)
+    expect(formatResetAt('not a date', now)).toBe('')
+  })
+
+  it('colours a plan window by the share used', () => {
+    expect(limitTone(38)).toBe('success')
+    expect(limitTone(75)).toBe('success')
+    expect(limitTone(81)).toBe('warn')
+    expect(limitTone(96)).toBe('danger')
+  })
+
   it('merges usage from meta events and keeps it across a reset', () => {
     const state = fold([
       { t: 'meta', usage: { contextTokens: 10, contextMax: 100 } },
@@ -313,6 +331,56 @@ describe('chat session helpers', () => {
     expect(isDisplayRelevant({ type: 'stream_event', event: { type: 'content_block_delta', delta: { type: 'text_delta' } } })).toBe(true)
     expect(isDisplayRelevant({ type: 'rate_limit_event' })).toBe(false)
     expect(isDisplayRelevant({ type: 'assistant' })).toBe(true)
+  })
+})
+
+describe('SessionStart and the cold cache', () => {
+  const resumed = {
+    session_id: 's1', hook_event_name: 'SessionStart', source: 'resume',
+    seconds_since_last_response: 6888, context_tokens: 31753,
+    prompt_cache_likely_expired: true, estimated_cache_write_usd: 0.0635
+  }
+  const response = (stderr: string, hookEvent = 'SessionStart'): unknown => ({
+    type: 'system', subtype: 'hook_response', hook_event: hookEvent, hook_name: `${hookEvent}:resume`, stdout: '{}', stderr, outcome: 'success'
+  })
+
+  it('reads the input our hook echoed to stderr', () => {
+    expect(sessionStartInput(response(JSON.stringify(resumed)))).toEqual(resumed)
+  })
+
+  it("ignores other hooks' output", () => {
+    expect(sessionStartInput(response('warning: something'))).toBeNull()
+    expect(sessionStartInput(response('{"not":"ours"}'))).toBeNull()
+    expect(sessionStartInput(response('{broken'))).toBeNull()
+    expect(sessionStartInput(response(JSON.stringify(resumed), 'Stop'))).toBeNull()
+    expect(sessionStartInput({ type: 'system', subtype: 'hook_started', hook_event: 'SessionStart' })).toBeNull()
+  })
+
+  it('flags only a resume whose cache the CLI thinks expired', () => {
+    expect(coldCacheFrom(resumed)).toEqual({ contextTokens: 31753, idleSeconds: 6888, estimatedUsd: 0.0635 })
+    expect(coldCacheFrom({ ...resumed, prompt_cache_likely_expired: false })).toBeNull()
+    expect(coldCacheFrom({ ...resumed, source: 'startup' })).toBeNull()
+    expect(coldCacheFrom({ ...resumed, context_tokens: 0 })).toBeNull()
+    // An older CLI without the fields says nothing.
+    expect(coldCacheFrom({ session_id: 's1', hook_event_name: 'SessionStart', source: 'resume' })).toBeNull()
+  })
+
+  it('shows until the first send, and not for a send-triggered restart', () => {
+    const cache = { contextTokens: 31753 }
+    let state = reduceChat(emptyChatState(), { t: 'cold-cache', cache })
+    expect(state.coldCache).toBe(cache)
+    state = reduceChat(state, { t: 'sent', uuid: 'u1', text: 'hi', images: 0 })
+    expect(state.coldCache).toBeUndefined()
+    expect(reduceChat(state, { t: 'cold-cache', cache }).coldCache).toBeUndefined()
+  })
+
+  it('words the warning', () => {
+    expect(coldCacheText({ contextTokens: 31753, idleSeconds: 6888, estimatedUsd: 0.0635 }))
+      .toBe('Prompt cache expired (idle 1h 54m). Your next message re-caches ~32k tokens of context (≈ $0.06).')
+    expect(coldCacheText({ contextTokens: 900, estimatedUsd: 0.002 }))
+      .toBe('Prompt cache expired. Your next message re-caches ~900 tokens of context (≈ <$0.01).')
+    expect(formatIdle(30)).toBe('1m')
+    expect(formatIdle(3 * 86400 + 4 * 3600 + 60)).toBe('3d 4h')
   })
 })
 

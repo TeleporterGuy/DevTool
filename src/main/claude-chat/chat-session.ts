@@ -14,12 +14,14 @@ import type {
 } from '@anthropic-ai/claude-agent-sdk'
 import { loadClaudeSdk } from './sdk'
 import {
+  isChatPermissionMode,
   promptKindFor,
   type ChatEvent,
   type ChatImage,
   type ChatPrompt,
   type ChatPromptResponse,
   type ChatSideAnswer,
+  type ChatColdCache,
   type ChatUsage
 } from '../../shared/claude-chat'
 
@@ -30,10 +32,45 @@ import {
  * gone. The session reports prompts itself, from `canUseTool`, which is exact.
  */
 export const FORWARDED_HOOK_EVENTS: HookEvent[] = [
-  'SessionStart', 'UserPromptSubmit', 'Stop', 'StopFailure', 'Notification',
+  'UserPromptSubmit', 'Stop', 'StopFailure', 'Notification',
   'PreToolUse', 'PostToolUse', 'PostToolUseFailure',
   'SubagentStart', 'SubagentStop', 'PreCompact', 'PostCompact', 'SessionEnd'
 ]
+
+/**
+ * SessionStart runs before the CLI registers SDK hook callbacks, so a callback never
+ * sees it. A command hook does: it echoes its input to stderr, which comes back in
+ * the `hook_response` message over the protocol channel, so it works through ssh
+ * with no tunnel. Stdout stays `{}`: a SessionStart hook's plain stdout would be
+ * added to Claude's context.
+ */
+export const SESSION_START_HOOK = { type: 'command', command: "cat >&2; printf '{}'", shell: 'bash', timeout: 10 } as const
+
+/** The input our {@link SESSION_START_HOOK} echoed, from a `hook_response` message. */
+export function sessionStartInput(message: unknown): Record<string, unknown> | null {
+  const m = message as { type?: unknown; subtype?: unknown; hook_event?: unknown; stderr?: unknown } | null
+  if (!m || m.type !== 'system' || m.subtype !== 'hook_response' || m.hook_event !== 'SessionStart') return null
+  if (typeof m.stderr !== 'string' || !m.stderr.trimStart().startsWith('{')) return null
+  try {
+    const input = JSON.parse(m.stderr) as Record<string, unknown>
+    return input && input.hook_event_name === 'SessionStart' && typeof input.session_id === 'string' ? input : null
+  } catch {
+    // Some other SessionStart hook's stderr.
+    return null
+  }
+}
+
+/** A resume whose prompt cache the CLI thinks has expired, or null. */
+export function coldCacheFrom(input: Record<string, unknown>): ChatColdCache | null {
+  if (input.source !== 'resume' && input.source !== 'fork') return null
+  if (input.prompt_cache_likely_expired !== true) return null
+  const tokens = input.context_tokens
+  if (typeof tokens !== 'number' || tokens <= 0) return null
+  const cache: ChatColdCache = { contextTokens: tokens }
+  if (typeof input.seconds_since_last_response === 'number') cache.idleSeconds = input.seconds_since_last_response
+  if (typeof input.estimated_cache_write_usd === 'number') cache.estimatedUsd = input.estimated_cache_write_usd
+  return cache
+}
 
 /**
  * The CLI leaves the Artifact tool off in SDK sessions ("sdk_default_off") unless
@@ -51,6 +88,17 @@ export function chatEnv(env: Record<string, string | undefined>): Record<string,
  */
 interface SideQuestionQuery {
   askSideQuestion?: (question: string) => Promise<{ response: string; synthetic: boolean } | null>
+}
+
+/** A local chat's mode when no settings file sets `permissions.defaultMode`. */
+const DEFAULT_CHAT_MODE = 'auto'
+
+/**
+ * `get_settings` in the SDK: shipped in its code, not yet in its types. `applied`
+ * is what the next request sends, with the settings' and the model's defaults resolved.
+ */
+interface SettingsQuery {
+  getSettings?: () => Promise<{ applied?: { model?: unknown; effort?: unknown } } | null>
 }
 
 /** Mid-turn context refreshes are at most this often; a turn's end always refreshes. */
@@ -245,25 +293,30 @@ export class ChatSession {
       ...(o.permissionMode ? { permissionMode: o.permissionMode as PermissionMode } : {}),
       ...(o.effort ? { effort: o.effort as Options['effort'] } : {}),
       ...(o.spawn ? { spawnClaudeCodeProcess: o.spawn } : {}),
+      // A project's own `--settings` would collide with this one; it wins, and the
+      // tab loses SessionStart status and the cold-cache warning.
+      ...('settings' in extra ? {} : { settings: { hooks: { SessionStart: [{ hooks: [SESSION_START_HOOK] }] } } }),
       stderr: (data: string) => { this.captureStderr(data) }
     }
 
     // The SDK always passes `--permission-mode`, which would override the user's own
     // `permissions.defaultMode`. Resolve it the way the CLI does (repo-committed
-    // escalations filtered out) so a chat starts in the mode a terminal would.
-    // Remote settings live on the host, where the CLI's default applies.
+    // escalations filtered out) so a chat starts in the mode a terminal would, and
+    // in Auto when no settings file names one. Remote settings live on the host,
+    // where the CLI's default applies.
     if (!o.permissionMode && !o.spawn) {
+      let mode: string | undefined
       try {
         const resolved = await sdk.resolveSettings({ cwd: o.cwd, settingSources: ['user', 'project', 'local'] })
-        const mode = sdk.filterEscalatingDefaultMode(resolved).permissions?.defaultMode
-        if (mode) queryOptions.permissionMode = mode as PermissionMode
+        mode = sdk.filterEscalatingDefaultMode(resolved).permissions?.defaultMode
       } catch {
-        // Fall back to the CLI default.
+        // Unreadable settings: start in Auto all the same.
       }
+      queryOptions.permissionMode = (mode ?? DEFAULT_CHAT_MODE) as PermissionMode
     }
 
     o.onEvent({ t: 'process', state: 'starting' })
-    if (queryOptions.permissionMode) o.onEvent({ t: 'meta', info: { permissionMode: queryOptions.permissionMode } })
+    o.onEvent({ t: 'meta', info: { modelPicked: Boolean(o.model), ...(queryOptions.permissionMode ? { permissionMode: queryOptions.permissionMode } : {}) } })
     this.query = sdk.query({ prompt: this.input, options: queryOptions })
     void this.pump(this.query)
     void this.loadMeta(this.query)
@@ -281,6 +334,8 @@ export class ChatSession {
           this.markRunning()
         }
         if (isDisplayRelevant(message)) this.options.onEvent({ t: 'sdk', m: message, at: Date.now() })
+        const started = sessionStartInput(message)
+        if (started) this.onSessionStart(started)
         this.noteForUsage(message as { type?: string; subtype?: string; parent_tool_use_id?: unknown; total_cost_usd?: unknown })
       }
     } catch (err) {
@@ -293,6 +348,12 @@ export class ChatSession {
     } finally {
       this.finish(error)
     }
+  }
+
+  private onSessionStart(input: Record<string, unknown>): void {
+    try { this.options.onHook(input) } catch { /* status is best-effort */ }
+    const cache = coldCacheFrom(input)
+    if (cache) this.options.onEvent({ t: 'cold-cache', cache })
   }
 
   private markRunning(): void {
@@ -321,6 +382,8 @@ export class ChatSession {
         this.options.onEvent({ t: 'meta', usage: { costUsd: m.total_cost_usd } })
       }
       this.refreshUsage(true)
+      // A `/model` or `/effort` sent as a message changes them too.
+      this.refreshApplied()
     } else if (m.type === 'rate_limit_event') {
       this.refreshUsage(true)
     } else if (m.type === 'conversation_reset' || (m.type === 'system' && m.subtype === 'compact_boundary')) {
@@ -374,6 +437,7 @@ export class ChatSession {
       // only comes with the first turn.
       if (!this.ended) this.markRunning()
       this.refreshUsage(true)
+      this.refreshApplied()
       this.options.onEvent({
         t: 'meta',
         models: models.map((m) => ({
@@ -432,16 +496,24 @@ export class ChatSession {
     if (response.behavior === 'allow') {
       // "Always" on a plan means what the terminal's plan dialog offers: leave plan
       // mode straight into accepting edits. Otherwise it applies Claude's own rules.
-      const updatedPermissions: PermissionUpdate[] | undefined = !response.always
-        ? undefined
+      const updatedPermissions: PermissionUpdate[] = !response.always
+        ? []
         : prompt.kind === 'plan'
           ? [{ type: 'setMode', mode: 'acceptEdits', destination: 'session' }]
-          : held.suggestions?.length ? held.suggestions : undefined
+          : held.suggestions ?? []
+      const mode = isChatPermissionMode(response.mode) ? response.mode : undefined
+      if (mode) {
+        // One mode wins: a suggestion's own setMode would fight the one asked for.
+        const rules = updatedPermissions.filter((update) => update.type !== 'setMode')
+        updatedPermissions.length = 0
+        updatedPermissions.push(...rules, { type: 'setMode', mode, destination: 'session' })
+      }
       result = {
         behavior: 'allow',
         updatedInput: response.updatedInput ?? prompt.input,
-        ...(updatedPermissions ? { updatedPermissions } : {})
+        ...(updatedPermissions.length ? { updatedPermissions } : {})
       }
+      if (mode) this.options.onEvent({ t: 'meta', info: { permissionMode: mode } })
     } else {
       result = { behavior: 'deny', message: response.message?.trim() || 'The user declined this action.' }
     }
@@ -452,12 +524,16 @@ export class ChatSession {
     return true
   }
 
-  /** Queue a user message. Returns its uuid, which the replay echo carries back. */
-  send(text: string, images: ChatImage[] = []): string {
+  /**
+   * Queue a user message. Returns its uuid, which the replay echo carries back.
+   * `context`: text blocks that go ahead of it (the `!command`s run since the last one).
+   */
+  send(text: string, images: ChatImage[] = [], context: string[] = []): string {
     const uuid = randomUUID()
-    const content = images.length === 0
+    const content = images.length === 0 && context.length === 0
       ? text
       : [
+          ...context.map((block) => ({ type: 'text' as const, text: block })),
           ...images.map((image) => ({
             type: 'image' as const,
             source: { type: 'base64' as const, media_type: image.mediaType as 'image/png', data: image.data }
@@ -520,9 +596,30 @@ export class ChatSession {
     return false
   }
 
+  /** Read the model and effort the CLI will use, for the footer's "Default (…)" labels. Best-effort. */
+  private refreshApplied(): void {
+    const query = this.query as (Query & SettingsQuery) | null
+    if (!query?.getSettings || this.ended) return
+    void query.getSettings().then((settings) => {
+      const applied = settings?.applied
+      if (!applied || this.ended) return
+      this.options.onEvent({
+        t: 'meta',
+        info: {
+          applied: {
+            model: typeof applied.model === 'string' ? applied.model : undefined,
+            effort: typeof applied.effort === 'string' ? applied.effort : null
+          }
+        }
+      })
+    }).catch(() => { /* an older CLI: the labels say just "Default" */ })
+  }
+
   async setModel(model: string | undefined): Promise<void> {
     await this.query?.setModel(model)
-    this.options.onEvent({ t: 'meta', info: { model } })
+    this.options.onEvent({ t: 'meta', info: { model, modelPicked: model !== undefined } })
+    // The default effort is per model.
+    this.refreshApplied()
   }
 
   async setPermissionMode(mode: string): Promise<void> {
@@ -533,6 +630,7 @@ export class ChatSession {
   async setEffort(effort: string | undefined): Promise<void> {
     await this.query?.applyFlagSettings({ effortLevel: (effort ?? null) as never })
     this.options.onEvent({ t: 'meta', info: { effort } })
+    this.refreshApplied()
   }
 
   isEnded(): boolean {

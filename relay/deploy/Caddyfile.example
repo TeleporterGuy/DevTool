@@ -1,0 +1,34 @@
+# Caddy in front of the relay on a small VPS. Caddy gets and renews the TLS certificate
+# for the name automatically (ports 80 and 443 must be reachable), and proxies
+# WebSocket upgrades without extra config.
+#
+# Run the relay bound to loopback with RELAY_TRUST_PROXY=1 so its per-IP limit uses
+# the client address Caddy puts in X-Forwarded-For (the relay reads the last entry):
+#
+#   docker run -d --name devtool-relay --restart unless-stopped \
+#     -p 127.0.0.1:8787:8787 -e RELAY_TRUST_PROXY=1 \
+#     -v devtool-relay-data:/data devtool-relay
+#
+# Copy to /etc/caddy/Caddyfile and `systemctl reload caddy`.
+
+relay.devtool.awantech.sk {
+	# Only the WebSocket endpoint, the push gateway (SPEC.md §7) and the health
+	# check are public.
+	@relay path /v1 /v1/push/register /v1/push/send /healthz
+	handle @relay {
+		reverse_proxy 127.0.0.1:8787 {
+			# By default Caddy closes proxied WebSockets on every config reload.
+			# Keep them open a while so a reload doesn't drop every client at once.
+			stream_close_delay 5m
+		}
+	}
+	handle {
+		respond 404
+	}
+
+	# Optional access log. It records IPs and connection times, never frame contents.
+	log {
+		output file /var/log/caddy/relay.log
+		format json
+	}
+}

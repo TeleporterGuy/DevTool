@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- APNs. Distribution signing switches this to production. -->
+	<key>aps-environment</key>
+	<string>development</string>
+	<!-- Shared with DevToolNotifications. iOS also accepts the App Group as a
+	     keychain access group; PushKeyStore keeps the push keys there. -->
+	<key>com.apple.security.application-groups</key>
+	<array>
+		<string>group.sk.awantech.devtool</string>
+	</array>
+	<!-- Keeps the app's default keychain group at its own app ID, where the
+	     device identity lives, now that it can also reach the App Group. -->
+	<key>keychain-access-groups</key>
+	<array>
+		<string>$(AppIdentifierPrefix)sk.awantech.devtool</string>
+	</array>
+</dict>
+</plist>

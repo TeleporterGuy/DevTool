@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useSta
 import { ArrowUp, Square, SquareTerminal, X } from 'lucide-react'
 import {
   CHAT_PERMISSION_MODES,
+  PERMISSIONS_COMMAND,
   TERMINAL_ONLY_COMMANDS,
   findModelOption,
   parseSideQuestion,
@@ -33,6 +34,10 @@ interface Props {
   onSend: (text: string, images: ChatImage[]) => void
   /** `/btw <question>`: answered beside the conversation, not sent into it. */
   onSideQuestion: (question: string) => void
+  /** `!command`: run in the project's shell; Claude gets it with the next message. */
+  onBash: (command: string) => void
+  /** `/permissions`: DevTool's own rules editor (the CLI's is terminal-only). */
+  onPermissions: () => void
   onStop: () => void
   onSetModel: (model: string | undefined) => void
   onSetMode: (mode: string) => void
@@ -46,7 +51,7 @@ interface Props {
 
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024
 const EFFORT_LEVELS = ['low', 'medium', 'high', 'xhigh', 'max']
-const MODE_CYCLE = ['default', 'acceptEdits', 'plan']
+const MODE_CYCLE = ['default', 'acceptEdits', 'plan', 'auto']
 
 type Suggest =
   | { kind: 'file'; start: number; query: string }
@@ -93,7 +98,7 @@ function readImage(file: File): Promise<Attachment | null> {
 }
 
 export default function Composer(props: Props): React.ReactElement {
-  const { busy, disabled, info, usage, models, commands, loadFiles, onSend, onSideQuestion, onStop, onSetModel, onSetMode, onSetEffort, onOpenInTerminal, focusSignal, tabId } = props
+  const { busy, disabled, info, usage, models, commands, loadFiles, onSend, onSideQuestion, onBash, onPermissions, onStop, onSetModel, onSetMode, onSetEffort, onOpenInTerminal, focusSignal, tabId } = props
   const [text, setText] = useState('')
   const textRef = useRef(text)
   textRef.current = text
@@ -129,13 +134,15 @@ export default function Composer(props: Props): React.ReactElement {
     })
   }, [tabId])
 
-  // Autosize up to a cap; the timeline keeps the rest of the pane.
+  // Autosize up to a cap; the timeline keeps the rest of the pane. A hidden
+  // tab measures 0, so leave the natural one-row height and re-measure on show.
   useLayoutEffect(() => {
     const el = textareaRef.current
     if (!el) return
     el.style.height = 'auto'
+    if (el.scrollHeight === 0) return
     el.style.height = `${Math.min(el.scrollHeight, 240)}px`
-  }, [text])
+  }, [text, focusSignal])
 
   useEffect(() => {
     if (suggest?.kind !== 'file' || files || filesLoading.current) return
@@ -157,7 +164,7 @@ export default function Composer(props: Props): React.ReactElement {
       .map((command) => ({
         value: command.name,
         label: `/${command.name}${command.argumentHint ? ` ${command.argumentHint}` : ''}`,
-        description: TERMINAL_ONLY_COMMANDS.has(command.name) ? 'Terminal only — opens this session in a terminal tab' : command.description
+        description: TERMINAL_ONLY_COMMANDS.has(command.name) && command.name !== PERMISSIONS_COMMAND.name ? 'Terminal only — opens this session in a terminal tab' : command.description
       }))
   }, [suggest, files, commands])
 
@@ -171,6 +178,12 @@ export default function Composer(props: Props): React.ReactElement {
     if (!suggest) return
     const el = textareaRef.current
     const caret = el?.selectionStart ?? text.length
+    if (suggest.kind === 'command' && value === PERMISSIONS_COMMAND.name) {
+      setSuggest(null)
+      setText('')
+      onPermissions()
+      return
+    }
     if (suggest.kind === 'command' && TERMINAL_ONLY_COMMANDS.has(value)) {
       setSuggest(null)
       onOpenInTerminal()
@@ -190,7 +203,22 @@ export default function Composer(props: Props): React.ReactElement {
   const submit = (): void => {
     const trimmed = text.trim()
     if (!trimmed && images.length === 0) return
+    if (trimmed.startsWith('!')) {
+      // Attached images stay for the next real message.
+      const command = trimmed.slice(1).trim()
+      if (!command) return
+      onBash(command)
+      setText('')
+      setSuggest(null)
+      return
+    }
     const command = /^\/(\S+)/.exec(trimmed)?.[1]
+    if (command === PERMISSIONS_COMMAND.name) {
+      onPermissions()
+      setText('')
+      setSuggest(null)
+      return
+    }
     if (command && TERMINAL_ONLY_COMMANDS.has(command)) {
       onOpenInTerminal()
       return
@@ -238,19 +266,30 @@ export default function Composer(props: Props): React.ReactElement {
     }
   }
 
+  // The CLI's own "Default" row resolves to a real model; name that model, not the row.
+  const pickable = models.filter((m) => m.value !== 'default')
+  const modelName = (model: string | undefined): string | undefined =>
+    model ? findModelOption(pickable, model)?.displayName ?? model.replace(/^claude-/, '') : undefined
+  const currentModel = findModelOption(pickable, info.applied?.model ?? info.model)
+  // A tab that never picked a model runs the settings default; `applied` names it once read.
+  const defaultModel = info.modelPicked ? undefined : modelName(info.applied?.model ?? info.model)
+  const modelLabel = info.modelPicked
+    ? modelName(info.model) ?? 'Model'
+    : defaultModel ? `Model: Default (${defaultModel})` : 'Model: Default'
   const modelOptions = [
-    { value: '', label: 'Default model', description: 'What your Claude settings pick' },
-    ...models.filter((m) => m.value !== 'default').map((m) => ({ value: m.value, label: m.displayName, description: m.description }))
+    { value: '', label: defaultModel ? `Default (${defaultModel})` : 'Default', description: 'What your Claude settings pick' },
+    ...pickable.map((m) => ({ value: m.value, label: m.displayName, description: m.description }))
   ]
-  const currentModel = findModelOption(models, info.model)
-  const modelLabel = currentModel?.displayName ?? (info.model ? info.model.replace(/^claude-/, '') : 'Default model')
   const effortLevels = currentModel?.supportedEffortLevels?.length ? currentModel.supportedEffortLevels : EFFORT_LEVELS
+  // `applied.effort` is null when no effort is sent (a model without effort levels).
+  const defaultEffort = info.effort ? undefined : info.applied?.effort ?? undefined
   const modeLabel = CHAT_PERMISSION_MODES.find((m) => m.value === info.permissionMode)?.label ?? 'Ask'
   const canSend = !disabled && (text.trim().length > 0 || images.length > 0)
+  const bashMode = text.trimStart().startsWith('!')
 
   return (
     <div
-      className="relative rounded-xl border-[0.5px] border-border-strong bg-field shadow-[0_1px_3px_rgba(0,0,0,0.12)] focus-within:border-border-focus transition-colors duration-(--motion-fast)"
+      className={`relative rounded-xl border-[0.5px] bg-field shadow-[0_1px_3px_rgba(0,0,0,0.12)] transition-colors duration-(--motion-fast) ${bashMode ? 'border-accent' : 'border-border-strong focus-within:border-border-focus'}`}
       onDragOver={(e) => { if (e.dataTransfer.types.includes('Files')) e.preventDefault() }}
       onDrop={(e) => {
         if (e.dataTransfer.files.length === 0) return
@@ -296,7 +335,7 @@ export default function Composer(props: Props): React.ReactElement {
         rows={1}
         value={text}
         disabled={disabled}
-        placeholder={busy ? 'Add to the conversation — Claude reads it at its next step' : 'Message Claude — @ for files, / for commands'}
+        placeholder={busy ? 'Add to the conversation — Claude reads it at its next step' : 'Message Claude — @ for files, / for commands, ! for shell'}
         onChange={(e) => {
           setText(e.target.value)
           refreshSuggest(e.target.value, e.target.selectionStart)
@@ -311,14 +350,19 @@ export default function Composer(props: Props): React.ReactElement {
             void addFiles(pasted)
           }
         }}
-        className="block w-full resize-none bg-transparent border-0 outline-none px-3 pt-2.5 pb-1 text-base text-text placeholder:text-text-subtle leading-[1.5] max-h-60"
+        className="block w-full resize-none bg-transparent border-0 outline-none px-3 pt-2.5 pb-1 text-base text-text placeholder:text-text-subtle leading-[1.5] min-h-[38px] max-h-60"
       />
       <div className="flex items-center gap-0.5 px-1.5 pb-1.5">
+        {bashMode && (
+          <span className="px-1.5 text-xs text-accent" title="Runs in the project's shell. Claude gets the command and its output with your next message.">
+            Shell command
+          </span>
+        )}
         <ChipMenu
           label={modelLabel}
           title="Model"
           options={modelOptions}
-          value={currentModel?.value ?? info.model ?? ''}
+          value={info.modelPicked ? currentModel?.value ?? info.model ?? '' : ''}
           onChange={(value) => onSetModel(value || undefined)}
         />
         <ChipMenu
@@ -329,9 +373,9 @@ export default function Composer(props: Props): React.ReactElement {
           onChange={onSetMode}
         />
         <ChipMenu
-          label={info.effort ? `Effort: ${info.effort}` : 'Effort'}
+          label={info.effort ? `Effort: ${info.effort}` : defaultEffort ? `Effort: Default (${defaultEffort})` : 'Effort: Default'}
           title="Thinking effort"
-          options={[{ value: '', label: 'Default' }, ...effortLevels.map((level) => ({ value: level, label: level }))]}
+          options={[{ value: '', label: defaultEffort ? `Default (${defaultEffort})` : 'Default' }, ...effortLevels.map((level) => ({ value: level, label: level }))]}
           value={info.effort ?? ''}
           onChange={(value) => onSetEffort(value || undefined)}
         />

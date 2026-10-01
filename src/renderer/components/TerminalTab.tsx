@@ -153,6 +153,9 @@ export default function TerminalTab({ tabId, visible, projectId, taskId, pane, p
   const lastStatusWriteRef = useRef(0)
   const decayTimerRef = useRef<number | null>(null)
 
+  // No hooks here: this window's heuristics are the only status there is.
+  useEffect(() => statusStore.mirrorToMain(tabId), [statusStore, tabId])
+
   const handleOutputForStatus = useCallback((chunk: string) => {
     const now = Date.now()
     // Bells skip the throttle — dropping one loses the tab's only attention signal.

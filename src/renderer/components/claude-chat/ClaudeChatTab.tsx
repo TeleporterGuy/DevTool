@@ -4,7 +4,7 @@ import { useApp } from '../../context/AppContext'
 import { useTabStatusStore } from '../../context/TabStatusContext'
 import type { SshConfig } from '../../../shared/types'
 import { classifyNotification, nextAiStatus, type AiNotificationKind, type AiStatusDecision, type AiStatusEvent } from '../../../shared/ai-status'
-import { SIDE_QUESTION_COMMAND, type ChatImage, type ChatPromptResponse } from '../../../shared/claude-chat'
+import { PERMISSIONS_COMMAND, SIDE_QUESTION_COMMAND, type ChatColdCache, type ChatImage, type ChatPromptResponse } from '../../../shared/claude-chat'
 import { parseExtraArgs } from '../aiToolTabUtils'
 import { ensureHookListeners, hookStatusCallbacks } from '../hookStatusListeners'
 import { normalizeBrowserUrl } from '../../browserUrl'
@@ -13,10 +13,13 @@ import Timeline, { type TimelineFocus } from './Timeline'
 import TaskIndicator from './TaskIndicator'
 import PromptCard from './PromptCards'
 import SideQuestion, { type SideQuestionState } from './SideQuestion'
+import ColdCacheNotice from './ColdCacheNotice'
+import PermissionsDialog from './PermissionsDialog'
 import Composer from './Composer'
 import { noteAgentTabTyped } from '../../agentLink/agentTabRecency'
 import LinkContextMenu, { type LinkMenuState } from '../LinkContextMenu'
 import { chatContextMenuAt } from './chatContextMenu'
+import { handleCodeCopyClick } from './markdown'
 
 interface Props {
   tabId: string
@@ -57,6 +60,7 @@ export default function ClaudeChatTab({ tabId, visible, sessionId, pane, project
   const [side, setSide] = useState<SideQuestionState | null>(null)
   const sideSeq = useRef(0)
   const [linkMenu, setLinkMenu] = useState<LinkMenuState | null>(null)
+  const [permissionsOpen, setPermissionsOpen] = useState(false)
 
   const applyStatus = useCallback((event: AiStatusEvent, notificationKind?: AiNotificationKind): AiStatusDecision => {
     const current = statusStore.getStatus(tabId)
@@ -154,6 +158,24 @@ export default function ClaudeChatTab({ tabId, visible, sessionId, pane, project
     if (stickRef.current) el.scrollTop = el.scrollHeight
   }, [state.items, state.pending, state.busy, visible])
 
+  // A growing composer (or prompt card) shrinks the timeline from below: keep the
+  // bottom edge where it was, so the last line stays in view instead of going under it.
+  useEffect(() => {
+    const el = scrollRef.current
+    if (!el) return
+    let height = el.clientHeight
+    const observer = new ResizeObserver(() => {
+      const next = el.clientHeight
+      // Hidden tabs report 0; their next show is handled by the follow effect.
+      if (next === 0 || height === 0) { height = next; return }
+      if (stickRef.current) el.scrollTop = el.scrollHeight
+      else if (next !== height) el.scrollTop += height - next
+      height = next
+    })
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [])
+
   const onScroll = (): void => {
     const el = scrollRef.current
     if (!el) return
@@ -196,11 +218,20 @@ export default function ClaudeChatTab({ tabId, visible, sessionId, pane, project
     })
   }, [tabId])
 
-  // The CLI doesn't list /btw to SDK clients; the chat tab runs it itself.
-  const commands = useMemo(
-    () => (state.commands.some((c) => c.name === SIDE_QUESTION_COMMAND.name) ? state.commands : [SIDE_QUESTION_COMMAND, ...state.commands]),
-    [state.commands]
-  )
+  // `!command`: main runs it; its row lands in the timeline like any event.
+  const runBash = useCallback((command: string) => {
+    markTaskInteracted(projectId, taskId)
+    stickRef.current = true
+    void window.api.chatBash(tabId, command).catch((err: unknown) => {
+      setAttachError(err instanceof Error ? err.message : String(err))
+    })
+  }, [tabId, projectId, taskId, markTaskInteracted])
+
+  // The CLI doesn't list /btw or /permissions to SDK clients; the chat tab runs them itself.
+  const commands = useMemo(() => {
+    const own = [SIDE_QUESTION_COMMAND, PERMISSIONS_COMMAND].filter((command) => !state.commands.some((c) => c.name === command.name))
+    return own.length > 0 ? [...own, ...state.commands] : state.commands
+  }, [state.commands])
 
   const respond = useCallback((promptId: string, response: ChatPromptResponse) => {
     markTaskInteracted(projectId, taskId)
@@ -227,7 +258,13 @@ export default function ClaudeChatTab({ tabId, visible, sessionId, pane, project
     [projectDir, projectId, sshConfig]
   )
 
-  const { tasks, toolIndex } = state
+  const { toolIndex } = state
+  // A subagent's own shells are part of its row, not tasks of their own.
+  const tasks = useMemo(() => {
+    const all = state.tasks
+    if (!Object.values(all).some((task) => task.nested)) return all
+    return Object.fromEntries(Object.entries(all).filter(([, task]) => !task.nested))
+  }, [state.tasks])
   const taskTools = useMemo(() => {
     const ids = new Set<string>()
     for (const task of Object.values(tasks)) {
@@ -254,6 +291,9 @@ export default function ClaudeChatTab({ tabId, visible, sessionId, pane, project
     setFocus({ toolId: toolUseId, seq: focusSeq.current })
   }, [toolIndex])
 
+  const [dismissedCache, setDismissedCache] = useState<ChatColdCache | null>(null)
+  const coldCache = state.coldCache && state.coldCache !== dismissedCache ? state.coldCache : null
+
   const hasTasks = Object.keys(tasks).length > 0
   const empty = state.items.length === 0 && !state.busy
   const starting = state.process === 'starting' && state.items.length === 0
@@ -263,6 +303,7 @@ export default function ClaudeChatTab({ tabId, visible, sessionId, pane, project
       className="absolute inset-0 flex-col bg-bg"
       style={{ display: visible ? 'flex' : 'none' }}
       onKeyDownCapture={() => noteAgentTabTyped(taskId, tabId)}
+      onClick={(e) => { if (handleCodeCopyClick(e.target)) e.preventDefault() }}
       onContextMenu={openContextMenu}
     >
       <div className="flex-1 min-h-0 relative">
@@ -307,8 +348,9 @@ export default function ClaudeChatTab({ tabId, visible, sessionId, pane, project
           <div className="text-sm text-danger rounded-md border border-[color-mix(in_srgb,var(--color-danger)_35%,transparent)] px-2 py-1">{attachError}</div>
         )}
         {state.pending.map((prompt) => (
-          <PromptCard key={prompt.id} prompt={prompt} onRespond={(response) => respond(prompt.id, response)} />
+          <PromptCard key={prompt.id} prompt={prompt} permissionMode={state.info.permissionMode} onRespond={(response) => respond(prompt.id, response)} />
         ))}
+        {coldCache && <ColdCacheNotice cache={coldCache} onDismiss={() => setDismissedCache(coldCache)} />}
         {side && <SideQuestion side={side} onDismiss={() => setSide(null)} onOpenLink={openLink} />}
         <Composer
           busy={state.busy}
@@ -319,6 +361,8 @@ export default function ClaudeChatTab({ tabId, visible, sessionId, pane, project
           loadFiles={loadFiles}
           onSend={send}
           onSideQuestion={askSideQuestion}
+          onBash={runBash}
+          onPermissions={() => setPermissionsOpen(true)}
           onStop={() => { void window.api.chatInterrupt(tabId) }}
           onSetModel={(model) => { void window.api.chatSetModel(tabId, model) }}
           onSetMode={(mode) => { void window.api.chatSetMode(tabId, mode) }}
@@ -329,6 +373,14 @@ export default function ClaudeChatTab({ tabId, visible, sessionId, pane, project
         />
       </div>
       <LinkContextMenu menu={linkMenu} onClose={() => setLinkMenu(null)} onOpenInApp={openLink} />
+      {permissionsOpen && (
+        <PermissionsDialog
+          cwd={sshConfig ? null : projectDir}
+          permissionMode={state.info.permissionMode}
+          onClose={() => setPermissionsOpen(false)}
+          onOpenInTerminal={openInTerminal}
+        />
+      )}
     </div>
   )
 }

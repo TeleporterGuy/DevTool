@@ -11,6 +11,12 @@ export interface TabStatusStore {
   /** `reason` is trace-only (see statusDebug) — every writer should pass one. */
   setStatus(tabId: string, status: TabStatusValue, reason?: string): void
   removeTab(tabId: string): void
+  /**
+   * Also publish this tab's status to main, for tabs no hook reports on (Codex,
+   * shells): main — and the phone behind it — cannot see PTY output heuristics.
+   * Returns the unregister function.
+   */
+  mirrorToMain(tabId: string): () => void
   subscribe(callback: () => void): () => void
   getSnapshot(): Record<string, TabStatusValue>
   /** When each tab's current status began — drives the inbox's "waiting 4m". */
@@ -21,6 +27,12 @@ function createTabStatusStore(): TabStatusStore {
   let statuses: Record<string, TabStatusValue> = {}
   let since: Record<string, number> = {}
   const listeners = new Set<() => void>()
+  const mirrored = new Set<string>()
+
+  function report(tabId: string, status: TabStatusValue) {
+    // Test windows stub `window.api` piecemeal; a missing channel is not an error.
+    void window.api?.reportTabStatus?.(tabId, status)?.catch(() => {})
+  }
 
   function notify() {
     statuses = { ...statuses }
@@ -37,6 +49,7 @@ function createTabStatusStore(): TabStatusStore {
       logStatusTransition(tabId, statuses[tabId] ?? null, status, reason)
       statuses[tabId] = status
       since[tabId] = Date.now()
+      if (mirrored.has(tabId)) report(tabId, status)
       notify()
     },
     removeTab(tabId: string) {
@@ -44,6 +57,11 @@ function createTabStatusStore(): TabStatusStore {
       delete statuses[tabId]
       delete since[tabId]
       notify()
+    },
+    mirrorToMain(tabId: string) {
+      mirrored.add(tabId)
+      report(tabId, statuses[tabId] ?? null)
+      return () => { mirrored.delete(tabId) }
     },
     subscribe(callback: () => void) {
       listeners.add(callback)

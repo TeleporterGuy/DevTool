@@ -1,0 +1,24 @@
+# Local development: `docker compose -f relay/docker-compose.yml up --build`
+# (or `cd relay && docker compose up --build`). The build context is the repo root.
+services:
+  relay:
+    build:
+      context: ..
+      dockerfile: relay/Dockerfile
+    image: devtool-relay
+    ports:
+      - "8787:8787"
+    environment:
+      LOG_LEVEL: debug
+      # Push (see README "Push gateway"). By default pushes are forwarded to the hosted
+      # gateway; an empty value turns push off:
+      # RELAY_PUSH_UPSTREAM: ""
+      # To run a gateway instead (log mode accepts pushes without contacting Apple):
+      # RELAY_PUSH_SEAL_KEY: <32 random bytes, base64url>
+      # RELAY_APNS_MODE: log
+    volumes:
+      - relay-data:/data
+    restart: unless-stopped
+
+volumes:
+  relay-data:

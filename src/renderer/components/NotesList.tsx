@@ -1,6 +1,7 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react'
 import { Plus, X } from 'lucide-react'
 import { useApp } from '../context/AppContext'
+import { ContextMenu } from './ui'
 
 export default function NotesList(): React.ReactElement {
   const {
@@ -16,6 +17,8 @@ export default function NotesList(): React.ReactElement {
   const [editingNoteId, setEditingNoteId] = useState<string | null>(null)
   const [editingName, setEditingName] = useState('')
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null)
+  const [menu, setMenu] = useState<{ x: number; y: number; noteId: string } | null>(null)
+  const closeMenu = useCallback(() => setMenu(null), [])
   const editInputRef = useRef<HTMLInputElement | null>(null)
   const confirmTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
@@ -76,6 +79,8 @@ export default function NotesList(): React.ReactElement {
     }
   }, [selectedProjectId, deleteNote, confirmDeleteId])
 
+  const menuNote = menu ? projectNotes.find(note => note.id === menu.noteId) : undefined
+
   return (
     <div className="flex flex-col h-full overflow-hidden">
       <div className="flex items-center justify-end px-2 py-1 border-b border-hair shrink-0">
@@ -93,6 +98,10 @@ export default function NotesList(): React.ReactElement {
             className="group flex items-center px-2 py-1 cursor-pointer select-none text-base text-text gap-1 hover:bg-surface-3 transition-colors duration-(--motion-fast)"
             onClick={() => editingNoteId !== note.id && handleNoteClick(note.id)}
             onDoubleClick={() => handleDoubleClick(note.id, note.name)}
+            onContextMenu={e => {
+              e.preventDefault()
+              if (editingNoteId !== note.id) setMenu({ x: e.clientX, y: e.clientY, noteId: note.id })
+            }}
           >
             {editingNoteId === note.id ? (
               <input
@@ -119,6 +128,23 @@ export default function NotesList(): React.ReactElement {
           </div>
         ))}
       </div>
+      <ContextMenu
+        menu={menuNote ? menu : null}
+        onClose={closeMenu}
+        items={menuNote ? [
+          { label: 'Open', disabled: !selectedTaskId, onSelect: () => handleNoteClick(menuNote.id) },
+          { label: 'Rename', onSelect: () => handleDoubleClick(menuNote.id, menuNote.name) },
+          {
+            label: 'Delete…',
+            danger: true,
+            onSelect: () => {
+              if (selectedProjectId && window.confirm(`Delete note "${menuNote.name}"? This can't be undone.`)) {
+                deleteNote(selectedProjectId, menuNote.id)
+              }
+            }
+          }
+        ] : []}
+      />
     </div>
   )
 }

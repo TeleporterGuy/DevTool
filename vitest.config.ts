@@ -5,6 +5,7 @@ import { configDefaults, defineConfig } from 'vitest/config'
 export default defineConfig({
   test: {
     environment: 'node',
-    exclude: [...configDefaults.exclude, '.claude/**', 'out/**', 'dist/**']
+    // relay/ runs its own vitest with its own dependencies; protocol/ts/** is picked up here.
+    exclude: [...configDefaults.exclude, '.claude/**', 'out/**', 'dist/**', 'relay/**', 'ios/**']
   }
 })

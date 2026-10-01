@@ -1,0 +1,6 @@
+{
+  "name": "@devtool/protocol",
+  "private": true,
+  "description": "Marks protocol/ as ESM so plain Node (type stripping) can run protocol/ts and protocol/tools directly. No dependencies, no build.",
+  "type": "module"
+}

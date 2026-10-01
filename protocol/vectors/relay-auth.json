@@ -1,0 +1,41 @@
+{
+  "description": "Relay hello signatures (§3.1). payload = utf8(\"devtool-relay-v1\\n\" + role + \"\\n\" + nonce); nonce is the b64u string as sent in the challenge.",
+  "vectors": [
+    {
+      "ed25519": {
+        "seed": "a61011ae9070e7156081b0587d50e8cfdbe38ced6850732123e9ad673f0f9eef",
+        "pub": "49b5e688693e7819fa7a952d1a8659e373ed3214885fa186b3ce20fb6c288284",
+        "deviceId": "20671253fbf6054273bb719d3a34999b"
+      },
+      "role": "desktop",
+      "nonce": "0HYLzIvIegGqGdOUu7Ns_0TB3NjUZFqipIOoOSdDLXo",
+      "payload": "646576746f6f6c2d72656c61792d76310a6465736b746f700a3048594c7a4976496567477147644f5575374e735f305442334e6a555a46716970494f6f4f5364444c586f",
+      "sig": "1eda1a595652d853d817455696d8cf76dc59c49cf42666e69f9d3d38e38640eb7cc9b3932abd21efe1c4d0d88e3d72e5903a0ac1f8faf99bd9133063cfe01c01",
+      "hello": "{\"t\":\"hello\",\"role\":\"desktop\",\"pub\":\"SbXmiGk-eBn6epUtGoZZ43PtMhSIX6GGs84g-2wogoQ\",\"sig\":\"HtoaWVZS2FPYF0VWltjPdtxZxJz0Jmbmn509OOOGQOt8ybOTKr0h7-HE0NiOPXLlkDoKwfj6-ZvZEzBjz-AcAQ\"}"
+    },
+    {
+      "ed25519": {
+        "seed": "7024281cf08108c9d6ed75d25ccfa343ef1ac7f780a1a38ddef010f4ef2fcc0a",
+        "pub": "7f1a8e8eabd19c4a13626bfe85c40f3afc57c445cdba07550c93ddc1abc5b849",
+        "deviceId": "adeae4935ee0d96b94e6b3cc82e0f7c0"
+      },
+      "role": "phone",
+      "nonce": "hv6mYnak8hKfOuxsSHbn5aDGR6Y2Xm6EEzC1Z9r3wK8",
+      "payload": "646576746f6f6c2d72656c61792d76310a70686f6e650a6876366d596e616b38684b664f7578735348626e3561444752365932586d3645457a43315a397233774b38",
+      "sig": "a2c2681db8bf2f304d8c7d07f8c75b2122e8e7f45d5dbb1ca666a56930981a57481136df3f7ce3395e1a5a473872cf8a914c95a37c515b4b07a69891d8f0cf0f",
+      "hello": "{\"t\":\"hello\",\"role\":\"phone\",\"pub\":\"fxqOjqvRnEoTYmv-hcQPOvxXxEXNugdVDJPdwavFuEk\",\"sig\":\"osJoHbi_LzBNjH0H-MdbISLo5_RdXbscpmalaTCYGldIETbfP3zjOV4aWkc4cs-KkUyVo3xRW0sHppiR2PDPDw\"}"
+    },
+    {
+      "ed25519": {
+        "seed": "7024281cf08108c9d6ed75d25ccfa343ef1ac7f780a1a38ddef010f4ef2fcc0a",
+        "pub": "7f1a8e8eabd19c4a13626bfe85c40f3afc57c445cdba07550c93ddc1abc5b849",
+        "deviceId": "adeae4935ee0d96b94e6b3cc82e0f7c0"
+      },
+      "role": "phone",
+      "nonce": "EAmcq243WfHzEs1BhlwnEvaGVSF6MOdz2LcSLR82d2k",
+      "payload": "646576746f6f6c2d72656c61792d76310a70686f6e650a45416d63713234335766487a45733142686c776e45766147565346364d4f647a324c63534c52383264326b",
+      "sig": "4efc82b39c8ce4ce7c68459db095122b4453abb0c9e94f679f97e1b31e60b54036dc1d64f3ee8e53e7c616750e317bc0894015bbb70169e34d682f4abdc5b90d",
+      "hello": "{\"t\":\"hello\",\"role\":\"phone\",\"pub\":\"fxqOjqvRnEoTYmv-hcQPOvxXxEXNugdVDJPdwavFuEk\",\"sig\":\"TvyCs5yM5M58aEWdsJUSK0RTq7DJ6U9nn5fhsx5gtUA23B1k8-6OU-fGFnUOMXvAiUAVu7cBaeNNaC9KvcW5DQ\",\"pair\":{\"to\":\"20671253fbf6054273bb719d3a34999b\",\"token\":\"_01UDFJIhgPdztK8lHXw3LsMPN7i3-5m5hmg6FXyS_M\"}}"
+    }
+  ]
+}
