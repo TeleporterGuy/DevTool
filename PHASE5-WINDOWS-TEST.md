@@ -116,3 +116,18 @@ Keep the exe unsigned but stamp it without winCodeSign:
 ## Report back
 
 Short list, one line per section: pass / fail + the exact error or a screenshot for any fail. Note whether §6 was needed. Commit fixes (if any) on `phase5-packaging` and push.
+
+---
+
+## Results — Windows 11 Pro 26200, 2026-10-01 (Node 24.18.1, npm 11.16.0)
+
+§6 **was needed**. Fix in `0e237ac`.
+
+- **§0 Setup — pass, with caveats.** `npm ci` exits 0 with the lockfile as-is. Typecheck clean, lint 0 errors (55 warnings), `tests/updates.test.ts` passes. 15 tests fail, all in `tests/ipc-path-allowlist.test.ts`, every one `EPERM: operation not permitted, symlink …`: this account cannot create symlinks (no Developer Mode). That file is not touched by this branch, so the failures are not a Phase 5 regression. Environment note: the Claude Code shell sets `NoDefaultCurrentDirectoryInExePath=1`, which makes node-pty's gyp step fail with `'GetCommitHash.bat' is not recognized`; install and builds were run with that variable unset.
+- **§1 Portable folder — fail, then pass after §6.** With `signAndEditExecutable: true`: `ERROR: Cannot create symbolic link : A required privilege is not held by the client. : …\winCodeSign\…\darwin\10.12\lib\libcrypto.dylib` (same for `libssl.dylib`). On Windows the download comes from electron-builder's own `app-builder rcedit` step. After §6: ProductName / FileDescription / CompanyName / InternalName = `DevTool`, OriginalFilename `DevTool.exe`, ProductVersion `0.5.1.0`, copyright names join3r and TeleporterGuy, `NotSigned`. Explorer, taskbar and title bar show the DevTool icon; Task Manager lists DevTool; Git Bash and Pi tabs start.
+- **§2 Installer — pass.** All four artifacts built. No UAC prompt, default `%LOCALAPPDATA%\Programs\DevTool`, Start Menu entry with icon, no desktop shortcut, `app-update.yml` names TeleporterGuy/DevTool, pinning lands on the same button, normal `~/.devtool` projects load.
+- **§3 Update check — pass, one transient failure.** The first Check now showed "The operation was aborted due to timeout". In `debug.log`, that error was logged about 30 s after the automatic first check would have started, so it was most likely that one request timing out, with the click waiting on it. It did not come back: 3 checks in a row through the same API returned up to date (642 / 109 / 112 ms), and Help → Check for Updates… worked. Toggle off persists across restart. The offline check was not run (remote session); a unit test covers a failed lookup becoming the error state.
+- **§4 Uninstall — pass.** No admin prompt. Install folder, Start Menu entry and uninstall registry key are gone; `~/.devtool` and its backups are kept.
+- **§5 Dev run — pass.** DevTool icon on window and taskbar, separate taskbar button from the installed pin, update mode `none` ("off in development runs"), logs to `~/.devtool-dev`.
+
+§6 as implemented: `signAndEditExecutable: false`, devDependency `rcedit` (lockfile change only adds packages), `scripts/win-rcedit.cjs` as `build.afterPack`. It reuses electron-builder's converted `.ico`, also overwrites Electron's leftover `GitHub, Inc.` / `electron.exe` strings, and runs `scripts/sign-win.cjs` on `DevTool.exe`. That last part goes beyond the plan: with exe editing off, electron-builder only signs the NSIS installer and uninstaller, which would have broken `release:win --signed`'s `signtool verify` on the app exe.
