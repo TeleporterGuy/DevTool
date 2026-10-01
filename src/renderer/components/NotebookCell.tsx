@@ -477,7 +477,7 @@ export default function NotebookCellView({
           )
       )}
 
-      {cell.cellType === 'code' && <NotebookOutputs outputs={cell.outputs} />}
+      {cell.cellType === 'code' && <NotebookOutputs outputs={cell.outputs} effectiveTheme={effectiveTheme} />}
     </div>
   )
 }
