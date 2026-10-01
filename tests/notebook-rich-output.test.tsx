@@ -29,6 +29,14 @@ describe('notebookOutputDisplay', () => {
     expect(notebookOutputDisplay({ 'text/markdown': '# x' })).toEqual({ kind: 'markdown', markdown: '# x' })
   })
 
+  it('prefers rich forms over an IPython display object placeholder', () => {
+    const repr = (name: string): string => `<IPython.core.display.${name} object>`
+    expect(notebookOutputDisplay({ 'text/html': '<b>x</b>', 'text/plain': repr('HTML') })).toEqual({ kind: 'html', html: '<b>x</b>' })
+    expect(notebookOutputDisplay({ 'text/markdown': '# x', 'text/plain': repr('Markdown') })).toEqual({ kind: 'markdown', markdown: '# x' })
+    expect(notebookOutputDisplay({ 'text/plain': repr('JSON') }, { 'application/json': { a: 1 } })).toMatchObject({ kind: 'json' })
+    expect(notebookOutputDisplay({ 'text/plain': '<Foo object at 0x10a2b>' })).toEqual({ kind: 'text', text: '<Foo object at 0x10a2b>' })
+  })
+
   it('names what it cannot show instead of showing nothing', () => {
     expect(notebookOutputDisplay({ 'application/vnd.custom': 'z' })).toEqual({ kind: 'unsupported', mimeTypes: ['application/vnd.custom'] })
     expect(notebookOutputDisplay({})).toBeNull()
@@ -58,7 +66,7 @@ describe('NotebookOutputs rendering', () => {
       data: {},
       jsonData: { 'application/json': { a: 1, message: 'survives' } }
     }]
-    const { container } = render(<NotebookOutputs outputs={outputs} />)
+    const { container } = render(<NotebookOutputs outputs={outputs} effectiveTheme="dark" />)
     expect(container.textContent).toContain('"message": "survives"')
   })
 
@@ -67,10 +75,21 @@ describe('NotebookOutputs rendering', () => {
       type: 'display_data',
       data: { 'text/html': '<table><tr><td>cell</td></tr></table><script>window.__bad = 1</script><img src=x onerror="window.__bad=1">' }
     }]
-    const { container } = render(<NotebookOutputs outputs={outputs} />)
+    const { container } = render(<NotebookOutputs outputs={outputs} effectiveTheme="dark" />)
     expect(container.querySelector('td')?.textContent).toBe('cell')
     expect(container.querySelector('script')).toBeNull()
     expect(container.querySelector('img')?.getAttribute('onerror')).toBeNull()
+  })
+
+  it('strips CSS from HTML output so it cannot restyle the app', () => {
+    const outputs: NotebookOutput[] = [{
+      type: 'display_data',
+      data: { 'text/html': '<p>a</p><style>body { display: none }</style><div style="position:fixed;inset:0">cover</div>' }
+    }]
+    const { container } = render(<NotebookOutputs outputs={outputs} effectiveTheme="dark" />)
+    expect(container.querySelector('style')).toBeNull()
+    expect(container.querySelector('[style]')).toBeNull()
+    expect(container.textContent).toContain('cover')
   })
 })
 
@@ -86,6 +105,14 @@ describe('markdown attachments', () => {
     expect(resolveMarkdownAttachments('![a](attachment:missing.png) attachment', attachments))
       .toBe('![a](attachment:missing.png) attachment')
     expect(resolveMarkdownAttachments('![a](attachment:x.png)', undefined)).toBe('![a](attachment:x.png)')
+  })
+
+  it('leaves attachment: references inside code alone', () => {
+    const source = 'see `attachment:checker.png`\n\n```\n![x](attachment:checker.png)\n```\n\n![y](attachment:checker.png)'
+    const out = resolveMarkdownAttachments(source, attachments)
+    expect(out).toContain('`attachment:checker.png`')
+    expect(out).toContain('```\n![x](attachment:checker.png)\n```')
+    expect(out).toContain(`![y](data:image/png;base64,${PNG})`)
   })
 
   it('handles URL-encoded names', () => {

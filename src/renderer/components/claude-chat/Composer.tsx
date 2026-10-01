@@ -51,7 +51,7 @@ interface Props {
 
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024
 const EFFORT_LEVELS = ['low', 'medium', 'high', 'xhigh', 'max']
-const MODE_CYCLE = ['default', 'acceptEdits', 'plan']
+const MODE_CYCLE = ['default', 'acceptEdits', 'plan', 'auto']
 
 type Suggest =
   | { kind: 'file'; start: number; query: string }
@@ -134,13 +134,15 @@ export default function Composer(props: Props): React.ReactElement {
     })
   }, [tabId])
 
-  // Autosize up to a cap; the timeline keeps the rest of the pane.
+  // Autosize up to a cap; the timeline keeps the rest of the pane. A hidden
+  // tab measures 0, so leave the natural one-row height and re-measure on show.
   useLayoutEffect(() => {
     const el = textareaRef.current
     if (!el) return
     el.style.height = 'auto'
+    if (el.scrollHeight === 0) return
     el.style.height = `${Math.min(el.scrollHeight, 240)}px`
-  }, [text])
+  }, [text, focusSignal])
 
   useEffect(() => {
     if (suggest?.kind !== 'file' || files || filesLoading.current) return
@@ -264,13 +266,23 @@ export default function Composer(props: Props): React.ReactElement {
     }
   }
 
+  // The CLI's own "Default" row resolves to a real model; name that model, not the row.
+  const pickable = models.filter((m) => m.value !== 'default')
+  const modelName = (model: string | undefined): string | undefined =>
+    model ? findModelOption(pickable, model)?.displayName ?? model.replace(/^claude-/, '') : undefined
+  const currentModel = findModelOption(pickable, info.applied?.model ?? info.model)
+  // A tab that never picked a model runs the settings default; `applied` names it once read.
+  const defaultModel = info.modelPicked ? undefined : modelName(info.applied?.model ?? info.model)
+  const modelLabel = info.modelPicked
+    ? modelName(info.model) ?? 'Model'
+    : defaultModel ? `Model: Default (${defaultModel})` : 'Model: Default'
   const modelOptions = [
-    { value: '', label: 'Default model', description: 'What your Claude settings pick' },
-    ...models.filter((m) => m.value !== 'default').map((m) => ({ value: m.value, label: m.displayName, description: m.description }))
+    { value: '', label: defaultModel ? `Default (${defaultModel})` : 'Default', description: 'What your Claude settings pick' },
+    ...pickable.map((m) => ({ value: m.value, label: m.displayName, description: m.description }))
   ]
-  const currentModel = findModelOption(models, info.model)
-  const modelLabel = currentModel?.displayName ?? (info.model ? info.model.replace(/^claude-/, '') : 'Default model')
   const effortLevels = currentModel?.supportedEffortLevels?.length ? currentModel.supportedEffortLevels : EFFORT_LEVELS
+  // `applied.effort` is null when no effort is sent (a model without effort levels).
+  const defaultEffort = info.effort ? undefined : info.applied?.effort ?? undefined
   const modeLabel = CHAT_PERMISSION_MODES.find((m) => m.value === info.permissionMode)?.label ?? 'Ask'
   const canSend = !disabled && (text.trim().length > 0 || images.length > 0)
   const bashMode = text.trimStart().startsWith('!')
@@ -338,7 +350,7 @@ export default function Composer(props: Props): React.ReactElement {
             void addFiles(pasted)
           }
         }}
-        className="block w-full resize-none bg-transparent border-0 outline-none px-3 pt-2.5 pb-1 text-base text-text placeholder:text-text-subtle leading-[1.5] max-h-60"
+        className="block w-full resize-none bg-transparent border-0 outline-none px-3 pt-2.5 pb-1 text-base text-text placeholder:text-text-subtle leading-[1.5] min-h-[38px] max-h-60"
       />
       <div className="flex items-center gap-0.5 px-1.5 pb-1.5">
         {bashMode && (
@@ -350,7 +362,7 @@ export default function Composer(props: Props): React.ReactElement {
           label={modelLabel}
           title="Model"
           options={modelOptions}
-          value={currentModel?.value ?? info.model ?? ''}
+          value={info.modelPicked ? currentModel?.value ?? info.model ?? '' : ''}
           onChange={(value) => onSetModel(value || undefined)}
         />
         <ChipMenu
@@ -361,9 +373,9 @@ export default function Composer(props: Props): React.ReactElement {
           onChange={onSetMode}
         />
         <ChipMenu
-          label={info.effort ? `Effort: ${info.effort}` : 'Effort'}
+          label={info.effort ? `Effort: ${info.effort}` : defaultEffort ? `Effort: Default (${defaultEffort})` : 'Effort: Default'}
           title="Thinking effort"
-          options={[{ value: '', label: 'Default' }, ...effortLevels.map((level) => ({ value: level, label: level }))]}
+          options={[{ value: '', label: defaultEffort ? `Default (${defaultEffort})` : 'Default' }, ...effortLevels.map((level) => ({ value: level, label: level }))]}
           value={info.effort ?? ''}
           onChange={(value) => onSetEffort(value || undefined)}
         />

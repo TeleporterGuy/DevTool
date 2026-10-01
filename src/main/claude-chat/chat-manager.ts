@@ -264,7 +264,7 @@ export class ClaudeChatManager {
     if (!runtime) return
     runtime.model = model
     if (runtime.session && !runtime.session.isEnded()) await runtime.session.setModel(model)
-    else this.emit(runtime, { t: 'meta', info: { model } })
+    else this.emit(runtime, { t: 'meta', info: { model, modelPicked: model !== undefined } })
   }
 
   async setPermissionMode(tabId: string, mode: string): Promise<void> {

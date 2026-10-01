@@ -22,7 +22,17 @@ function TruncationNote(): React.ReactElement {
   )
 }
 
-function OutputBlock({ output }: { output: NotebookOutput }): React.ReactElement | null {
+// Kernel HTML is sanitized (no scripts, no event handlers) and may not carry CSS:
+// a <style> block or inline `position: fixed` would restyle or cover the app.
+const KERNEL_HTML_SANITIZE = { FORBID_TAGS: ['style'], FORBID_ATTR: ['style'] }
+
+function OutputBlock({
+  output,
+  effectiveTheme
+}: {
+  output: NotebookOutput
+  effectiveTheme: 'dark' | 'light'
+}): React.ReactElement | null {
   if (output.type === 'stream') {
     const color = output.name === 'stderr' ? 'var(--color-danger)' : undefined
     return (
@@ -66,11 +76,13 @@ function OutputBlock({ output }: { output: NotebookOutput }): React.ReactElement
         {display.kind === 'text' && <pre className={pre}>{display.text}</pre>}
         {display.kind === 'json' && <pre className={pre}>{display.text}</pre>}
         {display.kind === 'html' && (
-          // Kernel HTML is sanitized (no scripts, no event handlers) before it is shown.
-          <div className="note-preview text-sm overflow-x-auto" dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(display.html) }} />
+          <div
+            className="note-preview text-sm overflow-x-auto"
+            dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(display.html, KERNEL_HTML_SANITIZE) }}
+          />
         )}
         {display.kind === 'markdown' && (
-          <MarkdownPreview content={display.markdown} effectiveTheme="dark" variant="flow" />
+          <MarkdownPreview content={display.markdown} effectiveTheme={effectiveTheme} variant="flow" />
         )}
         {display.kind === 'unsupported' && (
           <div className="text-2xs text-text-muted italic">Output not shown here: {display.mimeTypes.join(', ')}</div>
@@ -85,14 +97,15 @@ function OutputBlock({ output }: { output: NotebookOutput }): React.ReactElement
 
 interface Props {
   outputs: NotebookOutput[]
+  effectiveTheme: 'dark' | 'light'
 }
 
-export default function NotebookOutputs({ outputs }: Props): React.ReactElement | null {
+export default function NotebookOutputs({ outputs, effectiveTheme }: Props): React.ReactElement | null {
   if (outputs.length === 0) return null
   return (
     <div className="border-t border-hair bg-bg">
       {outputs.map((output, index) => (
-        <OutputBlock key={index} output={output} />
+        <OutputBlock key={index} output={output} effectiveTheme={effectiveTheme} />
       ))}
     </div>
   )

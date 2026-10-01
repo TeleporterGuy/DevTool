@@ -136,6 +136,10 @@ export interface ChatSessionInfo {
   model?: string
   permissionMode?: string
   effort?: string
+  /** The model was picked in this tab; otherwise `model` is whatever the settings default resolved to. */
+  modelPicked?: boolean
+  /** What the CLI sends next (`get_settings`'s `applied`): the defaults resolved, once read. */
+  applied?: { model?: string; effort?: string | null }
   cwd?: string
   claudeVersion?: string
 }
@@ -156,6 +160,19 @@ export interface ChatUsage {
   /** claude.ai plan windows; absent for API-key and cloud-provider sessions. */
   fiveHour?: ChatLimitWindow
   sevenDay?: ChatLimitWindow
+}
+
+/**
+ * A resumed session whose prompt cache has likely expired: the first send writes
+ * the whole context back into the cache. Numbers are the CLI's own estimate.
+ */
+export interface ChatColdCache {
+  /** Tokens the first request re-sends. */
+  contextTokens: number
+  /** Seconds since the transcript's last assistant response. */
+  idleSeconds?: number
+  /** Cost of that cache write at the session model's rate, response excluded. */
+  estimatedUsd?: number
 }
 
 export interface ChatState {
@@ -182,6 +199,8 @@ export interface ChatState {
   interrupting?: boolean
   /** Running tasks, and finished ones for {@link TASK_LINGER_MS}, by task id. */
   tasks: Record<string, ChatTask>
+  /** Set on a resume with a cold cache until the first send. */
+  coldCache?: ChatColdCache
 }
 
 export type ChatEvent =
@@ -199,6 +218,7 @@ export type ChatEvent =
   | { t: 'bash-done'; id: string; stdout: string; stderr: string; exitCode: number | null }
   /** The `!command` context went out with a message. */
   | { t: 'bash-sent'; ids: string[] }
+  | { t: 'cold-cache'; cache: ChatColdCache }
 
 /** What `chat-attach` returns: the state so far and the seq it corresponds to. */
 export interface ChatSnapshot {
@@ -1006,7 +1026,7 @@ export function reduceChat(state: ChatState, event: ChatEvent): ChatState {
     case 'sent': {
       const draft = new Draft(state, 's')
       draft.push({ kind: 'user', id: event.uuid, text: event.text, images: event.images, queued: true })
-      return draft.result({ busy: true, turnStartedAt: state.busy ? state.turnStartedAt : (event.at ?? Date.now()) })
+      return draft.result({ busy: true, turnStartedAt: state.busy ? state.turnStartedAt : (event.at ?? Date.now()), coldCache: undefined })
     }
     case 'prompt': {
       if (state.pending.some((prompt) => prompt.id === event.prompt.id)) return state
@@ -1080,6 +1100,9 @@ export function reduceChat(state: ChatState, event: ChatEvent): ChatState {
         ...(event.info ? { info: { ...state.info, ...event.info } } : {}),
         ...(event.usage ? { usage: { ...state.usage, ...event.usage } } : {})
       }
+    case 'cold-cache':
+      // A process restarted by a send resumes with the message already on its way.
+      return state.busy ? state : { ...state, coldCache: event.cache }
     case 'interrupting':
       return state.busy ? { ...state, interrupting: true } : state
     case 'reset':

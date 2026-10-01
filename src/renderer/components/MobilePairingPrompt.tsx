@@ -4,7 +4,9 @@ import { useMobileSettingsVisible, useMobileState } from '../hooks/useMobileStat
 
 /**
  * App-wide, non-modal: a phone asked to pair while Settings → Mobile is not on
- * screen. Settings shows the same request as a banner, so this stands down there.
+ * screen. It sits above modals so it also shows over other Settings tabs.
+ * Settings → Mobile shows the same request in place of the pairing code, so
+ * this stands down there.
  */
 export default function MobilePairingPrompt(): React.ReactElement | null {
   const [state] = useMobileState()
@@ -21,7 +23,7 @@ export default function MobilePairingPrompt(): React.ReactElement | null {
   return (
     <div
       role="alert"
-      className="fixed bottom-4 right-4 z-(--z-popover) w-72 rounded-lg border border-border bg-surface shadow-pop px-3 py-2.5 flex flex-col gap-1.5"
+      className="fixed bottom-4 right-4 z-(--z-alert) w-72 rounded-lg border border-border bg-surface shadow-pop px-3 py-2.5 flex flex-col gap-1.5"
     >
       <div className="text-base text-text">{pending.name} wants to pair</div>
       <div className="text-sm text-text-muted">

@@ -21,7 +21,7 @@ export function useMobileState(): [MobileState | null, (state: MobileState) => v
 }
 
 // Whether this window is showing Settings → Mobile, where the pending request has
-// its own banner. The app-wide prompt stands down while it is.
+// its own place in the pairing section. The app-wide prompt stands down while it is.
 let mobileSettingsVisible = false
 const visibilityListeners = new Set<() => void>()
 
