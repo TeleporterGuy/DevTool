@@ -53,6 +53,7 @@ import type { CondaEnvInfo } from '../shared/conda'
 import { registerMobileHandlers } from './ipc/mobile'
 import { registerUpdateHandlers } from './ipc/updates'
 import { createUpdates, type Updates } from './updates'
+import { probeRedirect } from './release-redirect'
 import { decideUpdateMode } from '../shared/updates'
 import { MobileService } from './mobile/mobile-service'
 import { PairingsStore } from './mobile/pairings-store'
@@ -261,7 +262,7 @@ export class AppRuntime {
       autoCheck: () => this.config.autoCheckUpdates !== false,
       broadcast: (status) => this.broadcastToAllWindows('updates-status', status),
       openExternal: (url) => { void shell.openExternal(url).catch(() => {}) },
-      fetch: (input, init) => fetch(input, init),
+      probeRedirect: (url) => probeRedirect(url),
       now: () => Date.now(),
       log: (message) => this.logDebug(message),
       loadAutoUpdater: async () => {

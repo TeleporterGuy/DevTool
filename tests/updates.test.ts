@@ -81,7 +81,7 @@ describe('createUpdates (manual mode)', () => {
   afterEach(() => { vi.useRealTimers() })
 
   function setup(location: string | null, overrides: Partial<UpdatesDeps> = {}) {
-    const fetchMock = vi.fn(async () => new Response(null, { status: 302, headers: location ? { location } : {} }))
+    const probeMock = vi.fn(async () => ({ status: 302, location }))
     const broadcast = vi.fn()
     const openExternal = vi.fn()
     const updates = createUpdates({
@@ -90,13 +90,13 @@ describe('createUpdates (manual mode)', () => {
       autoCheck: () => true,
       broadcast,
       openExternal,
-      fetch: fetchMock as unknown as typeof fetch,
+      probeRedirect: probeMock,
       now: () => 1234,
       log: () => {},
       loadAutoUpdater: () => { throw new Error('not in manual mode') },
       ...overrides
     })
-    return { updates, fetchMock, broadcast, openExternal }
+    return { updates, probeMock, broadcast, openExternal }
   }
 
   it('reports a newer release and opens its page', async () => {
@@ -123,26 +123,26 @@ describe('createUpdates (manual mode)', () => {
   })
 
   it('joins a check already in flight', async () => {
-    const { updates, fetchMock } = setup('https://github.com/TeleporterGuy/DevTool/releases/tag/v0.6.1')
+    const { updates, probeMock } = setup('https://github.com/TeleporterGuy/DevTool/releases/tag/v0.6.1')
     await Promise.all([updates.check(), updates.check()])
-    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(probeMock).toHaveBeenCalledTimes(1)
   })
 
   it('skips scheduled checks while the toggle is off', async () => {
     vi.useFakeTimers()
-    const { updates, fetchMock } = setup('https://github.com/TeleporterGuy/DevTool/releases/tag/v0.6.1', {
+    const { updates, probeMock } = setup('https://github.com/TeleporterGuy/DevTool/releases/tag/v0.6.1', {
       autoCheck: () => false
     })
     updates.start()
     await vi.advanceTimersByTimeAsync(FIRST_CHECK_DELAY_MS + 1)
-    expect(fetchMock).not.toHaveBeenCalled()
+    expect(probeMock).not.toHaveBeenCalled()
     updates.close()
   })
 
   it('never checks in dev', async () => {
-    const { updates, fetchMock } = setup('https://github.com/TeleporterGuy/DevTool/releases/tag/v0.6.1', { mode: 'none' })
+    const { updates, probeMock } = setup('https://github.com/TeleporterGuy/DevTool/releases/tag/v0.6.1', { mode: 'none' })
     await updates.check()
-    expect(fetchMock).not.toHaveBeenCalled()
+    expect(probeMock).not.toHaveBeenCalled()
   })
 })
 

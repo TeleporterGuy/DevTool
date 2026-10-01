@@ -1,4 +1,5 @@
 import type { AppUpdater } from 'electron-updater'
+import type { RedirectProbe } from './release-redirect'
 import {
   compareVersions,
   parseLatestRelease,
@@ -31,7 +32,8 @@ export interface UpdatesDeps {
   /** Push a status change to every window. */
   broadcast: (status: UpdateStatus) => void
   openExternal: (url: string) => void
-  fetch: typeof fetch
+  /** Where a URL redirects (src/main/release-redirect.ts). */
+  probeRedirect: (url: string) => Promise<RedirectProbe>
   now: () => number
   log: (message: string) => void
   /** electron-updater, loaded on first use in `auto` mode only. */
@@ -52,15 +54,13 @@ export interface Updates {
  * The newest released version, from where `/releases/latest` redirects. Null when
  * nothing is published yet: GitHub then redirects to the releases list instead.
  */
-export async function fetchLatestRelease(fetchImpl: typeof fetch): Promise<{ version: string; url: string } | null> {
-  const res = await fetchImpl(`${RELEASES_URL}/latest`, {
-    redirect: 'manual',
-    signal: AbortSignal.timeout(30_000)
-  })
-  const location = res.headers.get('location')
+export async function fetchLatestRelease(
+  probe: (url: string) => Promise<RedirectProbe>
+): Promise<{ version: string; url: string } | null> {
+  const { status, location } = await probe(`${RELEASES_URL}/latest`)
   if (location?.replace(/\/$/, '').endsWith('/releases')) return null
   const latest = parseLatestRelease(location)
-  if (!latest) throw new Error(`GitHub did not name a latest release (HTTP ${res.status})`)
+  if (!latest) throw new Error(`GitHub did not name a latest release (HTTP ${status})`)
   return latest
 }
 
@@ -121,7 +121,7 @@ export function createUpdates(deps: UpdatesDeps): Updates {
       return
     }
     set({ state: 'checking', error: null })
-    const latest = await fetchLatestRelease(deps.fetch)
+    const latest = await fetchLatestRelease(deps.probeRedirect)
     const newer = latest !== null && compareVersions(latest.version, deps.appVersion) > 0
     set({
       state: 'idle',
