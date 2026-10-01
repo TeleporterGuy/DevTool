@@ -134,13 +134,15 @@ export default function Composer(props: Props): React.ReactElement {
     })
   }, [tabId])
 
-  // Autosize up to a cap; the timeline keeps the rest of the pane.
+  // Autosize up to a cap; the timeline keeps the rest of the pane. A hidden
+  // tab measures 0, so leave the natural one-row height and re-measure on show.
   useLayoutEffect(() => {
     const el = textareaRef.current
     if (!el) return
     el.style.height = 'auto'
+    if (el.scrollHeight === 0) return
     el.style.height = `${Math.min(el.scrollHeight, 240)}px`
-  }, [text])
+  }, [text, focusSignal])
 
   useEffect(() => {
     if (suggest?.kind !== 'file' || files || filesLoading.current) return
@@ -348,7 +350,7 @@ export default function Composer(props: Props): React.ReactElement {
             void addFiles(pasted)
           }
         }}
-        className="block w-full resize-none bg-transparent border-0 outline-none px-3 pt-2.5 pb-1 text-base text-text placeholder:text-text-subtle leading-[1.5] max-h-60"
+        className="block w-full resize-none bg-transparent border-0 outline-none px-3 pt-2.5 pb-1 text-base text-text placeholder:text-text-subtle leading-[1.5] min-h-[38px] max-h-60"
       />
       <div className="flex items-center gap-0.5 px-1.5 pb-1.5">
         {bashMode && (
