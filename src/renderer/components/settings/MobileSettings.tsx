@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import type { MobileConnectionState, MobileState } from '../../../shared/mobile'
 import { isUnencryptedRemoteRelay, isValidRelayUrl, normalizeRelayUrl, UNENCRYPTED_RELAY_WARNING } from '../../../shared/mobile'
 import { Field, FormGroup, Group, GroupRow, GrpHead, HelperText, InlineConfirm, LinkBtn, SetBlock, Switch } from '../ui'
@@ -42,6 +42,7 @@ export default function MobileSettings(): React.ReactElement {
   const [actionError, setActionError] = useState<string | null>(null)
   const [qr, setQr] = useState<{ uri: string; image: string | null } | null>(null)
   const [copied, setCopied] = useState(false)
+  const pairSectionRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     setMobileSettingsVisible(true)
@@ -61,6 +62,13 @@ export default function MobileSettings(): React.ReactElement {
       .catch(() => { if (alive) setQr({ uri: inviteUri, image: null }) })
     return () => { alive = false }
   }, [inviteUri])
+
+  // Scanning consumes the code, so the request replaces the QR the user was
+  // looking at. Keep that spot on screen if the panel is scrolled.
+  const pendingId = state?.pending?.phoneId ?? null
+  useEffect(() => {
+    if (pendingId) pairSectionRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+  }, [pendingId])
 
   if (!state) return <div />
 
@@ -129,57 +137,56 @@ export default function MobileSettings(): React.ReactElement {
         </SetBlock>
       </FormGroup>
 
-      {pending && (
-        <FormGroup>
-          <SetBlock label={`${pending.name} wants to pair`}>
-            <div className="flex items-center gap-3">
-              <LinkBtn onClick={() => run(() => window.api.mobileAccept(pending.phoneId))}>Accept</LinkBtn>
-              <LinkBtn danger onClick={() => run(() => window.api.mobileReject(pending.phoneId))}>Reject</LinkBtn>
-            </div>
-            <HelperText>
-              {pending.online
-                ? 'Accept only if this is your phone and you just scanned the code.'
-                : 'The phone is offline right now. The request lasts until the code’s time runs out.'}
-            </HelperText>
-          </SetBlock>
-        </FormGroup>
-      )}
-
       <GrpHead
-        actions={inviteLive ? <LinkBtn onClick={() => run(() => window.api.mobileCancelPairing())}>Cancel</LinkBtn> : undefined}
+        actions={inviteLive && !pending ? <LinkBtn onClick={() => run(() => window.api.mobileCancelPairing())}>Cancel</LinkBtn> : undefined}
       >
         Pair a phone
       </GrpHead>
       <FormGroup>
-        {inviteLive && invite ? (
-          <div className="flex gap-3 items-start">
-            {qr?.uri === invite.uri && qr.image && (
-              <img src={qr.image} alt="Pairing QR code" className="w-40 h-40 rounded-md shrink-0" />
-            )}
-            <div className="flex flex-col gap-1.5 min-w-0">
-              <div className="text-base text-text">
-                {qr?.image ? 'Scan this code with DevTool on your phone.' : 'Open this link with DevTool on your phone.'}
+        <div ref={pairSectionRef}>
+          {pending ? (
+            <div role="alert" className="rounded-md border border-accent bg-accent/10 px-3 py-2.5 flex flex-col gap-1.5">
+              <div className="text-base text-text font-medium">{pending.name} wants to pair</div>
+              <div className="text-sm text-text-muted">
+                {pending.online
+                  ? 'Accept only if this is your phone and you just scanned the code.'
+                  : 'The phone is offline right now. The request lasts until the code’s time runs out.'}
               </div>
-              <div className="text-sm text-text-muted">Expires in {formatCountdown(invite.exp, now)} · works once</div>
-              {!qr?.image && (
-                <div className="text-xs text-text-subtle font-mono break-all select-text line-clamp-3">{invite.uri}</div>
-              )}
-              <div className="flex items-center gap-3">
-                <LinkBtn onClick={() => copyLink(invite.uri)}>{copied ? 'Copied' : 'Copy link'}</LinkBtn>
-                <LinkBtn onClick={() => run(() => window.api.mobileStartPairing())}>New code</LinkBtn>
+              <div className="flex items-center gap-3 pt-0.5">
+                <LinkBtn onClick={() => run(() => window.api.mobileAccept(pending.phoneId))}>Accept</LinkBtn>
+                <LinkBtn danger onClick={() => run(() => window.api.mobileReject(pending.phoneId))}>Reject</LinkBtn>
               </div>
             </div>
-          </div>
-        ) : (
-          <SetBlock>
-            <div><LinkBtn onClick={() => run(() => window.api.mobileStartPairing())}>
-              {invite ? 'Code expired · make a new one' : 'Show pairing code'}
-            </LinkBtn></div>
-            <HelperText>
-              {state.enabled ? 'The code lasts five minutes and pairs one phone.' : 'This also turns on Mobile.'}
-            </HelperText>
-          </SetBlock>
-        )}
+          ) : inviteLive && invite ? (
+            <div className="flex gap-3 items-start">
+              {qr?.uri === invite.uri && qr.image && (
+                <img src={qr.image} alt="Pairing QR code" className="w-40 h-40 rounded-md shrink-0" />
+              )}
+              <div className="flex flex-col gap-1.5 min-w-0">
+                <div className="text-base text-text">
+                  {qr?.image ? 'Scan this code with DevTool on your phone.' : 'Open this link with DevTool on your phone.'}
+                </div>
+                <div className="text-sm text-text-muted">Expires in {formatCountdown(invite.exp, now)} · works once</div>
+                {!qr?.image && (
+                  <div className="text-xs text-text-subtle font-mono break-all select-text line-clamp-3">{invite.uri}</div>
+                )}
+                <div className="flex items-center gap-3">
+                  <LinkBtn onClick={() => copyLink(invite.uri)}>{copied ? 'Copied' : 'Copy link'}</LinkBtn>
+                  <LinkBtn onClick={() => run(() => window.api.mobileStartPairing())}>New code</LinkBtn>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <SetBlock>
+              <div><LinkBtn onClick={() => run(() => window.api.mobileStartPairing())}>
+                {invite ? 'Code expired · make a new one' : 'Show pairing code'}
+              </LinkBtn></div>
+              <HelperText>
+                {state.enabled ? 'The code lasts five minutes and pairs one phone.' : 'This also turns on Mobile.'}
+              </HelperText>
+            </SetBlock>
+          )}
+        </div>
       </FormGroup>
       {actionError && <HelperText><span className="text-danger">{actionError}</span></HelperText>}
 

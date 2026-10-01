@@ -119,6 +119,7 @@
     --z-popover: 60;
     --z-overlay: 1000;
     --z-modal: 1200;
+    --z-alert: 1300; /* above modals: requests that need an answer wherever you are */
 
     --motion-fast: 120ms;
     --motion-med: 150ms;
