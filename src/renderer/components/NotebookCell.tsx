@@ -6,6 +6,7 @@ import type { AppConfig } from '../../shared/types'
 import {
   isNotebookCellCollapsed,
   notebookCellSourcePreview,
+  resolveMarkdownAttachments,
   type NotebookCell,
   type NotebookCellType
 } from '../../shared/notebook'
@@ -430,7 +431,7 @@ export default function NotebookCellView({
               {cell.source.trim()
                 ? (
                   <MarkdownPreview
-                    content={cell.source}
+                    content={resolveMarkdownAttachments(cell.source, cell.extra?.attachments)}
                     effectiveTheme={effectiveTheme}
                     variant="notebook"
                     fontSize={config.editorFontSize}
